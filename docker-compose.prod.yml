@@ -1,0 +1,304 @@
+# =============================================================================
+# AlphaCV — Production (CPU-only)
+# Configuration comes exclusively from ./.env (copy .env.example and fill in).
+# Start:  ./scripts/start.sh prod        Stop: ./scripts/stop.sh prod
+# Volumes are named and are NEVER deleted by the start/stop scripts.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Backend (FastAPI)
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./alpha-backend
+    env_file:
+      - ./.env
+    environment:
+      # 4 vCPU host: keep the API to 2 workers so the match-worker has cores to run.
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
+      TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
+      ENABLE_MATCH_QUEUE: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    volumes:
+      - uploads_data:/data/uploads
+      - llm_cache:/data/llm_cache
+    networks:
+      - cv-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, json, sys; resp=urllib.request.urlopen('http://localhost:8000/api/health', timeout=5); data=json.loads(resp.read().decode()); sys.exit(0 if data.get('status') in ('healthy','degraded') else 1)"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          memory: 2560M
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # Dedicated matching worker: consumes the Redis match-job queue so the
+  # CPU-bound Hungarian/cosine scoring never runs inside the API process.
+  # Scale with `--scale match-worker=N` once the host has spare cores.
+  match-worker:
+    build:
+      context: ./alpha-backend
+    command: ["python", "-m", "app.worker.match_worker"]
+    env_file:
+      - ./.env
+    environment:
+      ENABLE_MATCH_QUEUE: "true"
+      TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
+      MATCH_THREAD_POOL_WORKERS: ${MATCH_THREAD_POOL_WORKERS:-4}
+      MATCH_QUEUE_MAX_CONCURRENT_JOBS: ${MATCH_QUEUE_MAX_CONCURRENT_JOBS:-1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
+    volumes:
+      - uploads_data:/data/uploads
+      - llm_cache:/data/llm_cache
+    networks:
+      - cv-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # Combined background worker: email scheduler + public-CV queue consumer
+  # (for /careers public apply). Merged into one container because neither
+  # task is CPU-heavy — running them separately just meant two independent
+  # copies of the embedding model in RAM for no isolation benefit. Matching
+  # (the one genuinely CPU-hungry job) still gets its own dedicated
+  # match-worker container above.
+  background-worker:
+    build:
+      context: ./alpha-backend
+    command: ["python", "-m", "app.worker.background_worker"]
+    env_file:
+      - ./.env
+    environment:
+      ENABLE_EMAIL_SCHEDULER: "true"
+      ENABLE_PUBLIC_CV_QUEUE: "true"
+      TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
+    volumes:
+      - uploads_data:/data/uploads
+      - llm_cache:/data/llm_cache
+    networks:
+      - cv-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # ---------------------------------------------------------------------------
+  # Frontend (Next.js)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./cv-analyzer-frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        BACKEND_INTERNAL_URL: "http://backend:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      BACKEND_INTERNAL_URL: "http://backend:8000"
+      NODE_ENV: "production"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - cv-network
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: '0.5'
+        reservations:
+          memory: 384M
+          cpus: '0.25'
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL (auth_db + cv_database; auth_db created by db/init scripts)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cv_database}
+      POSTGRES_USER: ${POSTGRES_USER:-cv_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+    networks:
+      - cv-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 768M
+          cpus: '0.5'
+    command: >
+      postgres
+      -c shared_buffers=512MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=128MB
+      -c max_connections=80
+      -c work_mem=16MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c min_wal_size=256MB
+      -c max_wal_size=1GB
+      -c checkpoint_timeout=15min
+      -c max_worker_processes=4
+      -c max_parallel_workers_per_gather=2
+      -c max_parallel_workers=4
+
+  # ---------------------------------------------------------------------------
+  # Qdrant (vector store)
+  # ---------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    volumes:
+      - qdrant_data:/qdrant/storage
+      - ./qdrant-optimized.yaml:/qdrant/config/production.yaml:ro
+    restart: unless-stopped
+    networks:
+      - cv-network
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__MAX_REQUEST_SIZE_MB: 512
+      # Optional: require an API key (set QDRANT_API_KEY in .env to enable).
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '1.5'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # ---------------------------------------------------------------------------
+  # Redis (cache, rate-limit state, OTP, queue broker)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    # Optional auth: setting REDIS_PASSWORD in .env makes Redis require it (the
+    # backend reads the same var and authenticates). Empty = no password (the
+    # service is only reachable on the internal docker network).
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY:-2gb}
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 60
+      --timeout 300
+      --maxclients ${REDIS_MAXCLIENTS:-800}
+      ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    restart: unless-stopped
+    networks:
+      - cv-network
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
+          cpus: '0.75'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # ---------------------------------------------------------------------------
+  # Nginx (only service that publishes ports; DOMAIN comes from .env)
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
+      - nginx_cache:/var/cache/nginx
+      # SSL (populated by scripts/system/setup-ssl.sh)
+      - ./certbot/www:/var/www/certbot:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+    command: >
+      /bin/sh -c "envsubst '$$DOMAIN' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+      && exec nginx -g 'daemon off;'"
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - cv-network
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  redis_data:
+  uploads_data:
+  llm_cache:
+  nginx_cache:
+
+networks:
+  cv-network:
+    driver: bridge

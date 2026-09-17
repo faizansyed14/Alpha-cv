@@ -1,0 +1,154 @@
+# HTTPS configuration - used after Let's Encrypt certs are obtained.
+# Certificate paths are mounted from ./certbot/conf in docker-compose.
+
+events { worker_connections 1024; }
+
+http {
+  include       /etc/nginx/mime.types;
+  default_type  application/octet-stream;
+
+  # Don't leak the nginx version in responses/error pages.
+  server_tokens off;
+
+  sendfile on;
+  tcp_nopush on;
+  keepalive_timeout 300;
+  client_max_body_size 25m;
+
+  limit_req_zone $binary_remote_addr zone=general:10m rate=30r/s;
+  limit_req_zone $binary_remote_addr zone=api:10m rate=20r/s;
+  limit_req_zone $binary_remote_addr zone=strict:10m rate=5r/s;
+  limit_conn_zone $binary_remote_addr zone=addr:10m;
+  limit_conn addr 20;
+
+  map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+  }
+
+  upstream frontend { server frontend:8000; }
+  upstream backend  { server backend:8000; }
+
+  # HTTP -> HTTPS redirect (keep ACME challenge for cert renewal)
+  server {
+    listen 80;
+    server_name ${DOMAIN} localhost;
+
+    location ^~ /.well-known/acme-challenge/ {
+      root /var/www/certbot;
+      default_type "text/plain";
+    }
+    location / {
+      return 301 https://$host$request_uri;
+    }
+  }
+
+  # HTTPS
+  server {
+    listen 443 ssl;
+    server_name ${DOMAIN} localhost;
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+
+    set $real_ip $remote_addr;
+    if ($http_x_forwarded_for) { set $real_ip $http_x_forwarded_for; }
+    if ($http_x_real_ip) { set $real_ip $http_x_real_ip; }
+    set $block_ip 0;
+    if ($remote_addr ~* "(89\.144\.31\.18|176\.117\.107\.158)") { set $block_ip 1; }
+    if ($real_ip ~* "(89\.144\.31\.18|176\.117\.107\.158)") { set $block_ip 1; }
+    if ($http_x_forwarded_for ~* "(89\.144\.31\.18|176\.117\.107\.158)") { set $block_ip 1; }
+    if ($block_ip = 1) { return 403; }
+    if ($request_uri ~* "(busybox|x86|nuts|bolts|89\.144\.31\.18|176\.117\.107\.158|r\.sh|malware|exploit|shell|mkdir.*tmp|chmod.*777)") { return 403; }
+    # Block obvious command-injection probes, but avoid false positives like "Networking & Systems"
+    if ($query_string ~* "(\\b(bash|sh|cmd|exec|system|eval|wget|curl)\\b|r\\.sh|176\\.117\\.107\\.158|mkdir|chmod.*777)") { return 403; }
+    if ($request_body ~* "(mkdir.*tmp|wget.*176\.117\.107\.158|curl.*176\.117\.107\.158|r\.sh|chmod.*777)") { return 403; }
+    if ($http_referer ~* "(176\.117\.107\.158|89\.144\.31\.18|r\.sh)") { return 403; }
+    set $block_ua 0;
+    if ($http_user_agent ~* "(wget|curl|scanner|bot|malware|nikto|sqlmap|nmap|masscan)") { set $block_ua 1; }
+    if ($remote_addr ~* "^172\.(1[6-9]|2[0-9]|3[0-1])\.") { set $block_ua 0; }
+    if ($remote_addr ~* "^127\.0\.0\.1$") { set $block_ua 0; }
+    if ($block_ua = 1) { return 403; }
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+    # HSTS: force HTTPS for a year (only meaningful once TLS is enabled).
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # CSP: Next.js requires 'unsafe-inline' for its injected styles/runtime; we
+    # still lock down base-uri, form-action, framing and force HTTPS upgrades.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://api.openai.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests;" always;
+
+    location = /api {
+      return 301 /api/;
+    }
+    location /api/ {
+      limit_req zone=api burst=50 nodelay;
+      proxy_pass http://backend;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $connection_upgrade;
+      proxy_read_timeout 1800s;
+      proxy_send_timeout 1800s;
+      proxy_connect_timeout 60s;
+      proxy_request_buffering off;
+      proxy_buffering off;
+      client_max_body_size 25m;
+      proxy_max_temp_file_size 0;
+    }
+    location = /health {
+      proxy_pass http://backend/api/health;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location = /docs {
+      proxy_pass http://backend/docs;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location = /redoc {
+      proxy_pass http://backend/redoc;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location ~* \.(js|css|woff|woff2|ttf|eot|svg|png|jpg|jpeg|gif|ico|webp)$ {
+      proxy_pass http://frontend;
+      proxy_set_header Host $host;
+      expires 1y;
+      add_header Cache-Control "public, immutable";
+      add_header X-Content-Type-Options "nosniff";
+    }
+    location / {
+      limit_req zone=general burst=100 nodelay;
+      proxy_pass http://frontend;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $connection_upgrade;
+      proxy_read_timeout 1200s;
+      proxy_send_timeout 1200s;
+      proxy_connect_timeout 60s;
+      add_header Cache-Control "no-cache, no-store, must-revalidate";
+      add_header Pragma "no-cache";
+      add_header Expires "0";
+    }
+  }
+}

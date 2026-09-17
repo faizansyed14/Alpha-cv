@@ -1,0 +1,149 @@
+# AWS Credentials - NEVER COMMIT THESE
+.aws/
+*.pem
+*.key
+
+# Environment files with secrets
+.env
+.env.*
+*.env
+!.env.example
+!*.env.example
+!.env.development.example
+azure_email_config.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+ENV/
+
+# LLM Cache
+.llm_cache/
+*.cache
+
+# Node
+node_modules/
+.next/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Coverage artifacts
+.coverage
+coverage.xml
+htmlcov/
+
+# Docker
+docker-compose.override.yml
+
+# IDE & Editor
+.vscode/
+.vscode-server/
+.idea/
+.cursor/
+.cursor-server/
+.antigravity-server/
+.dotnet/
+.gemini/
+*.swp
+*.swo
+*.sublime-*
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Cache & Temp
+nginx-cache/
+tmp/
+temp/
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Backups
+backups/
+*.backup
+*.bak
+*.old
+
+# Database
+*.db
+*.sqlite
+*.sql
+
+# System
+.Trash/
+Desktop.ini
+
+# Large binary files
+*.bin
+*.dat
+*.dump
+
+# Shell history and config
+.bash_history
+.bash_logout
+.bashrc
+.lesshst
+.profile
+.gitconfig
+.sudo_as_admin_successful
+.wget-hsts
+
+# User config directories
+.config/
+.local/
+.ssh/
+.npm/
+
+# Snap packages
+snap/
+
+# Backup and maintenance scripts (if not needed in repo)
+backup_system.sh
+cleanup_qdrant.sh
+enable-maintenance.sh
+disable-maintenance.sh
+maintenance.html
+nginx-maintenance-simple.conf
+docker-compose.yml.backup*
+
+# Claude AI files
+.claude.json
+.claude/
+
+# Certbot
+certbot/
+
+#data
+uploads/
+
+# SonarQube
+.sonar/
+.sonarqube/
+.scannerwork/
+sonar-project.properties.local
+sonar-reports/
+*.sonar
+coverage/
+test-reports/
+# local shell/IDE files (never commit)
+.bashrc
+.profile
+.gitconfig
+.bash_logout
+.lesshst
+.cursor/

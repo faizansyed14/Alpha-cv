@@ -1,0 +1,163 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 9%;
+
+    /* Brand accent: professional blue (#2563EB) */
+    --primary: 221 83% 53%;
+    --primary-foreground: 210 40% 98%;
+    /* Kept for backwards compatibility (bg-gradient-primary / text-gradient-primary
+       are used across pages). Now resolves to the flat brand color — no gradients. */
+    --primary-gradient: linear-gradient(0deg, #2563eb, #2563eb);
+
+    /* Semantic status colors (hex helpers for non-Tailwind CSS) */
+    --color-success: #16a34a;
+    --color-warning: #f59e0b;
+    --color-danger: #dc2626;
+    --color-info: #2563eb;
+
+    /* App surfaces */
+    --app-bg: #f7f8fa;
+    --app-surface: #ffffff;
+
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 9%;
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  * {
+    @apply border-border;
+  }
+  body {
+    background-color: var(--app-bg);
+    @apply text-gray-900;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+  /* Consistent, restrained focus rings */
+  :focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+/* Thin Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+}
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Base Headings & Text Classes */
+.heading-xl { 
+  @apply text-4xl font-bold tracking-tight text-neutral-900;
+}
+.heading-lg { 
+  @apply text-3xl font-bold tracking-tight text-neutral-900;
+}
+.heading-md { 
+  @apply text-2xl font-semibold tracking-tight text-neutral-900;
+}
+.heading-sm {
+  @apply text-xl font-semibold tracking-tight text-neutral-900;
+}
+/* Renamed to avoid circular dependency */
+.body-lg { 
+  @apply text-lg text-neutral-700 leading-relaxed;
+}
+.body-base { 
+  @apply text-base text-neutral-600 leading-relaxed;
+}
+.body-sm { 
+  @apply text-sm text-neutral-500 leading-relaxed;
+}
+.body-xs {
+  @apply text-xs text-neutral-500 leading-relaxed;
+}
+
+/* UI & Caption classes used in components */
+.text-ui {
+  @apply text-[13px] leading-relaxed;
+}
+.text-caption {
+  @apply text-[11px] leading-tight tracking-wide uppercase font-semibold;
+}
+/* ERP section label: 11px uppercase tracking-wide gray-500 */
+.section-label {
+  @apply text-[11px] font-semibold uppercase tracking-wide text-gray-500;
+}
+
+/* Status Colors used occasionally */
+.status-success { @apply text-green-700 bg-green-50; }
+.status-warning { @apply text-amber-700 bg-amber-50; }
+.status-error { @apply text-red-700 bg-red-50; }
+.status-info { @apply text-blue-700 bg-blue-50; }
+
+/* Custom Animations */
+@keyframes shimmer {
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+.animate-shimmer {
+  animation: shimmer 2s infinite linear;
+  background: linear-gradient(to right, #f6f7f8 4%, #edeef1 25%, #f6f7f8 36%);
+  background-size: 1000px 100%;
+}
+.bg-gradient-primary {
+  background: var(--primary-gradient) !important;
+}
+
+.text-gradient-primary {
+  background: var(--primary-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}

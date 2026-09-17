@@ -1,0 +1,273 @@
+"""
+Email Database Service
+Handles email processing data storage in PostgreSQL
+"""
+
+import os
+import json
+import logging
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+logger = logging.getLogger(__name__)
+
+class EmailDatabaseService:
+    """Service for managing email processing data in PostgreSQL"""
+    
+    def __init__(self):
+        """Initialize database connection"""
+        # Connection comes from POSTGRES_* in .env — pointing these at an AWS
+        # RDS endpoint moves the email-processing tables there with no code change.
+        from app.core.config import settings
+        self.db_config = {
+            'host': settings.POSTGRES_HOST,
+            'port': str(settings.POSTGRES_PORT),
+            'database': settings.POSTGRES_DB,
+            'user': settings.POSTGRES_USER,
+            'password': settings.POSTGRES_PASSWORD,
+            'connect_timeout': 10,
+        }
+        self.connection = None
+        self._connect()
+        self._ensure_tables()
+        
+    def _connect(self):
+        """Establish database connection"""
+        try:
+            self.connection = psycopg2.connect(**self.db_config)
+            logger.info("✅ Connected to PostgreSQL for email data")
+        except Exception as e:
+            logger.error(f"❌ Failed to connect to PostgreSQL: {e}")
+            raise
+
+    def _ensure_tables(self) -> None:
+        """Create email-processing tables if missing (safe/additive)."""
+        try:
+            with self._get_cursor() as cursor:
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS processed_emails (
+                        id SERIAL PRIMARY KEY,
+                        email_id TEXT UNIQUE NOT NULL,
+                        subject TEXT,
+                        sender_email TEXT,
+                        processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS email_uploads (
+                        id SERIAL PRIMARY KEY,
+                        email_id TEXT NOT NULL,
+                        file_name TEXT,
+                        file_path TEXT,
+                        file_size BIGINT,
+                        upload_date TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS email_processing_stats (
+                        id INTEGER PRIMARY KEY,
+                        total_processed INTEGER NOT NULL DEFAULT 0,
+                        successful_today INTEGER NOT NULL DEFAULT 0,
+                        failed_today INTEGER NOT NULL DEFAULT 0,
+                        last_successful_run TIMESTAMPTZ NULL,
+                        last_error TEXT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    """
+                )
+                # Ensure singleton stats row exists (id=1)
+                cursor.execute(
+                    """
+                    INSERT INTO email_processing_stats (id)
+                    VALUES (1)
+                    ON CONFLICT (id) DO NOTHING;
+                    """
+                )
+                self.connection.commit()
+                logger.info("✅ Email processing tables ensured")
+        except Exception as e:
+            try:
+                if self.connection:
+                    self.connection.rollback()
+            except Exception:
+                pass
+            logger.error(f"❌ Failed to ensure email tables: {e}")
+            raise
+    
+    def _get_cursor(self):
+        """Get database cursor"""
+        if not self.connection or self.connection.closed:
+            self._connect()
+        return self.connection.cursor(cursor_factory=RealDictCursor)
+    
+    def is_email_processed(self, email_id: str) -> bool:
+        """Check if email has been processed"""
+        try:
+            with self._get_cursor() as cursor:
+                cursor.execute(
+                    "SELECT id FROM processed_emails WHERE email_id = %s",
+                    (email_id,)
+                )
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"❌ Failed to check processed email {email_id}: {e}")
+            return False
+    
+    def mark_email_processed(self, email_id: str, subject: str = None, sender_email: str = None) -> bool:
+        """Mark email as processed"""
+        try:
+            with self._get_cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO processed_emails (email_id, subject, sender_email) 
+                       VALUES (%s, %s, %s) 
+                       ON CONFLICT (email_id) DO NOTHING""",
+                    (email_id, subject, sender_email)
+                )
+                self.connection.commit()
+                logger.info(f"✅ Marked email as processed: {email_id}")
+                return True
+        except Exception as e:
+            try:
+                if self.connection:
+                    self.connection.rollback()
+            except Exception:
+                pass
+            logger.error(f"❌ Failed to mark email as processed {email_id}: {e}")
+            return False
+    
+    def get_processed_emails(self) -> List[str]:
+        """Get list of all processed email IDs"""
+        try:
+            with self._get_cursor() as cursor:
+                cursor.execute("SELECT email_id FROM processed_emails ORDER BY processed_at DESC")
+                return [row['email_id'] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"❌ Failed to get processed emails: {e}")
+            return []
+    
+    def get_processing_stats(self) -> Dict[str, Any]:
+        """Get email processing statistics"""
+        try:
+            with self._get_cursor() as cursor:
+                cursor.execute("SELECT * FROM email_processing_stats ORDER BY id DESC LIMIT 1")
+                result = cursor.fetchone()
+                if result:
+                    return dict(result)
+                return {
+                    'total_processed': 0,
+                    'successful_today': 0,
+                    'failed_today': 0,
+                    'last_successful_run': None,
+                    'last_error': None
+                }
+        except Exception as e:
+            logger.error(f"❌ Failed to get processing stats: {e}")
+            return {
+                'total_processed': 0,
+                'successful_today': 0,
+                'failed_today': 0,
+                'last_successful_run': None,
+                'last_error': None
+            }
+    
+    def update_processing_stats(self, stats: Dict[str, Any]) -> bool:
+        """Update processing statistics"""
+        try:
+            with self._get_cursor() as cursor:
+                cursor.execute(
+                    """UPDATE email_processing_stats 
+                       SET total_processed = %s, successful_today = %s, failed_today = %s,
+                           last_successful_run = %s, last_error = %s, updated_at = CURRENT_TIMESTAMP
+                       WHERE id = 1""",
+                    (
+                        stats.get('total_processed', 0),
+                        stats.get('successful_today', 0),
+                        stats.get('failed_today', 0),
+                        stats.get('last_successful_run'),
+                        stats.get('last_error')
+                    )
+                )
+                self.connection.commit()
+                logger.info("✅ Updated processing statistics")
+                return True
+        except Exception as e:
+            try:
+                if self.connection:
+                    self.connection.rollback()
+            except Exception:
+                pass
+            logger.error(f"❌ Failed to update processing stats: {e}")
+            return False
+    
+    def record_email_upload(self, email_id: str, file_name: str, file_path: str, file_size: int) -> bool:
+        """Record email file upload"""
+        try:
+            with self._get_cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO email_uploads (email_id, file_name, file_path, file_size) 
+                       VALUES (%s, %s, %s, %s)""",
+                    (email_id, file_name, file_path, file_size)
+                )
+                self.connection.commit()
+                logger.info(f"✅ Recorded email upload: {file_name}")
+                return True
+        except Exception as e:
+            try:
+                if self.connection:
+                    self.connection.rollback()
+            except Exception:
+                pass
+            logger.error(f"❌ Failed to record email upload: {e}")
+            return False
+    
+    def get_email_uploads(self, email_id: str = None) -> List[Dict[str, Any]]:
+        """Get email uploads, optionally filtered by email_id"""
+        try:
+            with self._get_cursor() as cursor:
+                if email_id:
+                    cursor.execute(
+                        "SELECT * FROM email_uploads WHERE email_id = %s ORDER BY upload_date DESC",
+                        (email_id,)
+                    )
+                else:
+                    cursor.execute("SELECT * FROM email_uploads ORDER BY upload_date DESC")
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"❌ Failed to get email uploads: {e}")
+            return []
+    
+    def reset_processed_emails(self) -> bool:
+        """Reset all processed emails (admin function)"""
+        try:
+            with self._get_cursor() as cursor:
+                cursor.execute("DELETE FROM processed_emails")
+                cursor.execute("DELETE FROM email_uploads")
+                cursor.execute(
+                    "UPDATE email_processing_stats SET total_processed = 0, successful_today = 0, failed_today = 0, last_successful_run = NULL, last_error = NULL"
+                )
+                self.connection.commit()
+                logger.info("✅ Reset all email processing data")
+                return True
+        except Exception as e:
+            try:
+                if self.connection:
+                    self.connection.rollback()
+            except Exception:
+                pass
+            logger.error(f"❌ Failed to reset processed emails: {e}")
+            return False
+    
+    def close(self):
+        """Close database connection"""
+        if self.connection and not self.connection.closed:
+            self.connection.close()
+
+# Global instance
+email_db_service = EmailDatabaseService()

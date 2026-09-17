@@ -1,0 +1,74 @@
+AlphaCV — common commands
+==========================
+Run these from the project root (the folder this file is in).
+Every start command rebuilds all images (frontend, backend, workers) and
+recreates containers, so code changes are always picked up. Stop commands
+never delete volumes (Postgres/Qdrant/Redis/uploads data is safe).
+
+DEVELOPMENT
+-----------
+Start dev:
+  ./scripts/start.sh dev
+
+Stop dev:
+  ./scripts/stop.sh dev
+
+Start dev with a from-scratch build (ignores Docker's layer cache):
+  ./scripts/start.sh dev clean
+
+First-time setup (only once):
+  cp .env.development.example .env.dev
+  # then edit .env.dev and fill in the required values
+
+Dev URLs:
+  Frontend : http://localhost:3000
+  API      : http://localhost:8000
+  Nginx    : http://localhost
+
+
+PRODUCTION
+----------
+Start prod:
+  ./scripts/start.sh prod
+
+Stop prod:
+  ./scripts/stop.sh prod
+
+Start prod with a from-scratch build (ignores Docker's layer cache):
+  ./scripts/start.sh prod clean
+
+First-time setup (only once):
+  cp .env.example .env
+  # then edit .env: fill in every CHANGE_ME, your domain, and API keys
+  # start.sh refuses to run while any CHANGE_ME placeholder remains
+
+
+USEFUL EXTRAS
+-------------
+View live logs (dev):
+  docker compose -f docker-compose.dev.yml --env-file .env.dev logs -f
+
+View live logs (prod):
+  docker compose -f docker-compose.prod.yml --env-file .env logs -f
+
+Check container status (dev):
+  docker compose -f docker-compose.dev.yml --env-file .env.dev ps
+
+Check container status (prod):
+  docker compose -f docker-compose.prod.yml --env-file .env ps
+
+Wipe application data only (keeps auth users + all volumes, asks to confirm):
+  ./db/reset_data.sh dev
+  ./db/reset_data.sh prod
+
+Run backend tests:
+  cd alpha-backend
+  python3 -m pytest tests/ --no-cov
+
+Run backend offline end-to-end smoke test:
+  cd alpha-backend
+  PYTHONPATH=. python3 tests/e2e_smoke.py
+
+Build frontend locally (without Docker):
+  cd cv-analyzer-frontend
+  npm run build

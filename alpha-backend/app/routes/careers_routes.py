@@ -1,0 +1,1668 @@
+"""
+Careers Routes - Public Job Postings & Applications
+Handles:
+  - HR job posting creation (authenticated)
+  - Public job viewing (no auth required)
+  - Public job applications (no auth required)
+  - Admin management of job postings and applications
+"""
+
+import logging
+import secrets
+import uuid
+import re
+from datetime import datetime, date
+from typing import Optional, List, Any, Union
+import tempfile
+import shutil
+import mimetypes
+
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, status, BackgroundTasks
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.requests import Request
+import hashlib
+import os
+from app.schemas.careers import (
+    JobPostingCreate,
+    JobPostingResponse, 
+    PublicJobView, 
+    JobApplicationRequest,
+    JobApplicationResponse,
+    JobApplicationSummary,
+    JobPostingSummary,
+    JobPostingUpdate,
+    JobStatusUpdate,
+    ApplicationStatusUpdate,
+    JobMatchingRequest,
+    JobMatchingResponse,
+    CareersHealthResponse
+)
+from app.services.ai.parsing_service import get_parsing_service
+from app.services.ai.llm_service import get_llm_service  
+from app.services.ai.embedding_service import get_embedding_service
+from app.utils.qdrant_utils import get_qdrant_utils, get_decompressed_content
+from app.services.storage import get_storage_service
+from app.deps.auth import require_admin, require_core_app
+from app.models.user import User
+from app.routes.cv_routes import process_cv_async
+from app.core.config import settings
+from app.helpers.careers_helpers import (
+    generate_public_token,
+    validate_file_upload,
+    now_iso,
+    get_safe_applicant_name,
+    generate_email_subject_id,
+    generate_email_subject_template,
+    generate_boolean_search_string,
+    parse_email_subject,
+    MAX_FILE_SIZE,
+    SUPPORTED_EXTENSIONS,
+    STORAGE_DIR,
+)
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+def _preview_careers_list_text(value: Any, max_chars: int = 320) -> str:
+    """Short previews for list endpoints (full text is available on detail endpoints)."""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        parts = [str(x).strip() for x in value if str(x).strip()]
+        text = " ".join(parts)
+    else:
+        text = str(value)
+    text = " ".join(text.split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "…"
+
+# ==================== PUBLIC ENDPOINTS (No Authentication) ====================
+
+@router.get("/jobs/recent", response_model=List[JobPostingSummary])
+async def get_recent_job_postings(limit: int = 10) -> List[JobPostingSummary]:
+    """
+    Public endpoint: Get recent job postings (no authentication required)
+    
+    Returns the most recent active job postings for display on public job pages.
+    Used to show "More Openings" section to candidates.
+    """
+    try:
+        logger.info(f"📄 Getting recent {limit} job postings")
+        
+        qdrant = get_qdrant_utils()
+        recent_rows, _total = qdrant.list_job_postings_lightweight_page(
+            include_inactive=False,
+            limit=max(1, min(int(limit or 5), 50)),
+            offset=0,
+            cache_ttl_seconds=2.0,
+        )
+        
+        summaries = []
+        for job in recent_rows:
+            structured_info = job.get("structured_info", {}) or {}
+            
+            job_title = structured_info.get("job_title", "") or job.get("job_title", "Position Available")
+            job_location = structured_info.get("job_location", "") or structured_info.get("location", "")
+            raw_summary = structured_info.get("job_summary", "") or structured_info.get("summary", "")
+            job_summary = _preview_careers_list_text(raw_summary, 320)
+            
+            # Get responsibilities and skills
+            responsibilities_list = structured_info.get("responsibilities", [])
+            if responsibilities_list and isinstance(responsibilities_list, list):
+                key_responsibilities = _preview_careers_list_text("\n".join([f"• {resp}" for resp in responsibilities_list]), 320)
+            else:
+                key_responsibilities = ""
+            
+            skills_list = structured_info.get("skills", []) or structured_info.get("requirements", [])
+            if skills_list and isinstance(skills_list, list):
+                qualifications = _preview_careers_list_text("\n".join([f"• {skill}" for skill in skills_list]), 320)
+            else:
+                qualifications = ""
+            
+            summary = JobPostingSummary(
+                job_id=job["id"],
+                job_title=job_title,
+                job_location=job_location,
+                job_summary=job_summary,
+                key_responsibilities=key_responsibilities,
+                qualifications=qualifications,
+                company_name=job.get("company_name"),
+                upload_date=job.get("upload_date", now_iso()),
+                filename=job.get("filename", "job_description.pdf"),
+                is_active=job.get("is_active", True),
+                application_count=0,  # Not needed for public view
+                public_token=job.get("public_token") or "unknown",
+                posted_by_user=job.get("posted_by_user"),
+                posted_by_role=job.get("posted_by_role"),
+                can_edit=False,  # Public access - no edit permissions
+                can_delete=False  # Public access - no delete permissions
+            )
+            summaries.append(summary)
+        
+        logger.info(f"✅ Returning {len(summaries)} recent job postings")
+        return summaries
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get recent job postings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve recent job postings")
+
+
+@router.get("/jobs/{public_token}", response_model=PublicJobView)
+async def get_public_job(public_token: str) -> PublicJobView:
+    """
+    Public endpoint: View job posting (no authentication required)
+    
+    This endpoint must be accessible to anyone with the link.
+    Returns structured job information for display to candidates.
+    """
+    try:
+        logger.info(f"📄 Public job request for token: {public_token[:8]}...")
+        
+        qdrant = get_qdrant_utils()
+        # Update this to include inactive jobs
+        job_data = qdrant.get_job_posting_by_token(public_token, include_inactive=True)
+        
+        if not job_data:
+            logger.warning(f"❌ Job posting not found for token: {public_token[:8]}...")
+            raise HTTPException(status_code=404, detail="Job posting not found")
+        
+        # Debug logging
+        logger.info(f"🔍 Job data received: {job_data}")
+        logger.info(f"🔍 Job data keys: {list(job_data.keys()) if job_data else 'None'}")
+        if job_data and 'job_title' in job_data:
+            logger.info(f"🔍 Job title from merged data: {job_data['job_title']}")
+        
+        # The job_data from get_job_posting_by_token already contains merged data
+        # Use the merged data directly since it already contains the structured information
+        
+        # Extract data from the merged job_data
+        # Prioritize structured_info from new UI data system, fall back to legacy format
+        structured_info = job_data.get("structured_info", {})
+        
+        job_title = (
+            structured_info.get("job_title") or 
+            job_data.get("job_title") or 
+            "Position Available"
+        )
+        
+        job_location = (
+            structured_info.get("job_location") or 
+            job_data.get("location") or 
+            job_data.get("job_location") or 
+            ""
+        )
+        
+        job_summary = (
+            structured_info.get("job_summary") or 
+            job_data.get("job_summary") or 
+            job_data.get("summary") or 
+            "Job description not available"
+        )
+        
+        experience_required = job_data.get("years_of_experience", "Not specified")
+        
+        # Convert experience to string if it's a number
+        if isinstance(experience_required, (int, float)):
+            experience_required = f"{experience_required} years"
+        
+        # Get requirements and responsibilities from structured UI data or legacy format
+        # For new UI data, convert bullet-point strings to arrays
+        if structured_info.get("qualifications"):
+            # Convert bullet-point string to array
+            qualifications_text = structured_info.get("qualifications", "")
+            requirements = [line.strip().lstrip("•").strip() for line in qualifications_text.split("\n") if line.strip()]
+        else:
+            # Legacy format
+            requirements = job_data.get("skills_sentences", []) or job_data.get("skills", [])
+        
+        if structured_info.get("key_responsibilities"):
+            # Convert bullet-point string to array
+            responsibilities_text = structured_info.get("key_responsibilities", "")
+            responsibilities = [line.strip().lstrip("•").strip() for line in responsibilities_text.split("\n") if line.strip()]
+        else:
+            # Legacy format
+            responsibilities = job_data.get("responsibility_sentences", []) or job_data.get("responsibilities", [])
+        
+        public_job = PublicJobView(
+            job_id=job_data["id"],
+            job_title=job_title,
+            job_location=job_location,
+            company_name=job_data.get("company_name", "Alpha Data Recruitment"),
+            job_description=job_summary,  # Use updated summary or fall back to original
+            upload_date=job_data.get("created_date", job_data.get("upload_date", now_iso())),
+            requirements=requirements[:10],  # Limit to top 10 for display
+            responsibilities=responsibilities[:10],  # Limit to top 10 for display
+            experience_required=str(experience_required),
+            is_active=job_data.get("is_active", True)  # This will now show the actual status
+        )
+        
+        logger.info(f"✅ Returning public job: {job_title}")
+        return public_job
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to get public job: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load job posting")
+
+@router.post("/jobs/{public_token}/apply", response_model=JobApplicationResponse)
+async def apply_to_job(
+    public_token: str,
+    background_tasks: BackgroundTasks,
+    applicant_name: str = Form(..., min_length=1, max_length=100),
+    applicant_email: str = Form(...),
+    applicant_phone: Optional[str] = Form(None),
+    cover_letter: Optional[str] = Form(None),
+    expected_salary: float = Form(..., description="Expected salary in AED"),
+    years_of_experience: float = Form(..., description="Years of experience"),
+    cv_file: UploadFile = File(...),
+    background_processing: bool = Form(True)  # Enable async processing by default
+) -> JobApplicationResponse:
+    """
+    Public endpoint: Submit application (no authentication required)
+    
+    Supports both synchronous and asynchronous processing:
+    - background_processing=True: Fast response, processes in background (recommended for high traffic)
+    - background_processing=False: Traditional sync processing (immediate result)
+    
+    Pipeline:
+    1. Validate job exists and is active
+    2. Validate application data and CV file
+    3. Either process immediately OR queue for background processing
+    4. Return confirmation with tracking info
+    """
+    try:
+        logger.info(f"📋 Application received for job token: {public_token[:8]}... from {applicant_name} (async: {background_processing})")
+        
+        # 1. Verify job exists and is active
+        qdrant = get_qdrant_utils()
+        job_data = qdrant.get_job_posting_by_token(public_token, include_inactive=True)
+        if not job_data:
+            raise HTTPException(status_code=404, detail="Job posting not found or no longer active")
+            
+        if not job_data.get("is_active", True):
+            raise HTTPException(status_code=400, detail="This job posting is no longer accepting applications")
+        
+        # 2. Validate CV file
+        validate_file_upload(cv_file)
+        
+        # Basic email validation
+        if "@" not in applicant_email or "." not in applicant_email:
+            raise HTTPException(status_code=400, detail="Please provide a valid email address")
+        
+        application_id = str(uuid.uuid4())
+        
+        # Read file content
+        file_content = await cv_file.read()
+        if len(file_content) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=400, detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB")
+        content_sha256 = hashlib.sha256(file_content).hexdigest()  # for duplicate-CV detection
+        
+        # Store CV file (local uploads folder; storage service may be S3 or local)
+        persisted_path = None
+        if cv_file.filename:
+            file_ext = os.path.splitext(cv_file.filename)[1].lower() or '.pdf'
+            s3_service = get_storage_service()
+            dest_dir = os.path.join(s3_service.base_dir, "cvs")
+            os.makedirs(dest_dir, exist_ok=True)
+            dest_path = os.path.join(dest_dir, f"{application_id}{file_ext}")
+
+            try:
+                # Primary: use storage service (handles local copy or S3)
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
+                    tmp.write(file_content)
+                    tmp_path = tmp.name
+                persisted_path = s3_service.upload_file(tmp_path, application_id, "cv", file_ext)
+                logger.info(f"✅ Job application CV stored: {persisted_path}")
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.error(f"❌ Storage upload failed for job application CV: {e}")
+                # Fallback: write raw file to uploads/cvs so PDF is always available for preview/download
+                try:
+                    with open(dest_path, "wb") as f:
+                        f.write(file_content)
+                    persisted_path = dest_path
+                    logger.info(f"✅ Job application CV saved to uploads fallback: {persisted_path}")
+                except Exception as fallback_err:
+                    logger.error(f"❌ Fallback save to uploads failed: {fallback_err}")
+                    persisted_path = None
+        
+        # Check experience requirements and create warning if needed
+        experience_warning = None
+        if job_data.get("years_of_experience"):
+            try:
+                # Extract required experience from job data
+                required_experience = 0
+                if isinstance(job_data["years_of_experience"], (int, float)):
+                    required_experience = float(job_data["years_of_experience"])
+                elif isinstance(job_data["years_of_experience"], str):
+                    # Extract number from string like "5 years" or "3-5 years"
+                    import re
+                    numbers = re.findall(r'\d+(?:\.\d+)?', job_data["years_of_experience"])
+                    if numbers:
+                        required_experience = float(numbers[0])
+                
+                if years_of_experience < required_experience:
+                    experience_warning = {
+                        "required": required_experience,
+                        "candidate": years_of_experience,
+                        "message": f"This job requires {required_experience} years of experience, but you have {years_of_experience} years."
+                    }
+            except (ValueError, TypeError):
+                pass  # Skip validation if parsing fails
+
+        if background_processing:
+            application_data = {
+                "application_id": application_id,
+                "applicant_name": applicant_name,
+                "applicant_email": applicant_email,
+                "applicant_phone": applicant_phone,
+                "cover_letter": cover_letter,
+                "expected_salary": expected_salary,
+                "years_of_experience": years_of_experience,
+                "experience_warning": experience_warning,
+                "cv_file_path": persisted_path,
+                "cv_filename": cv_file.filename,
+                "content_type": cv_file.content_type,
+                "public_token": public_token
+            }
+
+            # Preferred: Redis-backed queue handled by a dedicated worker container
+            try:
+                from app.services.queue.public_cv_queue import enqueue_public_application, is_public_cv_queue_enabled
+
+                if is_public_cv_queue_enabled():
+                    job_id = enqueue_public_application(application_data)
+                    return JobApplicationResponse(
+                        success=True,
+                        application_id=application_id,
+                        message=f"Thank you, {applicant_name}! Your application has been received and queued for processing.",
+                        next_steps=f"Your CV is being processed in the background. Check status at /api/careers/applications/{application_id}/status",
+                        job_id=job_id,
+                    )
+            except Exception as queue_error:
+                logger.warning(f"⚠️ Public CV queue enqueue failed, falling back to in-process background task: {queue_error}")
+                # Continue to in-process path below
+        
+        
+        # OPTIMIZED ASYNC PROCESSING: Use the same optimized processing as regular CVs
+        # This path runs when background_processing=False OR when queue submission fails
+        logger.info(f"🚀 Processing CV asynchronously for application {application_id}")
+        
+        # Import the optimized CV processing function
+        from app.routes.cv_routes import process_cv_async
+        
+        # Extract text using parsing service
+        # Check if file is in S3 or local
+        temp_file_path = None
+        try:
+            if persisted_path and persisted_path.startswith('s3://'):
+                # Download from S3 to temp file for processing
+                logger.info(f"📥 Downloading application CV from S3 for processing: {persisted_path}")
+                file_ext = os.path.splitext(cv_file.filename)[1].lower() or '.pdf'
+                
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
+                    temp_file_path = tmp.name
+                
+                # Download from S3
+                s3_service = get_storage_service()
+                s3_service.download_file(application_id, "cv", file_ext, temp_file_path)
+                
+                # Parse the downloaded file
+                parsing_service = get_parsing_service()
+                parsed = parsing_service.process_document(temp_file_path, "cv")
+                extracted_text = parsed["clean_text"]
+                raw_content = parsed["raw_text"]
+                extracted_pii = parsed.get("extracted_pii", {"email": [], "phone": []})
+                
+                # Cleanup temp file
+                try:
+                    os.unlink(temp_file_path)
+                except:
+                    pass
+                    
+            elif persisted_path and os.path.exists(persisted_path):
+                # Local file (legacy or fallback)
+                parsing_service = get_parsing_service()
+                parsed = parsing_service.process_document(persisted_path, "cv")
+                extracted_text = parsed["clean_text"]
+                raw_content = parsed["raw_text"]
+                extracted_pii = parsed.get("extracted_pii", {"email": [], "phone": []})
+            else:
+                raise HTTPException(status_code=500, detail="CV file was not properly stored")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to parse CV file {persisted_path}: {e}")
+            # Cleanup temp file if it exists
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.unlink(temp_file_path)
+                except:
+                    pass
+            raise HTTPException(status_code=500, detail=f"Failed to process CV file: {str(e)}")
+        
+        if not extracted_text or len(extracted_text.strip()) < 50:
+            raise HTTPException(status_code=400, detail="Could not extract sufficient text from CV. Please check the file format.")
+        
+        # Prepare CV data for async processing (same as regular upload)
+        cv_data = {
+            "cv_id": application_id,
+            "extracted_text": extracted_text,
+            "filename": cv_file.filename,
+            "raw_content": raw_content,
+            "extracted_pii": extracted_pii,
+            "file_ext": os.path.splitext(cv_file.filename)[1].lower() if cv_file.filename else ".txt",
+            "persisted_path": persisted_path,
+            "mime_type": cv_file.content_type or "application/octet-stream",
+            "is_job_application": True,
+            "content_sha256": content_sha256,
+            "job_id": job_data["id"],
+            "applicant_name": applicant_name,
+            "applicant_email": applicant_email,
+            "applicant_phone": applicant_phone,
+            "cover_letter": cover_letter,
+            "expected_salary": expected_salary,
+            "years_of_experience": years_of_experience,
+            "experience_warning": experience_warning,
+            "public_token": public_token,
+            "job_title": job_data.get("job_title", "Position"),
+            "company_name": job_data.get("company_name", "Alpha Data Recruitment")
+        }
+        
+        # Start background processing
+        background_tasks.add_task(process_cv_async, cv_data)
+        
+        # Return immediate response
+        return JobApplicationResponse(
+            success=True,
+            application_id=application_id,
+            message=f"Thank you, {applicant_name}! Your application is being processed with our optimized systems.",
+            next_steps=f"Your CV is being processed in the background. Check status at /api/careers/applications/{application_id}/status",
+            job_id=application_id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to process application: {e}")
+        raise HTTPException(status_code=500, detail="Failed to submit application. Please try again later.")
+
+
+@router.get("/applications/{application_id}/status")
+async def get_application_status(application_id: str) -> JSONResponse:
+    """Get background processing status for a public-link application.
+
+    Works for both:
+    - Redis queue worker mode (ENABLE_PUBLIC_CV_QUEUE=true)
+    - Legacy in-process background task mode (uses /api/cv/cv-upload-progress/{id})
+    """
+    # 1) Prefer Redis queue status (new worker path)
+    try:
+        from app.services.queue.public_cv_queue import get_public_job_status
+
+        st = get_public_job_status(application_id)
+        if st:
+            return JSONResponse({"source": "redis_queue", **st})
+    except Exception:
+        pass
+
+    # 2) Fallback to in-process progress tracker (legacy path)
+    try:
+        from app.routes.cv_routes import _cv_upload_progress  # type: ignore
+
+        prog = _cv_upload_progress.get(application_id)
+        if prog:
+            return JSONResponse({"source": "in_process", **prog})
+    except Exception:
+        pass
+
+    return JSONResponse({"source": "none", "status": "not_found", "application_id": application_id}, status_code=404)
+
+
+# ==================== HR/ADMIN ENDPOINTS (May require authentication later) ====================
+
+@router.post("/admin/jobs/post", response_model=JobPostingResponse)
+async def post_job(
+    company_name: Optional[str] = Form(None),
+    additional_info: Optional[str] = Form(None),
+    # Form data fields for manual job posting
+    job_title: Optional[str] = Form(None),
+    job_location: Optional[str] = Form(None),
+    job_summary: Optional[str] = Form(None),
+    key_responsibilities: Optional[str] = Form(None),
+    qualifications: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    current_user: User = Depends(require_core_app)
+) -> JobPostingResponse:
+    """
+    HR endpoint: Upload job description → create public link
+    
+    Pipeline:
+    1. Validate file upload (if provided) or form data
+    2. Extract text using parsing service (if file) or use form data
+    3. Process with LLM service (extract title, requirements, etc.) or use form data
+    4. Generate public access token
+    5. Store in job_postings_* collections
+    6. Also store in jd_* collections for main database view
+    7. Return public link
+    """
+    try:
+        # Check if we have file or form data
+        has_file = file is not None and file.filename
+        has_form_data = any([job_title, job_location, job_summary, key_responsibilities, qualifications])
+        
+        if not has_file and not has_form_data:
+            raise HTTPException(status_code=400, detail="Either file upload or form data must be provided")
+        
+        if has_file:
+            logger.info(f"💼 HR job posting upload: {file.filename}")
+            # 1. Validate file
+            validate_file_upload(file)
+        
+        job_id = str(uuid.uuid4())
+        public_token = generate_public_token()
+        
+        # 2. Process data (file or form)
+        if has_file:
+            # Extract text from file
+            file_content = await file.read()
+            if len(file_content) > MAX_FILE_SIZE:
+                raise HTTPException(status_code=400, detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB")
+            
+            import tempfile
+            import shutil
+            
+            # Get file extension for temp file
+            file_ext = '.' + file.filename.split('.')[-1].lower() if '.' in file.filename else '.txt'
+            
+            # Save to temporary file for parsing
+            with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
+                tmp.write(file_content)
+                tmp_path = tmp.name
+            
+            try:
+                parsing_service = get_parsing_service()
+                parsed = parsing_service.process_document(tmp_path, "jd")
+                extracted_text = parsed["clean_text"]
+                raw_content = parsed["raw_text"]
+            finally:
+                # Clean up temporary file
+                os.unlink(tmp_path)
+            
+            if not extracted_text or len(extracted_text.strip()) < 100:
+                raise HTTPException(status_code=400, detail="Could not extract sufficient text from job description. Please check the file format.")
+            
+            # 3. Process with LLM service to extract structured data
+            llm_service = get_llm_service()
+            llm_result = llm_service.standardize_jd(extracted_text, file.filename)
+            
+            # Extract job title for response
+            final_job_title = "Position Available"
+            if llm_result:
+                # Check both direct job_title and structured_info.job_title
+                final_job_title = llm_result.get("job_title") or llm_result.get("structured_info", {}).get("job_title", final_job_title)
+        else:
+            # Use form data directly
+            logger.info(f"💼 HR job posting from form data: {job_title}")
+            
+            # Create structured data from form inputs
+            llm_result = {
+                "doc_type": "job_description",
+                "job_title": job_title or "Position Available",
+                "years_of_experience": None,
+                "job_category": None,
+                "seniority_level": None,
+                "role_family": None,
+                "skills_sentences": [qual for qual in (qualifications or "").split('\n') if qual.strip()][:20],
+                "responsibility_sentences": [resp for resp in (key_responsibilities or "").split('\n') if resp.strip()][:10],
+                "structured_info": {
+                    "job_title": job_title or "Position Available",
+                    "location": job_location or "",
+                    "job_location": job_location or "",
+                    "job_summary": job_summary or "",
+                    "summary": job_summary or "",
+                    "responsibilities": [resp for resp in (key_responsibilities or "").split('\n') if resp.strip()],
+                    "skills": [qual for qual in (qualifications or "").split('\n') if qual.strip()]
+                }
+            }
+            
+            # Use form data for text content
+            extracted_text = f"{job_title or 'Position Available'}\n\n{job_summary or ''}\n\nResponsibilities:\n{key_responsibilities or ''}\n\nQualifications:\n{qualifications or ''}"
+            raw_content = extracted_text
+            final_job_title = job_title or "Position Available"
+        
+        # 4. Generate email subject ID and template
+        email_subject_id = generate_email_subject_id(final_job_title)
+        email_subject_template = generate_email_subject_template(final_job_title, email_subject_id)
+        logger.info(f"📧 Generated email subject: {email_subject_template}")
+
+        # 4b. Boolean search string (Naukri Gulf). Prefer the LLM's value, else build one
+        # deterministically from the title + skills so it is never empty.
+        _llm_bool = (llm_result or {}).get("boolean_search_string") or ""
+        _skills_for_bool = (
+            (llm_result or {}).get("skills_sentences")
+            or (llm_result or {}).get("structured_info", {}).get("skills")
+            or (llm_result or {}).get("skills")
+            or []
+        )
+        boolean_search_string = _llm_bool.strip() or generate_boolean_search_string(final_job_title, _skills_for_bool)
+        logger.info(f"🔎 Boolean search string: {boolean_search_string}")
+
+        # 5. Generate embeddings
+        embedding_service = get_embedding_service()
+        embeddings_data = embedding_service.generate_document_embeddings(llm_result)
+
+        # 5. Store in existing JD collections (reuse existing infrastructure)
+        qdrant = get_qdrant_utils()
+        success_steps = []
+        
+        # Store raw document in JD collection
+        filename = file.filename if has_file else f"job_posting_{job_id}.txt"
+        content_type = file.content_type if has_file else "text/plain"
+        
+        success_steps.append(
+            qdrant.store_document(
+                job_id, "jd", filename,
+                content_type,
+                extracted_text, now_iso()
+            )
+        )
+        
+        # Store structured data in JD collection
+        jd_structured_payload = {
+            **llm_result,
+            "document_type": "jd"
+        }
+        success_steps.append(
+            qdrant.store_structured_data(job_id, "jd", jd_structured_payload)
+        )
+        
+        # Store embeddings in JD collection
+        success_steps.append(
+            qdrant.store_embeddings_exact(job_id, "jd", embeddings_data)
+        )
+        
+        # 6. Store job posting metadata for careers functionality
+        success_steps.append(
+            qdrant.store_job_posting_metadata(
+                job_id, public_token, company_name, additional_info,
+                posted_by_user=current_user.username,
+                posted_by_role=current_user.role,
+                jd_id=job_id,  # Link job posting to its JD
+                email_subject_id=email_subject_id,
+                email_subject_template=email_subject_template,
+                boolean_search_string=boolean_search_string,
+            )
+        )
+        
+        if not all(success_steps):
+            logger.error(f"❌ Failed to store job posting {job_id} - some steps failed: {success_steps}")
+            raise HTTPException(status_code=500, detail="Failed to create job posting. Please try again.")
+        
+        # 7. Build public link
+        # In production, use proper domain from config
+        base_url = settings.FRONTEND_URL
+        public_link = f"{base_url}/careers/jobs/{public_token}"
+        
+        logger.info(f"✅ Job posting created: {job_id} with public link")
+        
+        return JobPostingResponse(
+            job_id=job_id,
+            public_link=public_link,
+            public_token=public_token,
+            job_title=final_job_title,
+            upload_date=now_iso(),
+            filename=filename,
+            is_active=True,
+            company_name=company_name,
+            posted_by_user=current_user.username,
+            posted_by_role=current_user.role,
+            email_subject_id=email_subject_id,
+            email_subject_template=email_subject_template,
+            boolean_search_string=boolean_search_string
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to post job: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create job posting. Please try again later.")
+@router.post("/admin/jobs/post-manual", response_model=JobPostingResponse)
+async def post_job_manual(
+    job_title: str = Form(..., min_length=1, max_length=200),
+    job_location: Optional[str] = Form(None),
+    job_summary: Optional[str] = Form(None),
+    key_responsibilities: Optional[str] = Form(None),
+    qualifications: Optional[str] = Form(None),
+    company_name: Optional[str] = Form(None),
+    additional_info: Optional[str] = Form(None),
+    current_user: User = Depends(require_core_app)
+) -> JobPostingResponse:
+    """
+    HR endpoint: Create job posting manually with form data
+    
+    Pipeline:
+    1. Validate form data
+    2. Create structured text content from form inputs
+    3. Process with LLM service (extract title, requirements, etc.)
+    4. Generate public access token
+    5. Store in job_postings_* collections only (not jd_documents)
+    6. Return public link
+    """
+    try:
+        logger.info(f"💼 Manual job posting creation: {job_title}")
+        
+        # 1. Validate required fields
+        if not job_title.strip():
+            raise HTTPException(status_code=400, detail="Job title is required")
+        
+        job_id = str(uuid.uuid4())
+        public_token = generate_public_token()
+        
+        # 2. Create structured text content from form inputs
+        # This simulates what would be extracted from a document
+        structured_text = f"""
+Job Title: {job_title}
+
+Location: {job_location or 'Not specified'}
+
+Job Summary:
+{job_summary or 'No summary provided'}
+
+Key Responsibilities:
+{key_responsibilities or 'No responsibilities specified'}
+
+Qualifications & Requirements:
+{qualifications or 'No qualifications specified'}
+
+Additional Information:
+{additional_info or 'No additional information'}
+        """.strip()
+        
+        # 3. Process with LLM service to extract structured data
+        llm_service = get_llm_service()
+        llm_result = llm_service.standardize_jd(structured_text, f"manual_job_{job_id}.txt")
+        
+        # Extract job title for response
+        final_job_title = job_title
+        if llm_result and llm_result.get("job_title"):
+            # Use LLM extracted title if available, otherwise use form title
+            final_job_title = llm_result.get("job_title")
+        
+        # 4. Generate email subject ID and template
+        email_subject_id = generate_email_subject_id(final_job_title)
+        email_subject_template = generate_email_subject_template(final_job_title, email_subject_id)
+        logger.info(f"📧 Generated email subject: {email_subject_template}")
+
+        # 4b. Boolean search string (Naukri Gulf): prefer LLM value, else deterministic build.
+        _llm_bool = (llm_result or {}).get("boolean_search_string") or ""
+        _skills_for_bool = (
+            (llm_result or {}).get("skills_sentences")
+            or (llm_result or {}).get("structured_info", {}).get("skills")
+            or (llm_result or {}).get("skills")
+            or []
+        )
+        boolean_search_string = _llm_bool.strip() or generate_boolean_search_string(final_job_title, _skills_for_bool)
+        logger.info(f"🔎 Boolean search string: {boolean_search_string}")
+
+        # 5. Generate embeddings
+        embedding_service = get_embedding_service()
+        embeddings_data = embedding_service.generate_document_embeddings(llm_result)
+
+        # 5. Store in job_postings collections only (not jd_documents)
+        qdrant = get_qdrant_utils()
+        success_steps = []
+        
+        # Store raw document in jd_documents collection (reuse existing infrastructure)
+        success_steps.append(
+            qdrant.store_document(
+                job_id, "jd", f"manual_job_{job_id}.txt",
+                "text/plain",
+                structured_text, now_iso()
+            )
+        )
+        
+        # Store structured data in jd_structured collection (reuse existing infrastructure)
+        jd_structured_payload = {
+            **llm_result,
+            "document_type": "jd"
+        }
+        success_steps.append(
+            qdrant.store_structured_data(job_id, "jd", jd_structured_payload)
+        )
+        
+        # Store embeddings in jd_embeddings collection (reuse existing infrastructure)
+        success_steps.append(
+            qdrant.store_embeddings_exact(job_id, "jd", embeddings_data)
+        )
+        
+        # 6. Store job posting metadata for careers functionality
+        success_steps.append(
+            qdrant.store_job_posting_metadata(
+                job_id, public_token, company_name, additional_info,
+                posted_by_user=current_user.username,
+                posted_by_role=current_user.role,
+                jd_id=job_id,  # Link job posting to its JD
+                email_subject_id=email_subject_id,
+                email_subject_template=email_subject_template,
+                boolean_search_string=boolean_search_string,
+            )
+        )
+        
+        if not all(success_steps):
+            logger.error(f"❌ Failed to store manual job posting {job_id} - some steps failed: {success_steps}")
+            raise HTTPException(status_code=500, detail="Failed to create job posting. Please try again.")
+        
+        # 7. Build public link
+        base_url = settings.FRONTEND_URL
+        public_link = f"{base_url}/careers/jobs/{public_token}"
+        
+        logger.info(f"✅ Manual job posting created: {job_id} with public link")
+        
+        return JobPostingResponse(
+            job_id=job_id,
+            public_link=public_link,
+            public_token=public_token,
+            job_title=final_job_title,
+            upload_date=now_iso(),
+            filename=f"manual_job_{job_id}.txt",
+            is_active=True,
+            company_name=company_name,
+            posted_by_user=current_user.username,
+            posted_by_role=current_user.role,
+            email_subject_id=email_subject_id,
+            email_subject_template=email_subject_template,
+            boolean_search_string=boolean_search_string
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to create manual job posting: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create job posting. Please try again later.")
+
+
+@router.get("/admin/jobs", response_model=Union[List[JobPostingSummary], dict])
+async def list_job_postings(
+    include_inactive: bool = False,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    current_user: User = Depends(require_core_app)
+) -> Union[List[JobPostingSummary], dict]:
+    """List job postings for HR dashboard - filtered by user role"""
+    try:
+        logger.info(
+            f"📋 Listing job postings for user {current_user.username} "
+            f"(role: {current_user.role}, include_inactive: {include_inactive}, limit: {limit}, offset: {offset})"
+        )
+        
+        qdrant = get_qdrant_utils()
+
+        # Backwards compatible default: legacy clients call without pagination params.
+        if limit is None and offset is None:
+            page_rows, total = qdrant.list_job_postings_lightweight_page(
+                include_inactive=include_inactive,
+                limit=1000,
+                offset=0,
+                cache_ttl_seconds=2.0,
+            )
+        else:
+            page_rows, total = qdrant.list_job_postings_lightweight_page(
+                include_inactive=include_inactive,
+                limit=int(limit or 25),
+                offset=int(offset or 0),
+                cache_ttl_seconds=2.0,
+            )
+        
+        summaries = []
+        for job in page_rows:
+            # Debug logging for public_token
+            logger.info(f"🔍 Job {job.get('id', 'N/A')} - Public Token: {job.get('public_token', 'MISSING')}")
+            
+            # Fix missing public_token for existing jobs
+            if not job.get("public_token") or job.get("public_token") == "unknown":
+                logger.warning(f"⚠️ Job {job.get('id')} missing public_token, generating new one")
+                new_token = generate_public_token()
+                # Update the job metadata with the new token
+                success = qdrant.update_job_posting_public_token(job["id"], new_token)
+                if success:
+                    job["public_token"] = new_token
+                    logger.info(f"✅ Generated new public_token for job {job.get('id')}: {new_token[:8]}...")
+                else:
+                    logger.error(f"❌ Failed to update public_token for job {job.get('id')}")
+                    # Still set the token in memory for this request
+                    job["public_token"] = new_token
+            
+            # Extract job details from merged job data (already contains both metadata and structured data)
+            job_title = "Position Available"
+            job_location = ""
+            job_summary = ""
+            key_responsibilities = ""
+            qualifications = ""
+            
+            structured_info = job.get("structured_info", {}) or {}
+            
+            # Use job posting's own data first (this is the edited data)
+            job_title = structured_info.get("job_title", "") or job.get("job_title", job_title)
+            job_location = structured_info.get("job_location", "") or structured_info.get("location", "")
+            raw_summary = structured_info.get("job_summary", "") or structured_info.get("summary", "")
+            job_summary = _preview_careers_list_text(raw_summary, 320)
+            
+            # Use job posting's own responsibilities and skills (edited data)
+            responsibilities_list = structured_info.get("responsibilities", [])
+            if responsibilities_list and isinstance(responsibilities_list, list):
+                key_responsibilities = _preview_careers_list_text(
+                    "\n".join([f"• {resp}" for resp in responsibilities_list]),
+                    320,
+                )
+            
+            skills_list = structured_info.get("skills", []) or structured_info.get("requirements", [])
+            if skills_list and isinstance(skills_list, list):
+                qualifications = _preview_careers_list_text(
+                    "\n".join([f"• {skill}" for skill in skills_list]),
+                    320,
+                )
+            
+            # Calculate permissions: user can edit/delete if they posted the job OR if they are admin
+            job_poster = job.get("posted_by_user")
+            is_owner = job_poster == current_user.username
+            is_admin = current_user.role == "admin"
+            can_edit = is_owner or is_admin
+            can_delete = is_owner or is_admin
+            
+            summary = JobPostingSummary(
+                job_id=job["id"],
+                job_title=job_title,
+                job_location=job_location,
+                job_summary=job_summary,
+                key_responsibilities=key_responsibilities,
+                qualifications=qualifications,
+                company_name=job.get("company_name"),
+                upload_date=job.get("upload_date", now_iso()),
+                filename=job.get("filename", "job_description.pdf"),
+                is_active=job.get("is_active", True),
+                application_count=int(job.get("application_count") or 0),
+                public_token=job.get("public_token") or "unknown",
+                posted_by_user=job.get("posted_by_user"),
+                posted_by_role=job.get("posted_by_role"),
+                can_edit=can_edit,
+                can_delete=can_delete,
+                email_subject_id=job.get("email_subject_id"),
+                email_subject_template=job.get("email_subject_template"),
+                boolean_search_string=job.get("boolean_search_string")
+                or structured_info.get("boolean_search_string", ""),
+            )
+            summaries.append(summary)
+        
+        logger.info(f"✅ Found {len(summaries)} job postings (total={total})")
+        if limit is None and offset is None:
+            return summaries
+        return {"jobs": summaries, "total": total}
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to list job postings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve job postings")
+
+
+@router.get("/admin/reports/weekly", response_model=dict)
+async def weekly_analysis_report(
+    start_date: str,
+    end_date: str,
+    current_admin: User = Depends(require_admin),  # 🚨 ADMIN ONLY 🚨
+):
+    """Return lightweight stats for a weekly analysis report.
+
+    This endpoint is intentionally aggregate-only (no CV text, no large payloads) so it can be
+    called on demand without impacting normal Careers operations.
+    """
+    try:
+        def _parse_ymd(v: str) -> date:
+            try:
+                return datetime.strptime(v.strip(), "%Y-%m-%d").date()
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+        start = _parse_ymd(start_date)
+        end = _parse_ymd(end_date)
+        if end < start:
+            raise HTTPException(status_code=400, detail="end_date must be >= start_date")
+
+        qdrant = get_qdrant_utils()
+        # One scroll over job metadata; filter in memory by upload_date.
+        jobs = qdrant.get_all_job_postings(include_inactive=True)
+
+        def _job_date(job: dict) -> Optional[date]:
+            raw = str(job.get("upload_date") or job.get("created_date") or "")[:10]
+            if not raw:
+                return None
+            try:
+                return datetime.strptime(raw, "%Y-%m-%d").date()
+            except Exception:
+                return None
+
+        in_range: list[dict] = []
+        for j in jobs:
+            d = _job_date(j)
+            if not d:
+                continue
+            if start <= d <= end:
+                in_range.append(j)
+
+        recruiter_counts: dict[str, int] = {}
+        by_recruiter: dict[str, list[dict]] = {}
+        for j in in_range:
+            poster = (j.get("posted_by_user") or "Unknown").strip() or "Unknown"
+            recruiter_counts[poster] = recruiter_counts.get(poster, 0) + 1
+
+            structured = j.get("structured_info") or {}
+            title = structured.get("job_title") or j.get("job_title") or "Position Available"
+            job_id = str(j.get("id") or j.get("job_id") or "")
+            apps = qdrant.get_application_count_for_job(job_id) if job_id else 0
+
+            by_recruiter.setdefault(poster, []).append(
+                {"job_id": job_id, "job_title": str(title), "applications": int(apps)}
+            )
+
+        # Stable ordering for the UI/doc output.
+        recruiters_sorted = sorted(recruiter_counts.items(), key=lambda x: (-x[1], x[0].lower()))
+        return {
+            "range": {"start_date": start.isoformat(), "end_date": end.isoformat()},
+            "total_jobs_posted": len(in_range),
+            "recruiters_posted": [{"recruiter": name, "jobs_posted": count} for name, count in recruiters_sorted],
+            "applications_by_recruiter": {
+                name: sorted(rows, key=lambda r: r.get("job_title", "").lower())
+                for name, rows in by_recruiter.items()
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ weekly_analysis_report failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate weekly report")
+
+@router.get("/admin/jobs/{job_id}/match-data", response_model=dict)
+async def get_job_for_matching(job_id: str, current_user: User = Depends(require_core_app)) -> dict:
+    """Get job data for matching - all users can access any job for matching purposes"""
+    try:
+        logger.info(f"📝 Getting job data for matching: {job_id} by user: {current_user.username}")
+        
+        qdrant = get_qdrant_utils()
+        
+        # Verify job exists
+        job_data = qdrant.get_job_posting_by_id(job_id)
+        if not job_data:
+            raise HTTPException(status_code=404, detail="Job posting not found")
+        
+        # No authorization check needed - all users can match any job
+        
+        # Get structured data
+        client = qdrant.client
+        structured_data = None
+        try:
+            res = client.retrieve("job_postings_structured", ids=[job_id], with_payload=True, with_vectors=False)
+            if res:
+                structured_data = res[0].payload
+        except Exception as e:
+            logger.warning(f"⚠️ Could not retrieve structured data for job {job_id}: {e}")
+        
+        # Extract job details
+        job_title = "Position Available"
+        job_location = ""
+        job_summary = ""
+        key_responsibilities = ""
+        qualifications = ""
+        
+        if structured_data:
+            structured_info = structured_data.get("structured_info", {})
+            
+            # Use job posting's own data first (this is the edited data)
+            job_title = structured_info.get("job_title", "") or structured_data.get("job_title", job_title)
+            job_location = structured_info.get("job_location", "") or structured_info.get("location", "")
+            job_summary = structured_info.get("job_summary", "") or structured_info.get("summary", "")
+            
+            # Use job posting's own responsibilities and skills (edited data)
+            responsibilities_list = structured_info.get("responsibilities", [])
+            if responsibilities_list and isinstance(responsibilities_list, list):
+                key_responsibilities = "\n".join([f"• {resp}" for resp in responsibilities_list])
+            
+            skills_list = structured_info.get("skills", []) or structured_info.get("requirements", [])
+            if skills_list and isinstance(skills_list, list):
+                qualifications = "\n".join([f"• {skill}" for skill in skills_list])
+        
+        return {
+            "job_title": job_title,
+            "job_location": job_location,
+            "job_summary": job_summary,
+            "key_responsibilities": key_responsibilities,
+            "qualifications": qualifications,
+            "company_name": job_data.get("company_name"),
+            "jd_id": job_data.get("jd_id")  # Include jd_id for frontend matching
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to get job data for matching: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve job data")
+
+@router.get("/admin/jobs/{job_id}/edit-data", response_model=dict)
+async def get_job_for_edit(job_id: str, current_user: User = Depends(require_core_app)) -> dict:
+    """Get job data for editing - users can only edit their own jobs"""
+    try:
+        logger.info(f"📝 Getting job data for editing: {job_id} by user: {current_user.username}")
+        
+        qdrant = get_qdrant_utils()
+        
+        # Verify job exists
+        job_data = qdrant.get_job_posting_by_id(job_id)
+        if not job_data:
+            raise HTTPException(status_code=404, detail="Job posting not found")
+        
+        # Authorization check: Users can only edit their own job postings (unless admin)
+        if current_user.role != "admin":
+            job_poster = job_data.get("posted_by_user")
+            if job_poster != current_user.username:
+                logger.warning(f"❌ Unauthorized edit attempt: User {current_user.username} tried to edit job posted by {job_poster}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You can only edit job postings that you created"
+                )
+        
+        # Get structured data
+        client = qdrant.client
+        structured_data = None
+        try:
+            res = client.retrieve("job_postings_structured", ids=[job_id], with_payload=True, with_vectors=False)
+            if res:
+                structured_data = res[0].payload
+        except Exception as e:
+            logger.warning(f"Could not retrieve structured data for job {job_id}: {e}")
+            structured_data = None
+        
+        # Extract job details from structured data
+        job_title = ""
+        job_location = ""
+        job_summary = ""
+        key_responsibilities = ""
+        qualifications = ""
+        company_name = job_data.get("company_name", "")
+        
+        # Prioritize job posting's own structured_info data (edited data)
+        if structured_data:
+            structured_info = structured_data.get("structured_info", {})
+            # Use job posting's own data first (this is the edited data)
+            job_title = structured_info.get("job_title", "") or structured_data.get("job_title", "")
+            job_location = structured_info.get("job_location", "") or structured_info.get("location", "")
+            job_summary = structured_info.get("job_summary", "") or structured_info.get("summary", "")
+            
+            # Use job posting's own responsibilities and skills (edited data)
+            # Handle both string format (from UI extraction) and array format (from matching pipeline)
+            key_responsibilities = structured_info.get("key_responsibilities", "")
+            if not key_responsibilities:
+                # Fallback to array format
+                responsibilities_list = structured_info.get("responsibilities", [])
+                if responsibilities_list and isinstance(responsibilities_list, list):
+                    key_responsibilities = "\n".join([f"• {resp}" for resp in responsibilities_list])
+            
+            qualifications = structured_info.get("qualifications", "")
+            if not qualifications:
+                # Fallback to array format
+                skills_list = structured_info.get("skills", []) or structured_info.get("requirements", [])
+                if skills_list and isinstance(skills_list, list):
+                    qualifications = "\n".join([f"• {skill}" for skill in skills_list])
+        
+        return {
+            "job_title": job_title,
+            "job_location": job_location,
+            "job_summary": job_summary,
+            "key_responsibilities": key_responsibilities,
+            "qualifications": qualifications,
+            "company_name": company_name,
+            "jd_id": job_data.get("jd_id")  # Include jd_id for frontend matching
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to get job data for editing: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get job data for editing")
+
+
+@router.patch("/admin/jobs/{job_id}/status", response_model=dict)
+async def toggle_job_status(
+    job_id: str, 
+    status_update: JobStatusUpdate,
+    current_user: User = Depends(require_core_app)
+) -> dict:
+    """Activate/deactivate job postings - users can only toggle their own jobs"""
+    try:
+        logger.info(f"🔄 Updating job {job_id} status to: {status_update.is_active} by user: {current_user.username}")
+        
+        qdrant = get_qdrant_utils()
+        
+        # Check if job exists and get job data for authorization
+        job_data = qdrant.get_job_posting_by_id(job_id)
+        if not job_data:
+            raise HTTPException(status_code=404, detail="Job posting not found")
+        
+        # Authorization check: Users can only toggle their own job postings (unless admin)
+        if current_user.role != "admin":
+            job_poster = job_data.get("posted_by_user")
+            if job_poster != current_user.username:
+                logger.warning(f"❌ Unauthorized status toggle attempt: User {current_user.username} tried to toggle job posted by {job_poster}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You can only toggle status of job postings that you created"
+                )
+        
+        success = qdrant.update_job_posting_status(job_id, status_update.is_active)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Job posting not found")
+        
+        return {
+            "success": True,
+            "job_id": job_id,
+            "is_active": status_update.is_active,
+            "message": f"Job posting {'activated' if status_update.is_active else 'deactivated'} successfully",
+            "reason": status_update.reason
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to update job status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update job status")
+
+@router.get("/admin/jobs/{job_id}/applications", response_model=List[JobApplicationSummary])
+async def get_job_applications(
+    job_id: str
+    # Add authentication: current_user = Depends(require_hr_user)
+) -> List[JobApplicationSummary]:
+    """Get all applications for a specific job"""
+    try:
+        logger.info(f"📋 Getting applications for job: {job_id}")
+        
+        qdrant = get_qdrant_utils()
+        
+        # Verify job exists
+        job_data = qdrant.get_job_posting_by_id(job_id)
+        if not job_data:
+            raise HTTPException(status_code=404, detail="Job posting not found")
+        
+        # Get applications
+        applications = qdrant.get_applications_for_job(job_id)
+        
+        summaries = []
+        for app in applications:
+            # Use safe applicant name function to prevent API failures
+            safe_applicant_name = get_safe_applicant_name(app)
+            
+            summary = JobApplicationSummary(
+                application_id=app["id"],
+                job_id=job_id,
+                applicant_name=safe_applicant_name,
+                applicant_email=app.get("applicant_email", "unknown@email.com"),
+                application_date=app.get("application_date", "Unknown"),
+                cv_filename=app.get("cv_filename", "unknown.pdf"),
+                expected_salary=app.get("expected_salary"),
+                years_of_experience=app.get("years_of_experience"),
+                match_score=app.get("match_score"),  # Persisted when a match runs for this job
+                status=app.get("status", "pending"),
+                source=app.get("source", "website")  # Default to 'website' if not specified
+            )
+            summaries.append(summary)
+        
+        logger.info(f"✅ Found {len(summaries)} applications for job {job_id}")
+        return summaries
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to get job applications: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve applications")
+
+
+# ==================== UTILITY ENDPOINTS ====================
+
+@router.post("/admin/jobs/{jd_id}/extract-ui-data")
+async def extract_jd_for_ui(jd_id: str) -> dict:
+    """
+    Extract human-readable data from already processed JD for UI display.
+    This is separate from the matching pipeline and uses a different LLM prompt.
+    """
+    try:
+        logger.info(f"📝 Extracting UI data for JD: {jd_id}")
+        
+        qdrant = get_qdrant_utils()
+        
+        # Get the original JD document content (raw content, not structured)
+        jd_doc = qdrant.retrieve_document(jd_id, "jd")
+        if not jd_doc:
+            raise HTTPException(status_code=404, detail="JD not found")
+        
+        # Use raw content and send to LLM for auto-fill (as requested)
+        raw_content = get_decompressed_content(jd_doc)
+        
+        if not raw_content:
+            raise HTTPException(status_code=400, detail="No raw content found in JD document")
+        
+        logger.info(f"🔍 Using raw content for auto-fill, length: {len(raw_content)}")
+        
+        # Send raw content to LLM for UI extraction
+        llm_service = get_llm_service()
+        ui_data = llm_service.extract_jd_for_ui_display(raw_content, "auto_fill")
+        
+        if not ui_data:
+            raise HTTPException(status_code=500, detail="Failed to extract UI data from JD")
+        
+        logger.info(f"✅ UI data extracted from raw content via LLM")
+        
+        if not ui_data:
+            raise HTTPException(status_code=500, detail="Failed to extract UI data")
+        
+        logger.info(f"✅ UI data extracted successfully for JD: {jd_id}")
+        
+        return {
+            "success": True,
+            "jd_id": jd_id,  # Return the original JD ID for the next step
+            "job_title": ui_data.get("job_title", ""),
+            "job_location": ui_data.get("job_location", ""),
+            "job_summary": ui_data.get("job_summary", ""),
+            "key_responsibilities": ui_data.get("key_responsibilities", ""),
+            "qualifications": ui_data.get("qualifications", "")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to extract UI data: {e}")
+        raise HTTPException(status_code=500, detail="Failed to extract UI data")
+
+
+
+
+@router.post("/admin/jobs/unified-update")
+async def unified_job_update(
+    jd_id: Optional[str] = Form(None),
+    job_id: Optional[str] = Form(None),
+    job_title: str = Form(...),
+    job_location: str = Form(...),
+    job_summary: str = Form(...),
+    key_responsibilities: str = Form(...),
+    qualifications: str = Form(...),
+    company_name: Optional[str] = Form(None),
+    additional_info: Optional[str] = Form(None),
+    current_user: User = Depends(require_core_app)
+) -> dict:
+    """
+    Unified endpoint for creating or updating job postings.
+    - If job_id is provided: Update existing job posting
+    - If jd_id is provided (and no job_id): Create new job posting from JD
+    - Saves data directly to job_postings_structured collection
+    """
+    try:
+        qdrant = get_qdrant_utils()
+        
+        # Prepare UI data
+        ui_data = {
+            "job_title": job_title,
+            "job_location": job_location,
+            "job_summary": job_summary,
+            "key_responsibilities": key_responsibilities,
+            "qualifications": qualifications
+        }
+        
+        if job_id:
+            # Update existing job posting
+            logger.info(f"📝 Updating existing job posting: {job_id} by user: {current_user.username}")
+            
+            # Verify job exists
+            existing_job = qdrant.get_job_posting_by_id(job_id)
+            if not existing_job:
+                raise HTTPException(status_code=404, detail="Job posting not found")
+            
+            # Authorization check: Users can only update their own job postings (unless admin)
+            if current_user.role != "admin":
+                job_poster = existing_job.get("posted_by_user")
+                if job_poster != current_user.username:
+                    logger.warning(f"❌ Unauthorized update attempt: User {current_user.username} tried to update job posted by {job_poster}")
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="You can only update job postings that you created"
+                    )
+            
+            # Boolean search string: keep the existing one if present, else build it from
+            # the (possibly edited) title + skills so it is never empty.
+            _existing_bool = (
+                (existing_job.get("boolean_search_string") or "")
+                or ((existing_job.get("structured_info") or {}).get("boolean_search_string") or "")
+            ).strip()
+            _skills_for_bool = [q for q in (qualifications or "").split("\n") if q.strip()]
+            boolean_search_string = _existing_bool or generate_boolean_search_string(job_title, _skills_for_bool)
+
+            # Update structured data
+            success = qdrant.update_job_posting_structured_data(job_id, {
+                "structured_info": ui_data,
+                "company_name": company_name,
+                "additional_info": additional_info,
+                "boolean_search_string": boolean_search_string,
+                "updated_date": now_iso()
+            })
+            
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to update job posting")
+            
+            logger.info(f"✅ Job posting updated: {job_id}")
+            
+            return {
+                "success": True,
+                "job_id": job_id,
+                "public_token": existing_job.get("public_token"),
+                "message": "Job posting updated successfully"
+            }
+            
+        elif jd_id:
+            # Create new job posting from JD
+            logger.info(f"📝 Creating new job posting from JD: {jd_id}")
+            
+            # Verify the original JD exists
+            jd_doc = qdrant.retrieve_document(jd_id, "jd")
+            if not jd_doc:
+                raise HTTPException(status_code=404, detail="Original JD not found")
+            
+            # Generate new job posting metadata
+            new_job_id = str(uuid.uuid4())
+            public_token = generate_public_token()
+            
+            # Generate email subject ID and template
+            email_subject_id = generate_email_subject_id(job_title)
+            email_subject_template = generate_email_subject_template(job_title, email_subject_id)
+            logger.info(f"📧 Generated email subject for new job: {email_subject_template}")
+            
+            # Boolean search string: prefer the JD's LLM-generated string, else build one
+            # deterministically from the title + skills so it is never empty.
+            _jd_struct = (qdrant.get_structured_jd(jd_id) or {})
+            _jd_info = _jd_struct.get("structured_info") or {}
+            _llm_bool = (_jd_info.get("boolean_search_string") or "").strip()
+            _skills_for_bool = (
+                _jd_struct.get("skills_sentences")
+                or [q for q in (qualifications or "").split("\n") if q.strip()]
+            )
+            boolean_search_string = _llm_bool or generate_boolean_search_string(job_title, _skills_for_bool)
+            logger.info(f"🔎 Boolean search string for new job: {boolean_search_string}")
+
+            # Store UI data in job_postings_structured
+            success = qdrant.store_job_posting_ui_data(
+                job_id=new_job_id,
+                jd_id=jd_id,
+                public_token=public_token,
+                ui_data=ui_data,
+                posted_by_user=current_user.username,
+                posted_by_role=current_user.role,
+                email_subject_id=email_subject_id,
+                email_subject_template=email_subject_template
+            )
+
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to create job posting")
+
+            # Persist the boolean search string (+ any extra metadata) on the new posting.
+            _meta_update = {"boolean_search_string": boolean_search_string}
+            if company_name:
+                _meta_update["company_name"] = company_name
+            if additional_info:
+                _meta_update["additional_info"] = additional_info
+            qdrant.update_job_posting_structured_data(new_job_id, _meta_update)
+            
+            logger.info(f"✅ New job posting created: {new_job_id}")
+            
+            return {
+                "success": True,
+                "job_id": new_job_id,
+                "public_token": public_token,
+                "message": "Job posting created successfully"
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Either job_id (for update) or jd_id (for create) must be provided")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to process job update: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process job update")
+
+
+@router.delete("/admin/jobs/{job_id}")
+async def delete_job_posting(
+    job_id: str,
+    current_user: User = Depends(require_core_app)  # Allow both admin and user
+) -> JSONResponse:
+    """
+    Delete a specific job posting and all related data (soft deletion)
+    
+    This endpoint will:
+    1. Mark job posting as deleted in job_postings_structured collection
+    2. Mark related JD data as deleted in jd_* collections if it exists
+    3. Archive job applications instead of deleting them
+    4. Return confirmation with cleanup summary
+    
+    Authorization:
+    - Admins can delete any job posting
+    - Regular users can only delete their own job postings
+    """
+    try:
+        logger.info(f"🗑️ USER ACTION: Starting deletion of job posting {job_id} by user: {current_user.username} (role: {current_user.role})")
+        
+        qdrant = get_qdrant_utils()
+        
+        # Check if job posting exists first
+        job_exists = qdrant.get_job_posting_by_id(job_id)
+        if not job_exists:
+            logger.warning(f"❌ Job posting {job_id} not found for deletion by {current_user.username}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail=f"Job posting with ID {job_id} not found"
+            )
+        
+        # Authorization check: Users can only delete their own job postings (unless admin)
+        if current_user.role != "admin":
+            job_poster = job_exists.get("posted_by_user")
+            if job_poster != current_user.username:
+                logger.warning(f"❌ Unauthorized deletion attempt: User {current_user.username} tried to delete job posted by {job_poster}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You can only delete job postings that you created"
+                )
+        
+        # Perform soft deletion
+        results = qdrant.soft_delete_job_posting(
+            job_id=job_id,
+            deleted_by=current_user.username,
+            deleted_at=datetime.utcnow().isoformat()
+        )
+        
+        if results["success"]:
+            logger.info(f"✅ Successfully soft-deleted job posting {job_id} by user: {current_user.username}")
+            return JSONResponse({
+                "success": True,
+                "message": f"Job posting {job_id} deleted successfully",
+                "details": results,
+                "deleted_by": {
+                    "username": current_user.username,
+                    "role": current_user.role,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            })
+        else:
+            logger.error(f"❌ Failed to delete job posting {job_id}: {results}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to delete job posting: {results.get('error', 'Unknown error')}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error during job posting {job_id} deletion by {current_user.username}: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail="An unexpected error occurred while deleting the job posting. Please try again later."
+        )
+
+
+@router.delete("/admin/jobs/delete-all")
+async def delete_all_job_postings(
+    current_admin: User = Depends(require_admin)  # 🚨 ADMIN ONLY 🚨
+) -> JSONResponse:
+    """
+    Delete all job postings and related JD data while preserving CVs.
+    🚨 ADMIN ONLY ENDPOINT 🚨
+    """
+    try:
+        logger.info(f"🗑️ ADMIN ACTION: Starting deletion of all job postings by admin: {current_admin.username}")
+        
+        # Double-check admin role (extra security layer)
+        if current_admin.role != "admin":
+            logger.warning(f"❌ Unauthorized delete attempt by user: {current_admin.username} (role: {current_admin.role})")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, 
+                detail="Admin privileges required for this action"
+            )
+        
+        qdrant = get_qdrant_utils()
+        results = qdrant.delete_all_job_postings()
+        
+        if results["success"]:
+            logger.info(f"✅ Successfully deleted all job postings by admin: {current_admin.username}")
+            return JSONResponse({
+                "success": True,
+                "message": "All job postings deleted successfully",
+                "details": results,
+                "performed_by": {
+                    "username": current_admin.username,
+                    "role": current_admin.role,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            })
+        else:
+            logger.error(f"❌ Failed to delete job postings: {results}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to delete job postings: {results.get('error', 'Unknown error')}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error during job postings deletion by {current_admin.username}: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail="An unexpected error occurred while deleting job postings. Please try again later."
+        )
