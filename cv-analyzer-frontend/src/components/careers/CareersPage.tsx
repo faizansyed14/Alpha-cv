@@ -4,7 +4,6 @@ import { useRouter } from 'next/navigation';
 import {
   Plus,
   Users,
-  FileText,
   Copy,
   Check,
   AlertCircle,
@@ -26,10 +25,10 @@ import { useCareersStore } from '@/stores/careersStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
 import { useUserSessionStore } from '@/stores/userSessionStore';
+import { useWorkspaceNav } from '@/hooks/useWorkspaceNav';
 import { JobPostingListItem } from '@/lib/types';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { PageHeader, EmptyState } from '@/components/ui/page';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table';
 import {
@@ -117,7 +116,7 @@ function IconButton({
       aria-label={title}
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 disabled:pointer-events-none disabled:opacity-50 ${className || ''}`}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors duration-200 hover:bg-slate-100 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-50 ${className || ''}`}
     >
       {children}
     </button>
@@ -139,7 +138,8 @@ export default function CareersPage() {
     selectedJob,
     matchJobCandidates
   } = useCareersStore();
-  const { setCurrentTab, setMatchingProgress, setLoading: setAppLoading } = useAppStore();
+  const { setMatchingProgress, setLoading: setAppLoading } = useAppStore();
+  const { go } = useWorkspaceNav();
 
   const {
     loadingStates,
@@ -285,7 +285,7 @@ export default function CareersPage() {
         estimatedTimeRemaining: Math.max(30, totalCVs * 3),
       });
       setAppLoading('careersMatching', true);
-      setCurrentTab('match');
+      go('match');
       selectJob(job);
       await new Promise((r) => setTimeout(r, 500));
       await matchJobCandidates(job.job_id);
@@ -475,31 +475,31 @@ export default function CareersPage() {
 
       {/* Weekly analysis report (admin only) */}
       <AdminOnly>
-        <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="surface-panel mb-4 p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <p className="section-label">Weekly analysis report</p>
-              <p className="mt-1 text-[13px] text-gray-500">
+              <p className="mt-1 text-[13px] text-slate-500">
                 Select a date range and download a Word report of recruiting activity.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <label className="flex items-center gap-1.5 text-[13px] text-gray-600">
+              <label className="flex items-center gap-1.5 text-[13px] text-slate-600">
                 From
                 <input
                   type="date"
                   value={reportFrom}
                   onChange={(e) => setReportFrom(e.target.value)}
-                  className="h-9 rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                  className="field-input"
                 />
               </label>
-              <label className="flex items-center gap-1.5 text-[13px] text-gray-600">
+              <label className="flex items-center gap-1.5 text-[13px] text-slate-600">
                 To
                 <input
                   type="date"
                   value={reportTo}
                   onChange={(e) => setReportTo(e.target.value)}
-                  className="h-9 rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                  className="field-input"
                 />
               </label>
               <Button
@@ -568,21 +568,21 @@ export default function CareersPage() {
       </AdminOnly>
 
       {/* Filters */}
-      <div className="mb-4 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:flex-row sm:items-center">
+      <div className="toolbar-bar flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative w-full sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search title, poster, subject…"
-            className="h-9 w-full rounded-md border border-gray-200 bg-white pl-9 pr-3 text-[13px] text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            className="field-input w-full pl-9 pr-3"
           />
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
           <select
             value={jobFilter}
             onChange={(e) => setJobFilter(e.target.value as 'all' | 'yours' | 'others')}
-            className="h-9 rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            className="field-input text-slate-700"
             title="Ownership filter"
           >
             <option value="all">All jobs</option>
@@ -592,14 +592,14 @@ export default function CareersPage() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as any)}
-            className="h-9 rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            className="field-input text-slate-700"
             title="Status filter"
           >
             <option value="all">All status</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
-          <span className="text-[13px] text-gray-500">
+          <span className="text-[13px] text-slate-500">
             {filteredJobs.length} result{filteredJobs.length === 1 ? '' : 's'}
           </span>
         </div>
@@ -631,7 +631,7 @@ export default function CareersPage() {
         />
       ) : (
         <>
-          <Table>
+          <Table className="table-premium">
             <THead>
               <TR>
                 <TH>Title</TH>
@@ -647,11 +647,11 @@ export default function CareersPage() {
               {visibleJobs.map((job) => (
                 <TR key={job.job_id}>
                   <TD className="max-w-[280px]">
-                    <span className="block truncate font-medium text-gray-900" title={job.job_title}>
+                    <span className="block truncate font-medium text-slate-900" title={job.job_title}>
                       {job.job_title || 'Untitled role'}
                     </span>
                     {job.email_subject_template && (
-                      <span className="mt-0.5 block truncate text-[12px] text-gray-400" title={job.email_subject_template}>
+                      <span className="mt-0.5 block truncate text-[12px] text-slate-400" title={job.email_subject_template}>
                         {job.email_subject_template}
                       </span>
                     )}
@@ -665,35 +665,35 @@ export default function CareersPage() {
                           setCopiedBoolean(job.job_id);
                           setTimeout(() => setCopiedBoolean(null), 2000);
                         }}
-                        className="mt-1 flex max-w-full items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-left text-[11px] font-mono text-gray-600 transition-colors hover:border-brand-300 hover:text-brand-600"
+                        className="surface-panel-hover mt-1 flex max-w-full items-center gap-1.5 px-2 py-1 text-left text-[11px] font-mono text-slate-600 transition-colors duration-200 hover:border-brand-300 hover:text-brand-600"
                       >
-                        <Search className="h-3 w-3 shrink-0 text-gray-400" />
+                        <Search className="h-3 w-3 shrink-0 text-slate-400" />
                         <span className="truncate">{job.boolean_search_string}</span>
                         {copiedBoolean === job.job_id ? (
                           <Check className="h-3 w-3 shrink-0 text-green-600" />
                         ) : (
-                          <Copy className="h-3 w-3 shrink-0 text-gray-400" />
+                          <Copy className="h-3 w-3 shrink-0 text-slate-400" />
                         )}
                       </button>
                     )}
                   </TD>
-                  <TD className="text-gray-600">{job.job_location || '—'}</TD>
+                  <TD className="text-slate-600">{job.job_location || '—'}</TD>
                   <TD>
-                    <Badge variant={job.is_active ? 'success' : 'secondary'}>
+                    <span className={`chip ${job.is_active ? 'chip-success' : 'chip-neutral'}`}>
                       {job.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
+                    </span>
                   </TD>
-                  <TD className="text-right tabular-nums text-gray-700">{job.application_count ?? 0}</TD>
+                  <TD className="text-right tabular-nums text-slate-700">{job.application_count ?? 0}</TD>
                   <TD>
-                    <span className="inline-flex items-center gap-1.5 text-gray-700">
-                      <User className="h-3.5 w-3.5 text-gray-400" />
+                    <span className="inline-flex items-center gap-1.5 text-slate-700">
+                      <User className="h-3.5 w-3.5 text-slate-400" />
                       <span className="truncate">{job.posted_by_user || '—'}</span>
                       {job.posted_by_user && job.posted_by_user === user.username && (
-                        <Badge variant="default" className="ml-1">You</Badge>
+                        <span className="chip chip-brand ml-1">You</span>
                       )}
                     </span>
                   </TD>
-                  <TD className="whitespace-nowrap text-gray-600">{formatDate(job.upload_date)}</TD>
+                  <TD className="whitespace-nowrap text-slate-600">{formatDate(job.upload_date)}</TD>
                   <TD>
                     <div className="flex items-center justify-end gap-0.5">
                       <IconButton
@@ -808,7 +808,7 @@ export default function CareersPage() {
 
           {/* Pagination */}
           <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
-            <p className="text-[13px] text-gray-500">
+            <p className="text-[13px] text-slate-500">
               {filteredJobs.length === 0
                 ? 'No matching jobs'
                 : `Showing ${rangeStart}–${rangeEnd} of ${filteredJobs.length}`}
@@ -838,7 +838,7 @@ export default function CareersPage() {
       {/* Admin delete all confirmation */}
       <AdminOnly>
         <Dialog open={showDeleteConfirm} onOpenChange={(o) => !o && setShowDeleteConfirm(false)}>
-          <DialogContent>
+          <DialogContent className="animate-page-enter border-slate-200 shadow-[var(--shadow-md)]">
             <DialogHeader>
               <DialogTitle>Delete all job postings</DialogTitle>
               <DialogDescription>
@@ -865,7 +865,7 @@ export default function CareersPage() {
 
       {/* Individual job delete confirmation */}
       <Dialog open={!!showJobDeleteConfirm} onOpenChange={(o) => !o && setShowJobDeleteConfirm(null)}>
-        <DialogContent>
+        <DialogContent className="animate-page-enter border-slate-200 shadow-[var(--shadow-md)]">
           <DialogHeader>
             <DialogTitle>Delete job posting</DialogTitle>
             <DialogDescription>
@@ -910,7 +910,7 @@ export default function CareersPage() {
 
       {/* Boolean search string viewer */}
       <Dialog open={!!booleanModal} onOpenChange={(open) => { if (!open) setBooleanModal(null); }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl animate-page-enter border-slate-200 shadow-[var(--shadow-md)]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Code2 className="h-5 w-5 text-brand-600" />
@@ -920,7 +920,7 @@ export default function CareersPage() {
           </DialogHeader>
           {booleanModal?.value ? (
             <div className="space-y-3">
-              <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 p-3 font-mono text-[13px] leading-relaxed text-gray-800">
+              <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-[13px] leading-relaxed text-slate-800">
                 {booleanModal.value}
               </pre>
               <div className="flex justify-end">
@@ -936,12 +936,12 @@ export default function CareersPage() {
                   {booleanModalCopied ? 'Copied' : 'Copy to clipboard'}
                 </Button>
               </div>
-              <p className="text-[12px] text-gray-500">
+              <p className="text-[12px] text-slate-500">
                 Paste this into Naukri Gulf Resdex to find matching candidates.
               </p>
             </div>
           ) : (
-            <p className="text-[13px] text-gray-500">
+            <p className="text-[13px] text-slate-500">
               No boolean string is stored for this job yet. Editing &amp; saving the job (or re-posting it)
               will generate one from the title and skills.
             </p>

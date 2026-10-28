@@ -21,9 +21,9 @@ export function PageHeader({ title, description, actions, className, ...props }:
       {...props}
     >
       <div className="min-w-0">
-        <h1 className="text-lg font-semibold leading-7 tracking-tight text-gray-900">{title}</h1>
+        <h1 className="text-lg font-semibold leading-7 tracking-tight text-slate-900">{title}</h1>
         {description ? (
-          <p className="mt-0.5 text-[13px] text-gray-500">{description}</p>
+          <p className="mt-0.5 text-[13px] text-slate-500">{description}</p>
         ) : null}
       </div>
       {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
@@ -45,18 +45,18 @@ export function EmptyState({ icon: Icon, title, hint, action, className, ...prop
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-lg border border-dashed border-gray-200 bg-white px-6 py-12 text-center",
+        "flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-white px-6 py-12 text-center",
         className
       )}
       {...props}
     >
       {Icon ? (
-        <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-gray-100">
-          <Icon className="h-5 w-5 text-gray-400" />
+        <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-slate-100">
+          <Icon className="h-5 w-5 text-slate-400" />
         </div>
       ) : null}
-      <div className="text-sm font-medium text-gray-900">{title}</div>
-      {hint ? <div className="mt-1 max-w-sm text-[13px] text-gray-500">{hint}</div> : null}
+      <div className="text-sm font-medium text-slate-900">{title}</div>
+      {hint ? <div className="mt-1 max-w-sm text-[13px] text-slate-500">{hint}</div> : null}
       {action ? <div className="mt-4">{action}</div> : null}
     </div>
   );

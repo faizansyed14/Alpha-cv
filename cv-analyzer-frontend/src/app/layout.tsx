@@ -1,9 +1,14 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import AuthInitializer from "@/components/auth/AuthInitializer";
 
-const inter = Inter({ subsets: ["latin"] });
+const plusJakarta = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-sans",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Alpha CV - AI-Powered Resume Matching",
@@ -44,8 +49,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="scroll-smooth">
-      <body className={`${inter.className} antialiased overflow-x-hidden`}>
+    <html lang="en" className={`scroll-smooth ${plusJakarta.variable}`}>
+      <body className={`${plusJakarta.className} antialiased overflow-x-hidden`}>
         <AuthInitializer />
         {children}
       </body>

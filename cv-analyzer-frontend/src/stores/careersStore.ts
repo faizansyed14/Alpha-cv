@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api } from '@/lib/api';
+import { matchingService } from '@/services/matchingService';
 import { 
   JobPostingResponse, 
   JobPostingListItem, 
@@ -52,13 +53,16 @@ interface CareersActions {
   // Public actions (no auth required)
   loadPublicJob: (token: string) => Promise<void>;
   submitApplication: (
-    token: string, 
-    name: string, 
-    email: string, 
-    phone: string | undefined, 
+    token: string,
+    name: string,
+    email: string,
+    phone: string | undefined,
     expectedSalary: number,
     yearsOfExperience: number,
-    cvFile: File
+    cvFile: File,
+    location?: string,
+    noticePeriod?: string,
+    nationality?: string
   ) => Promise<JobApplicationResponse | null>;
   
   // CV Data Viewer
@@ -441,7 +445,7 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
       // Matching now runs in a background worker: the first call returns
       // is_queued=true, so re-POST the same request until the job completes.
       const matchReq = { jd_id: originalJdId, cv_ids: cvIds };
-      let matchResults = await api.matchCandidates(matchReq);
+      let matchResults = await matchingService.matchCandidates(matchReq);
       const matchDeadline = Date.now() + 40 * 60 * 1000;
       while (matchResults.is_queued && Date.now() < matchDeadline) {
         if (matchResults.status === 'failed') {
@@ -466,7 +470,7 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
           });
         }
         await new Promise((r) => setTimeout(r, 2000));
-        matchResults = await api.matchCandidates(matchReq);
+        matchResults = await matchingService.matchCandidates(matchReq);
       }
       if (matchResults.is_queued) {
         throw new Error('Matching is taking longer than expected. Please try again.');
@@ -586,17 +590,17 @@ loadPublicJob: async (token: string) => {
     });
   }
 },
-  submitApplication: async (token: string, name: string, email: string, phone: string | undefined, expectedSalary: number, yearsOfExperience: number, cvFile: File) => {
+  submitApplication: async (token: string, name: string, email: string, phone: string | undefined, expectedSalary: number, yearsOfExperience: number, cvFile: File, location?: string, noticePeriod?: string, nationality?: string) => {
     set({ isSubmittingApplication: true, error: null });
     try {
-      logger.info('Submitting job application', { 
+      logger.info('Submitting job application', {
         token: token.substring(0, 8) + '...',
         applicantName: name,
         applicantEmail: email,
         cvFileName: cvFile.name
       });
-      
-      const result = await api.submitJobApplication(token, name, email, phone, expectedSalary, yearsOfExperience, cvFile);
+
+      const result = await api.submitJobApplication(token, name, email, phone, expectedSalary, yearsOfExperience, cvFile, location, noticePeriod, nationality);
       
       logger.info('Application submitted successfully', { 
         applicationId: result.application_id 

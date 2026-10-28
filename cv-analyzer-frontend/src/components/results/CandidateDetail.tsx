@@ -63,7 +63,7 @@ function SubScoreBar({ label, score }: { label: string; score: number }) {
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-[13px] text-gray-600">{label}</span>
+        <span className="text-[13px] text-slate-600">{label}</span>
         <span className={cn('text-[13px] font-semibold', scoreTone(score).text)}>{pct}%</span>
       </div>
       <Progress value={pct} className="h-1.5" />
@@ -126,14 +126,14 @@ export default function CandidateDetail({ candidate, onClose }: CandidateDetailP
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <p className="section-label">{title} assignments ({assignments.length})</p>
-          <div className="flex items-center gap-2 text-[13px] text-gray-500">
+          <div className="flex items-center gap-2 text-[13px] text-slate-500">
             <span>Average</span>
             <Badge variant={scoreTone(avgScore).badge}>{formatPercentage(avgScore)}</Badge>
           </div>
         </div>
 
         {assignments.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-gray-200 bg-white px-4 py-6 text-center text-[13px] text-gray-500">
+          <p className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-[13px] text-slate-500">
             No {title.toLowerCase()} assignments.
           </p>
         ) : (
@@ -148,10 +148,10 @@ export default function CandidateDetail({ candidate, onClose }: CandidateDetailP
             <TBody>
               {assignments.map((a, index) => (
                 <TR key={index}>
-                  <TD className="text-gray-900">{a.jd_item}</TD>
+                  <TD className="text-slate-900">{a.jd_item}</TD>
                   <TD>
-                    <span className="flex items-start gap-1.5 text-gray-700">
-                      <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                    <span className="flex items-start gap-1.5 text-slate-700">
+                      <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                       {a.cv_item}
                     </span>
                   </TD>
@@ -176,18 +176,18 @@ export default function CandidateDetail({ candidate, onClose }: CandidateDetailP
     <div className="space-y-3">
       <p className="section-label">{title} alternatives (top 3 per requirement)</p>
       {alternatives.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-gray-200 bg-white px-4 py-6 text-center text-[13px] text-gray-500">
+        <p className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-[13px] text-slate-500">
           No alternatives available.
         </p>
       ) : (
         <div className="space-y-3">
           {alternatives.map((alt, jdIndex) => (
-            <div key={jdIndex} className="rounded-lg border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-              <p className="mb-2 text-[13px] font-medium text-gray-900">Requirement {alt.jd_index}</p>
+            <div key={jdIndex} className="rounded-lg border border-slate-200 bg-white p-4 shadow-[var(--shadow-sm)]">
+              <p className="mb-2 text-[13px] font-medium text-slate-900">Requirement {alt.jd_index}</p>
               <div className="space-y-1.5">
                 {alt.items.map((item, itemIndex) => (
-                  <div key={itemIndex} className="flex items-center justify-between gap-3 rounded-md bg-gray-50 px-3 py-1.5">
-                    <span className="text-[13px] text-gray-700">{item.cv_item}</span>
+                  <div key={itemIndex} className="flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-1.5">
+                    <span className="text-[13px] text-slate-700">{item.cv_item}</span>
                     <Badge variant={scoreTone(item.score).badge}>{formatPercentage(item.score)}</Badge>
                   </div>
                 ))}
@@ -209,16 +209,16 @@ export default function CandidateDetail({ candidate, onClose }: CandidateDetailP
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-[0_8px_24px_rgba(16,24,40,0.12)]"
+        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_8px_24px_rgba(16,24,40,0.12)]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div className="flex items-center gap-4 min-w-0">
             <ScoreRing score={candidate.overall_score} />
             <div className="min-w-0">
-              <h2 className="truncate text-lg font-semibold tracking-tight text-gray-900">{candidate.cv_name}</h2>
-              <p className="mt-0.5 truncate text-[13px] text-gray-500">
+              <h2 className="truncate text-lg font-semibold tracking-tight text-slate-900">{candidate.cv_name}</h2>
+              <p className="mt-0.5 truncate text-[13px] text-slate-500">
                 {candidate.cv_job_title || 'No title'} &middot; {candidate.cv_years} years experience
               </p>
               <div className="mt-1.5 flex items-center gap-2">
@@ -247,7 +247,7 @@ export default function CandidateDetail({ candidate, onClose }: CandidateDetailP
             {/* Overview */}
             <TabsContent value="overview" className="mt-5 space-y-5">
               {/* Breakdown */}
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-[var(--shadow-sm)]">
                 <p className="section-label mb-4">Score breakdown</p>
                 <div className="space-y-3.5">
                   {breakdownItems.map((item) => (
@@ -257,8 +257,8 @@ export default function CandidateDetail({ candidate, onClose }: CandidateDetailP
               </div>
 
               {/* Weighted contribution */}
-              <div className="rounded-lg border border-gray-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-                <div className="border-b border-gray-200 px-4 py-3">
+              <div className="rounded-lg border border-slate-200 bg-white shadow-[var(--shadow-sm)]">
+                <div className="border-b border-slate-200 px-4 py-3">
                   <p className="section-label">Weighted contribution</p>
                 </div>
                 <Table>
@@ -273,14 +273,14 @@ export default function CandidateDetail({ candidate, onClose }: CandidateDetailP
                   <TBody>
                     {breakdownItems.map((item) => (
                       <TR key={item.label}>
-                        <TD className="font-medium text-gray-900">{item.label}</TD>
+                        <TD className="font-medium text-slate-900">{item.label}</TD>
                         <TD>{formatPercentage(item.score)}</TD>
                         <TD>{formatPercentage(item.weight)}</TD>
-                        <TD className="font-semibold text-gray-900">{formatPercentage(item.score * item.weight)}</TD>
+                        <TD className="font-semibold text-slate-900">{formatPercentage(item.score * item.weight)}</TD>
                       </TR>
                     ))}
-                    <TR className="bg-gray-50/80">
-                      <TD className="font-semibold text-gray-900" colSpan={3}>Overall score</TD>
+                    <TR className="bg-slate-50/80">
+                      <TD className="font-semibold text-slate-900" colSpan={3}>Overall score</TD>
                       <TD className={cn('font-semibold', scoreTone(candidate.overall_score).text)}>
                         {formatPercentage(candidate.overall_score)}
                       </TD>
@@ -291,29 +291,29 @@ export default function CandidateDetail({ candidate, onClose }: CandidateDetailP
 
               {/* Candidate profile */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-[var(--shadow-sm)]">
                   <p className="section-label">Name</p>
-                  <p className="mt-1 text-[13px] font-medium text-gray-900">{candidate.cv_name}</p>
+                  <p className="mt-1 text-[13px] font-medium text-slate-900">{candidate.cv_name}</p>
                 </div>
-                <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-[var(--shadow-sm)]">
                   <p className="section-label">Current role</p>
-                  <p className="mt-1 text-[13px] font-medium text-gray-900">{candidate.cv_job_title || 'Not specified'}</p>
+                  <p className="mt-1 text-[13px] font-medium text-slate-900">{candidate.cv_job_title || 'Not specified'}</p>
                 </div>
-                <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-[var(--shadow-sm)]">
                   <p className="section-label">Experience</p>
-                  <p className="mt-1 text-[13px] font-medium text-gray-900">{candidate.cv_years} years</p>
+                  <p className="mt-1 text-[13px] font-medium text-slate-900">{candidate.cv_years} years</p>
                 </div>
               </div>
 
               {/* LLM analysis */}
               {candidate.has_llm_analysis && candidate.llm_analysis && (
-                <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-[var(--shadow-sm)]">
                   <div className="mb-3 flex items-center gap-2">
                     <Award className="h-4 w-4 text-brand-600" />
                     <p className="section-label">AI analysis</p>
                   </div>
                   {candidate.llm_analysis.summary && (
-                    <p className="text-[13px] leading-relaxed text-gray-700">{candidate.llm_analysis.summary}</p>
+                    <p className="text-[13px] leading-relaxed text-slate-700">{candidate.llm_analysis.summary}</p>
                   )}
                   <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {Array.isArray(candidate.llm_analysis.key_matches) && candidate.llm_analysis.key_matches.length > 0 && (
@@ -321,7 +321,7 @@ export default function CandidateDetail({ candidate, onClose }: CandidateDetailP
                         <p className="mb-1.5 text-[13px] font-medium text-green-600">Key matches</p>
                         <ul className="space-y-1">
                           {candidate.llm_analysis.key_matches.map((m: string, i: number) => (
-                            <li key={i} className="flex gap-2 text-[13px] text-gray-700">
+                            <li key={i} className="flex gap-2 text-[13px] text-slate-700">
                               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />{m}
                             </li>
                           ))}
@@ -333,7 +333,7 @@ export default function CandidateDetail({ candidate, onClose }: CandidateDetailP
                         <p className="mb-1.5 text-[13px] font-medium text-red-500">Gaps</p>
                         <ul className="space-y-1">
                           {candidate.llm_analysis.gaps.map((g: string, i: number) => (
-                            <li key={i} className="flex gap-2 text-[13px] text-gray-700">
+                            <li key={i} className="flex gap-2 text-[13px] text-slate-700">
                               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" />{g}
                             </li>
                           ))}

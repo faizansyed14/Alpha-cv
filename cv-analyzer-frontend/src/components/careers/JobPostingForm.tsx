@@ -20,9 +20,9 @@ interface JobPostingFormProps {
 }
 
 const cardClass =
-  'rounded-lg border border-gray-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]';
+  'rounded-lg border border-slate-200 bg-white shadow-[var(--shadow-sm)]';
 const inputClass =
-  'w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-[13px] text-gray-900 placeholder:text-gray-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30';
+  'w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-900 placeholder:text-slate-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30';
 
 export default function JobPostingForm({ onSuccess, jobId, publicToken, initialData }: JobPostingFormProps) {
   const { createJobPosting, createJobPostingWithFormData, isCreatingJob, error, clearError } = useCareersStore();
@@ -396,16 +396,16 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
       <ToastContainer toasts={toasts} onClose={removeToast} />
       <div id="job-posting-form" className={`${cardClass} scroll-mt-20 overflow-hidden`}>
         {/* Card header */}
-        <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 sm:px-5">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-5">
           <div className="flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-50 text-brand-600">
               {jobId ? <Edit3 className="h-4 w-4" /> : <Briefcase className="h-4 w-4" />}
             </span>
             <div>
-              <h2 className="text-sm font-semibold text-gray-900">
+              <h2 className="text-sm font-semibold text-slate-900">
                 {jobId || success ? 'Edit job posting' : 'New job posting'}
               </h2>
-              <p className="text-[12px] text-gray-500">
+              <p className="text-[12px] text-slate-500">
                 {jobId
                   ? 'Update the job details below.'
                   : 'Upload a JD to auto-fill, or enter details manually.'}
@@ -432,7 +432,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
                   <p className="font-semibold">Job posting created successfully.</p>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">Public link:</span>
-                    <code className="max-w-xs truncate rounded bg-white px-2 py-1 font-mono text-[12px] text-gray-700">
+                    <code className="max-w-xs truncate rounded bg-white px-2 py-1 font-mono text-[12px] text-slate-700">
                       {success.link}
                     </code>
                     <button
@@ -522,12 +522,12 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
             <div
               className={`rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
                 jobId
-                  ? 'cursor-not-allowed border-gray-200 bg-gray-50 opacity-60'
+                  ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-60'
                   : dragActive
                   ? 'border-brand-400 bg-brand-50'
                   : selectedFile
                   ? 'border-green-300 bg-green-50/60'
-                  : 'border-gray-300 bg-gray-50 hover:border-brand-300 hover:bg-brand-50/40'
+                  : 'border-slate-300 bg-slate-50 hover:border-brand-300 hover:bg-brand-50/40'
               }`}
               onDragEnter={jobId ? undefined : (e) => { e.preventDefault(); setDragActive(true); }}
               onDragLeave={jobId ? undefined : (e) => { e.preventDefault(); setDragActive(false); }}
@@ -536,11 +536,11 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
             >
               {jobId ? (
                 <div className="space-y-1.5">
-                  <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-gray-100">
-                    <Edit3 className="h-5 w-5 text-gray-400" />
+                  <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-slate-100">
+                    <Edit3 className="h-5 w-5 text-slate-400" />
                   </span>
-                  <p className="text-[13px] font-medium text-gray-700">Edit mode</p>
-                  <p className="text-[12px] text-gray-500">File upload is disabled. Edit the fields below.</p>
+                  <p className="text-[13px] font-medium text-slate-700">Edit mode</p>
+                  <p className="text-[12px] text-slate-500">File upload is disabled. Edit the fields below.</p>
                 </div>
               ) : selectedFile ? (
                 <div className="space-y-2">
@@ -554,8 +554,8 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
                     )}
                   </span>
                   <div>
-                    <p className="text-[13px] font-medium text-gray-900">{selectedFile.name}</p>
-                    <p className="text-[12px] text-gray-500">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                    <p className="text-[13px] font-medium text-slate-900">{selectedFile.name}</p>
+                    <p className="text-[12px] text-slate-500">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
                     {isUploading && <p className="mt-0.5 text-[12px] font-medium text-brand-600">Processing…</p>}
                     {uploadPhase === 'uploaded' && <p className="mt-0.5 text-[12px] font-medium text-green-600">Processed successfully</p>}
                   </div>
@@ -585,14 +585,14 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
                     <Upload className="h-5 w-5 text-brand-600" />
                   </span>
                   <div>
-                    <p className="text-[13px] font-medium text-gray-900">Upload job description</p>
-                    <p className="mt-0.5 text-[12px] text-gray-500">Drag &amp; drop or select a file — it is processed automatically.</p>
+                    <p className="text-[13px] font-medium text-slate-900">Upload job description</p>
+                    <p className="mt-0.5 text-[12px] text-slate-500">Drag &amp; drop or select a file — it is processed automatically.</p>
                   </div>
-                  <div className="flex items-center justify-center gap-1.5 text-[11px] text-gray-400">
-                    <span className="rounded bg-gray-100 px-1.5 py-0.5">PDF</span>
-                    <span className="rounded bg-gray-100 px-1.5 py-0.5">DOC</span>
-                    <span className="rounded bg-gray-100 px-1.5 py-0.5">DOCX</span>
-                    <span className="rounded bg-gray-100 px-1.5 py-0.5">TXT</span>
+                  <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5">PDF</span>
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5">DOC</span>
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5">DOCX</span>
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5">TXT</span>
                     <span>· Max 10MB</span>
                   </div>
                   <input
@@ -617,7 +617,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
           {uploadPhase === 'uploaded' && (
             <div className="flex flex-col items-center gap-3 rounded-lg border border-green-200 bg-green-50/60 p-4 text-center">
               <CheckCircle className="h-5 w-5 text-green-600" />
-              <p className="text-[13px] font-medium text-gray-900">JD processed — extract details to review and edit</p>
+              <p className="text-[13px] font-medium text-slate-900">JD processed — extract details to review and edit</p>
               <Button
                 variant="primary"
                 icon={<Wand2 className="h-4 w-4" />}
@@ -640,7 +640,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">Job title *</label>
+                  <label className="block text-[13px] font-medium text-slate-700">Job title *</label>
                   <input
                     type="text"
                     value={formData.jobTitle}
@@ -650,7 +650,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">Location</label>
+                  <label className="block text-[13px] font-medium text-slate-700">Location</label>
                   <input
                     type="text"
                     value={formData.jobLocation}
@@ -662,7 +662,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-[13px] font-medium text-gray-700">Job summary</label>
+                <label className="block text-[13px] font-medium text-slate-700">Job summary</label>
                 <textarea
                   value={formData.jobSummary}
                   onChange={(e) => handleInputChange('jobSummary', e.target.value)}
@@ -673,7 +673,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-[13px] font-medium text-gray-700">Key responsibilities</label>
+                <label className="block text-[13px] font-medium text-slate-700">Key responsibilities</label>
                 <textarea
                   value={formData.keyResponsibilities}
                   onChange={(e) => handleInputChange('keyResponsibilities', e.target.value)}
@@ -684,7 +684,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-[13px] font-medium text-gray-700">Qualifications &amp; requirements</label>
+                <label className="block text-[13px] font-medium text-slate-700">Qualifications &amp; requirements</label>
                 <textarea
                   value={formData.qualifications}
                   onChange={(e) => handleInputChange('qualifications', e.target.value)}
@@ -698,7 +698,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
         </div>
 
         {/* Footer actions */}
-        <div className="flex flex-wrap justify-end gap-2 border-t border-gray-200 px-4 py-3 sm:px-5">
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-4 py-3 sm:px-5">
           <Button variant="secondary" onClick={onSuccess}>
             Cancel
           </Button>

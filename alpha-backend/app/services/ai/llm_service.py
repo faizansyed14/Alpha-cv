@@ -33,7 +33,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CV_PROMPT = """You are an information-extraction engine. You will receive the full plain text of ONE resume/CV.
 Your job is to output STRICT JSON with the following schema, extracting:
-Candidate NAME
+Candidate NAME: the person's actual full name — a human being's given name and family name (e.g. "Ahmed Al Mansoori", "Priya Sharma"). It is almost always the most prominent line at the very top of the document, often directly above or beside the contact details (email/phone/address).
+  NEVER return any of the following as the name, even if they appear in a prominent position: a city, country, or address (e.g. "Riyadh", "Dubai, UAE"), a job title or role (e.g. "Senior Accountant"), a company/employer name, a document heading (e.g. "Curriculum Vitae", "Resume"), or a section header.
+  If OCR/extraction noise makes the top of the document garbled or you cannot find a clear person's name anywhere in the text, return null — do not guess, and do not substitute a location, title, or any other field's value just to fill this one in.
 Exactly 20 SKILL PHRASES (by reviewing the full CV and understanding the skills possessed by this candidate; if fewer than 20 exist, leave the remaining slots as "").
 Exactly 10 RESPONSIBILITY PHRASES (from WORK EXPERIENCE / PROFESSIONAL EXPERIENCE sections; if fewer than 10, derive the remaining from CERTIFICATIONS or other professional sections, but never from skills).
 The most recent JOB TITLE.
@@ -42,6 +44,9 @@ JOB CATEGORY: Classify the candidate's role as one of (Technical/Management/Sale
 SENIORITY LEVEL: Determine the seniority as one of (Entry/Junior/Mid/Senior/Lead/Manager/Director/VP/C-Level).
 ROLE FAMILY: Identify the role family such as (Engineering/Management/Sales/Finance/HR/Marketing/Operations/Healthcare/Education/etc).
 CATEGORY: Classify the candidate's primary domain as one of (Cloud & Infrastructure Engineering/Software & Application Development/Data & Analytics/Cybersecurity & Governance/Project & Program Management/Business Applications & Functional Consulting/IT Operations & Support/Networking & Systems/Specialized Technical Roles/Non IT). Base this on their primary skills, experience, and job titles.
+Exactly 20 SEARCH KEYWORDS: short, precise keyword tags (1-3 words each — e.g. "Python", "AWS", "Financial Modeling", "Salesforce CRM", "Project Management") that a recruiter would type into a search box to find this exact candidate. These are NOT the same as the skill phrases above: a skill phrase can be a longer descriptive sentence fragment, a keyword must be the bare searchable term itself (the specific technology, tool, certification, methodology, or domain expertise named in the CV — not a paraphrase, not a generic word like "communication" or "teamwork" unless the CV gives no more specific skills at all). Pick the 20 terms that most precisely and distinctively describe THIS candidate, ranked by how central they are to their profile. This field is used to power exact-match candidate search, so precision matters more than creativity: only use terms that actually appear (or are unambiguously implied, e.g. "AWS" implying "Amazon Web Services") in the CV. If fewer than 20 genuinely distinct, specific keywords exist, leave the remaining slots as "" rather than inventing or repeating ones.
+GENDER: Infer only when the CV explicitly states gender/sex OR uses unambiguous gendered pronouns referring to the candidate (he/him/his → "Male", she/her/hers → "Female"), or an explicit label like "Gender: Male". If unclear, ambiguous, or not mentioned, return null. NEVER invent gender from the name alone.
+LANGUAGES: Extract spoken/written languages ONLY if the CV explicitly lists them (e.g. Languages, Language proficiency, Mother tongue sections, or phrases like "Fluent in English and Arabic"). Return a de-duplicated array of language names (e.g. ["English", "Arabic"]). If none are mentioned, return []. Do not invent languages from location or nationality.
 General Rules:
 Output valid JSON only. No markdown, no comments, no trailing commas.
 Use English only.
@@ -67,6 +72,8 @@ Output Format:
   "seniority_level": string | null,
   "role_family": string | null,
   "category": string | null,
+  "gender": "Male" | "Female" | null,
+  "languages": ["English", "..."] | [],
   "skills_sentences": [
     "<Skill phrase 1>",
     "... (total 20 items)",
@@ -75,6 +82,11 @@ Output Format:
   "responsibility_sentences": [
     "<Responsibility phrase 1>",
     "... (total 10 items)",
+    ""
+  ],
+  "keywords": [
+    "<Search keyword 1>",
+    "... (total 20 items)",
     ""
   ],
   "contact_info": {"name": string | null}
@@ -158,7 +170,8 @@ CV_JSON_SCHEMA: Dict[str, Any] = {
         "additionalProperties": False,
         "required": [
             "doc_type", "name", "job_title", "years_of_experience",
-            "skills_sentences", "responsibility_sentences", "contact_info"
+            "skills_sentences", "responsibility_sentences", "keywords", "contact_info",
+            "gender", "languages"
         ],
         "properties": {
             "doc_type": {"type": "string", "const": "resume"},
@@ -166,6 +179,12 @@ CV_JSON_SCHEMA: Dict[str, Any] = {
             "job_title": {"type": ["string", "null"]},
             "years_of_experience": {"type": ["number", "integer", "null"]},
             "category": {"type": ["string", "null"]},
+            "gender": {"type": ["string", "null"]},
+            "languages": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 20
+            },
             "skills_sentences": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -177,6 +196,12 @@ CV_JSON_SCHEMA: Dict[str, Any] = {
                 "items": {"type": "string"},
                 "minItems": 10,
                 "maxItems": 10
+            },
+            "keywords": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 20,
+                "maxItems": 20
             },
             "contact_info": {
                 "type": "object",
@@ -535,13 +560,48 @@ class LLMService:
     def _validate_cv_response(self, data: Dict[str, Any], *, source_text: str) -> Dict[str, Any]:
         skills_src = data.get("skills_sentences") or data.get("skills") or []
         resp_src = data.get("responsibility_sentences") or data.get("responsibilities") or []
+        keywords_src = data.get("keywords") or []
 
         skills = self._normalize_fixed_list(skills_src, 20)
         resps  = self._normalize_fixed_list(resp_src, 10)
+        # Keywords are the search index for candidate lookup (see FilterSidebar /
+        # advanced CV search) — deliberately NOT stable-ordered by source position
+        # like skills/responsibilities are, since their whole point is a flat,
+        # de-duplicated tag list, not a document-order narrative.
+        keywords = self._normalize_fixed_list(keywords_src, 20)
 
         # deterministic ordering by appearance in source
         skills = self._stable_order(skills, source_text)
         resps  = self._stable_order(resps, source_text)
+
+        raw_gender = data.get("gender")
+        gender = None
+        if isinstance(raw_gender, str):
+            g = raw_gender.strip().lower()
+            if g in {"male", "m", "man", "masculine"}:
+                gender = "Male"
+            elif g in {"female", "f", "woman", "feminine"}:
+                gender = "Female"
+
+        raw_langs = data.get("languages") or []
+        languages: list[str] = []
+        if isinstance(raw_langs, str):
+            raw_langs = [p.strip() for p in re.split(r"[,;/|]+", raw_langs) if p.strip()]
+        if isinstance(raw_langs, list):
+            seen = set()
+            for lang in raw_langs:
+                if not isinstance(lang, str):
+                    continue
+                cleaned = self._canonicalize(lang)
+                if not cleaned:
+                    continue
+                key = cleaned.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                languages.append(cleaned)
+                if len(languages) >= 20:
+                    break
 
         out = {
             "doc_type": "resume",
@@ -549,8 +609,11 @@ class LLMService:
             "job_title": data.get("job_title"),
             "years_of_experience": data.get("years_of_experience"),
             "category": data.get("category"),
+            "gender": gender,
+            "languages": languages,
             "skills_sentences": skills,
             "responsibility_sentences": resps,
+            "keywords": keywords,
             "contact_info": {"name": data.get("name")},
         }
         return out

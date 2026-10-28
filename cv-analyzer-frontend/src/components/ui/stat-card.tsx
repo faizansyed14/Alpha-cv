@@ -23,21 +23,21 @@ export function StatCard({ label, value, icon: Icon, trend, hint, className, ...
   return (
     <div
       className={cn(
-        "rounded-lg border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]",
+        "rounded-lg border border-surface-border bg-paper p-4 shadow-[var(--shadow-sm)]",
         className
       )}
       {...props}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
             {label}
           </div>
-          <div className="mt-1.5 text-xl font-semibold leading-7 text-gray-900">{value}</div>
+          <div className="mt-1.5 text-xl font-semibold leading-7 text-navy-500 tabular-nums">{value}</div>
         </div>
         {Icon ? (
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand-50">
-            <Icon className="h-4 w-4 text-brand-600" />
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-navy-50">
+            <Icon className="h-4 w-4 text-navy-500" />
           </div>
         ) : null}
       </div>
@@ -58,7 +58,7 @@ export function StatCard({ label, value, icon: Icon, trend, hint, className, ...
               {trend.value}
             </span>
           ) : null}
-          {hint ? <span className="text-gray-500">{hint}</span> : null}
+          {hint ? <span className="text-ink-muted">{hint}</span> : null}
         </div>
       )}
     </div>

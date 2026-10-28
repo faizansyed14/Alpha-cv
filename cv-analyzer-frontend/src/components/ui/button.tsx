@@ -4,24 +4,26 @@ import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500/40 focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        /** Brand primary action */
-        primary: "bg-brand-600 text-white shadow-sm hover:bg-brand-700 active:bg-brand-800",
-        /** Legacy alias — kept so existing variant=\"default\" usages stay primary-styled */
-        default: "bg-brand-600 text-white shadow-sm hover:bg-brand-700 active:bg-brand-800",
-        /** White + border */
+        /** Light navy CTA */
+        primary: "bg-navy-500 text-paper shadow-sm hover:bg-navy-400 active:bg-navy-600",
+        /** Legacy alias — same light navy CTA */
+        default: "bg-navy-500 text-paper shadow-sm hover:bg-navy-400 active:bg-navy-600",
+        /** Navy solid (dark surfaces / secondary primary) */
+        navy: "bg-navy-800 text-paper shadow-sm hover:bg-navy-700 active:bg-navy-900",
+        /** White + warm border */
         secondary:
-          "border border-gray-200 bg-white text-gray-700 shadow-sm hover:bg-gray-50 hover:text-gray-900",
+          "border border-surface-border bg-paper text-ink shadow-sm hover:bg-offwhite hover:text-navy-800",
         outline:
-          "border border-gray-200 bg-white text-gray-700 shadow-sm hover:bg-gray-50 hover:text-gray-900",
-        ghost: "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+          "border border-surface-border bg-paper text-ink shadow-sm hover:bg-offwhite hover:text-navy-800",
+        ghost: "text-ink-muted hover:bg-navy-50 hover:text-navy-800",
         danger: "bg-red-600 text-white shadow-sm hover:bg-red-700",
         /** Legacy alias for danger */
         destructive: "bg-red-600 text-white shadow-sm hover:bg-red-700",
-        link: "text-brand-600 underline-offset-4 hover:underline",
+        link: "text-navy-500 underline-offset-4 hover:underline",
       },
       size: {
         sm: "h-8 rounded-md px-3 text-xs",

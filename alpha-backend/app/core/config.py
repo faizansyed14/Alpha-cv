@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "cv_user"
     POSTGRES_PASSWORD: str = ""
     POSTGRES_DB: str = "cv_database"
+    # "prefer" matches the local docker Postgres (which has no TLS cert configured);
+    # set to "require" in production against RDS. AUTH_DB_URL/TRACKER_DB_URL are full
+    # URLs so they take sslmode as a query param instead (?sslmode=require).
+    POSTGRES_SSLMODE: str = "prefer"
     AUTH_DB_URL: str = "sqlite:///./auth.db"
     ENABLE_CANDIDATE_TRACKER: bool = False
     TRACKER_DB_URL: str = ""

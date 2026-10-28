@@ -20,10 +20,40 @@ import docx  # python-docx for DOCX
 import pytesseract  # OCR for images
 from PIL import Image
 from io import BytesIO
+import phonenumbers  # Google's libphonenumber port — see remove_pii_data() for why
 
 
 
 logger = logging.getLogger(__name__)
+
+# Countries most likely to appear in this platform's candidate pool (GCC +
+# South Asia + a few global anchors). Used as region *hints* only: a hint
+# tells libphonenumber how to interpret a number that has no explicit
+# country code / '+' prefix (e.g. a bare local mobile number). Numbers that
+# already carry a country code (with '+' or a '00' access code) are matched
+# correctly regardless of which hint found them, since phonenumbers parses
+# the actual digits, not just the hint's own country. We only need the union
+# of matched character spans across every hint below, so overlap between
+# hints is harmless — see remove_pii_data().
+_PHONE_REGION_HINTS = [
+    "AE", "SA", "QA", "KW", "BH", "OM", "JO", "LB", "EG",  # GCC / Levant / Egypt
+    "IN", "PK", "BD", "PH", "NP", "LK",                     # South / SE Asia
+    "GB", "US",                                             # global anchors
+]
+
+# Safety-net pattern for anything the above still misses: any run of 9+
+# digits (optionally grouped with spaces/dashes/dots/parens) is far more
+# likely to be a phone number than legitimate free-text content in a CV —
+# genuine 9+ digit sequences (IDs, reference numbers) are rare, and erring
+# toward redacting too much is the correct tradeoff for PII sent to an LLM.
+# Deliberately >= 9 (not >= 7) so date ranges like "2015 - 2020" and short
+# reference codes never get caught.
+_PHONE_FALLBACK_PATTERN = re.compile(r'(?:\+?\d[\d\-.\s()]{7,}\d)')
+
+
+def _looks_like_enough_digits(candidate: str, minimum: int = 9) -> bool:
+    return sum(c.isdigit() for c in candidate) >= minimum
+
 
 class ParsingService:
     """
@@ -125,28 +155,47 @@ class ParsingService:
             for page_num in range(len(doc)):
                 page = doc.load_page(page_num)
                 page_text = page.get_text()
-                
+
                 if page_text.strip():  # Only add pages with content
                     text_parts.append(page_text)
-                    
-                # Also extract text from images in PDF if needed
+
+                if len(page_text.strip()) >= 100:
+                    continue  # plenty of real text already — this page needs no OCR
+
+                # Sparse/empty text layer: this page is almost certainly a scan.
+                ocr_used = True
+                self.logger.info(f"🔍 OCR needed for page {page_num + 1} (sparse text: {len(page_text.strip())} chars)")
+                ocr_text = ""
                 try:
-                    image_list = page.get_images()
-                    for img_index, img in enumerate(image_list):
-                        # Extract image and perform OCR if text is sparse
-                        if len(page_text.strip()) < 100:  # Fallback to OCR for image-heavy pages
-                            ocr_used = True
-                            self.logger.info(f"🔍 OCR needed for page {page_num + 1} (sparse text: {len(page_text.strip())} chars)")
-                            xref = img[0]
-                            pix = fitz.Pixmap(doc, xref)
-                            if pix.n - pix.alpha < 4:  # GRAY or RGB
-                                img_data = pix.tobytes("png")
-                                ocr_text = self._perform_ocr_on_bytes(img_data)
-                                if ocr_text.strip():
-                                    text_parts.append(f"\n[OCR from page {page_num + 1}]: {ocr_text}")
-                            pix = None
+                    # Prefer OCR-ing the embedded raster image(s) directly —
+                    # usually sharper than re-rasterizing the whole page.
+                    # CMYK images (pix.n - pix.alpha >= 4) are converted to RGB
+                    # instead of being silently skipped, as they used to be.
+                    for img in page.get_images():
+                        xref = img[0]
+                        pix = fitz.Pixmap(doc, xref)
+                        if pix.n - pix.alpha >= 4:
+                            pix = fitz.Pixmap(fitz.csRGB, pix)
+                        ocr_text += self._perform_ocr_on_bytes(pix.tobytes("png")) + "\n"
+                        pix = None
                 except Exception as ocr_error:
-                    self.logger.warning(f"OCR fallback failed for page {page_num + 1}: {str(ocr_error)}")
+                    self.logger.warning(f"Embedded-image OCR failed for page {page_num + 1}: {str(ocr_error)}")
+
+                if len(ocr_text.strip()) < 20:
+                    # No embedded images were found (or they yielded nothing
+                    # usable) — fall back to rasterizing the page exactly as it
+                    # would be displayed, so OCR always gets a real attempt at
+                    # any scan regardless of how the PDF encodes it internally
+                    # (this is what actually made the difference for PDFs whose
+                    # scan isn't a plain get_images()-visible XObject).
+                    try:
+                        page_pixmap = page.get_pixmap(dpi=200)
+                        ocr_text = self._perform_ocr_on_bytes(page_pixmap.tobytes("png"))
+                    except Exception as page_ocr_error:
+                        self.logger.warning(f"Full-page OCR fallback failed for page {page_num + 1}: {str(page_ocr_error)}")
+
+                if ocr_text.strip():
+                    text_parts.append(f"\n[OCR from page {page_num + 1}]: {ocr_text}")
             
             doc.close()
             
@@ -338,59 +387,84 @@ class ParsingService:
         """
         Remove PII from text and return cleaned text plus extracted PII.
         Returns tuple: (clean_text, extracted_pii)
+
+        Phone detection uses Google's libphonenumber (the `phonenumbers`
+        package) instead of hand-rolled regexes. A prior regex-only version
+        of this method reliably caught US-style (123) 456-7890 / 10-digit /
+        '+'-prefixed numbers but silently missed a lot of real-world CV
+        formats: numbers written with a '00' international access code
+        instead of '+' (e.g. "0044 7911 123456"), bare local numbers with a
+        country code but no '+' (e.g. "919876543210"), and local formats
+        whose digit grouping didn't match any of the fixed patterns (e.g.
+        Singapore's "6512 3456"). Those would have gone into the LLM prompt
+        completely unredacted. See _PHONE_REGION_HINTS above for why this
+        runs libphonenumber's matcher once per region hint and unions the
+        results instead of relying on one guessed region.
         """
         extracted_pii = {"email": [], "phone": []}
-        
-        # Extract emails
+
+        # ---- Email --------------------------------------------------------
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        emails = re.findall(email_pattern, text)
-        if emails:
-            extracted_pii["email"] = list(set(emails))
-        
-        # Extract phone numbers - improved patterns to avoid false positives
-        phone_patterns = [
-            # US format with area code: (123) 456-7890, 123-456-7890, 123.456.7890
-            r'\(\d{3}\)\s*\d{3}[-.\s]?\d{4}',
-            r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b',
-            # International format: +1 123 456 7890, +44 1234 567890
-            r'\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}',
-            # 10-digit with country code: +11234567890
-            r'\+\d{11,15}',
-            # 11-digit phone numbers (like 09652267482)
-            r'\b\d{11}\b',
-            # 7-digit phone: 123-4567
-            r'\b\d{3}[-.\s]?\d{4}\b'
-        ]
-        
-        phones = []
-        for pattern in phone_patterns:
-            matches = re.findall(pattern, text)
-            for match in matches:
-                # Filter out obvious non-phone numbers
-                if len(match) >= 7 and not re.match(r'^\d{4}$', match):  # Exclude 4-digit years
-                    phones.append(match)
-        
-        # Remove duplicates and validate
-        valid_phones = []
-        for phone in phones:
-            # Clean up the phone number
-            cleaned = re.sub(r'[^\d+]', '', phone)
-            # Check if it has at least 7 digits and starts with + or has 10 digits
-            if (cleaned.startswith('+') and len(cleaned) >= 7) or (not cleaned.startswith('+') and len(cleaned) >= 7):
-                valid_phones.append(phone)
-        
-        if valid_phones:
-            extracted_pii["phone"] = list(set(valid_phones))
-        
-        # Remove PII from text
-        clean_text = text
-        clean_text = re.sub(email_pattern, '[EMAIL]', clean_text)
-        for pattern in phone_patterns:
-            clean_text = re.sub(pattern, '[PHONE]', clean_text)
-        
+        email_spans = [m.span() for m in re.finditer(email_pattern, text)]
+        if email_spans:
+            extracted_pii["email"] = list(dict.fromkeys(text[s:e] for s, e in email_spans))
+
+        # ---- Phone: libphonenumber across every region hint + no-region ---
+        # (region=None only matches numbers that already carry an explicit
+        # country code; the hints below additionally catch bare local numbers.)
+        phone_spans: list[tuple[int, int]] = []
+        raw_phones: list[str] = []
+        for region in [None] + _PHONE_REGION_HINTS:
+            try:
+                for match in phonenumbers.PhoneNumberMatcher(text, region):
+                    if not phonenumbers.is_valid_number(match.number):
+                        continue
+                    phone_spans.append((match.start, match.end))
+                    raw_phones.append(match.raw_string)
+            except Exception as e:  # noqa: BLE001 - matcher must never break parsing
+                self.logger.debug(f"phonenumbers matcher failed for region={region}: {e}")
+
+        # ---- Phone fallback: catch anything libphonenumber still missed ---
+        # (e.g. a typo'd number, or a format no real country uses but still
+        # reads as a phone number). Only applied outside spans already found
+        # above, and only kept if it has enough digits to plausibly be one.
+        for m in _PHONE_FALLBACK_PATTERN.finditer(text):
+            if _looks_like_enough_digits(m.group()):
+                if not any(m.start() < e and s < m.end() for s, e in phone_spans):
+                    phone_spans.append((m.start(), m.end()))
+                    raw_phones.append(m.group())
+
+        if raw_phones:
+            extracted_pii["phone"] = list(dict.fromkeys(raw_phones))
+
+        # ---- Build clean_text by merging all spans (email + phone) and ----
+        # ---- replacing each with a single placeholder, left to right. ----
+        all_spans = sorted(email_spans + phone_spans)
+        merged: list[list[int]] = []
+        for start, end in all_spans:
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+
+        pieces = []
+        cursor = 0
+        email_span_set = set(email_spans)
+        for start, end in merged:
+            pieces.append(text[cursor:start])
+            # A merged span that grew from overlapping email+phone matches is
+            # still just one PII item — tag it using whichever type it started as.
+            placeholder = '[EMAIL]' if (start, end) in email_span_set or any(
+                s == start for s, _ in email_spans
+            ) else '[PHONE]'
+            pieces.append(placeholder)
+            cursor = end
+        pieces.append(text[cursor:])
+        clean_text = ''.join(pieces)
+
         # Clean up multiple whitespaces
         clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-        
+
         return clean_text, extracted_pii
 
 # Global instance

@@ -78,7 +78,7 @@ export function Toast({ id, type, title, message, duration = 4000, onClose }: To
           ? 'translate-x-0 opacity-100 scale-100'
           : 'translate-x-full opacity-0 scale-95'
         }
-        bg-white border border-gray-200 rounded-lg shadow-lg shadow-gray-900/5 overflow-hidden
+        bg-white border border-slate-200 rounded-lg shadow-lg shadow-gray-900/5 overflow-hidden
       `}
     >
       <div className="p-3.5">
@@ -90,11 +90,11 @@ export function Toast({ id, type, title, message, duration = 4000, onClose }: To
           </div>
 
           <div className="flex-1 min-w-0">
-            <h4 className="text-[13px] font-semibold text-gray-900">
+            <h4 className="text-[13px] font-semibold text-slate-900">
               {title}
             </h4>
             {message && (
-              <p className="text-[13px] mt-0.5 text-gray-500">
+              <p className="text-[13px] mt-0.5 text-slate-500">
                 {message}
               </p>
             )}
@@ -102,7 +102,7 @@ export function Toast({ id, type, title, message, duration = 4000, onClose }: To
 
           <button
             onClick={handleClose}
-            className="flex-shrink-0 ml-2 p-1 rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+            className="flex-shrink-0 ml-2 p-1 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -110,7 +110,7 @@ export function Toast({ id, type, title, message, duration = 4000, onClose }: To
       </div>
 
       {/* Progress bar */}
-      <div className="h-0.5 bg-gray-100 overflow-hidden">
+      <div className="h-0.5 bg-slate-100 overflow-hidden">
         <div
           className={`h-full transition-all ease-linear ${accent.bar}`}
           style={{

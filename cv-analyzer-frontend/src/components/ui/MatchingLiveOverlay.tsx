@@ -112,7 +112,7 @@ export default function MatchingLiveOverlay({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.96 }}
             transition={{ type: 'spring', stiffness: 300, damping: 26 }}
-            className="fixed bottom-4 right-4 z-[110] w-[calc(100vw-2rem)] max-w-sm overflow-hidden rounded-2xl border border-gray-200 bg-white/95 shadow-[0_16px_48px_rgba(16,24,40,0.20)] backdrop-blur-sm"
+            className="fixed bottom-4 right-4 z-[110] w-[calc(100vw-2rem)] max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white/95 shadow-[0_16px_48px_rgba(16,24,40,0.20)] backdrop-blur-sm"
           >
             <div className="p-4">
               <div className="flex items-center gap-3">
@@ -143,7 +143,7 @@ export default function MatchingLiveOverlay({
                       {phase === 'finalizing' ? (
                         <CheckCircle2 className="h-5 w-5 text-emerald-600" />
                       ) : (
-                        <span className="text-[13px] font-bold tabular-nums text-gray-900">{displayPct}%</span>
+                        <span className="text-[13px] font-bold tabular-nums text-slate-900">{displayPct}%</span>
                       )}
                     </motion.span>
                   </AnimatePresence>
@@ -159,7 +159,7 @@ export default function MatchingLiveOverlay({
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: 6 }}
                         transition={{ duration: 0.2 }}
-                        className="truncate text-[13px] font-semibold text-gray-900"
+                        className="truncate text-[13px] font-semibold text-slate-900"
                       >
                         {STAGES[activeIndex]?.label ?? 'Matching'}
                       </motion.span>
@@ -169,12 +169,12 @@ export default function MatchingLiveOverlay({
                       <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-600" />
                     </span>
                   </div>
-                  <p className="mt-0.5 truncate text-[12px] text-gray-500">
-                    <span className="font-medium tabular-nums text-gray-900">{processedCVs}</span>
+                  <p className="mt-0.5 truncate text-[12px] text-slate-500">
+                    <span className="font-medium tabular-nums text-slate-900">{processedCVs}</span>
                     <span className="tabular-nums"> / {totalCVs}</span> candidates
-                    {batchLabel && <span className="text-gray-400"> · {batchLabel}</span>}
+                    {batchLabel && <span className="text-slate-400"> · {batchLabel}</span>}
                     {typeof estimatedTimeRemaining === 'number' && estimatedTimeRemaining > 0 && (
-                      <span className="text-gray-400"> · ~{Math.ceil(estimatedTimeRemaining / 60)} min left</span>
+                      <span className="text-slate-400"> · ~{Math.ceil(estimatedTimeRemaining / 60)} min left</span>
                     )}
                   </p>
                 </div>
@@ -185,7 +185,7 @@ export default function MatchingLiveOverlay({
                 {STAGES.map((s, i) => (
                   <motion.div
                     key={s.key}
-                    className="h-1.5 flex-1 rounded-full bg-gray-100"
+                    className="h-1.5 flex-1 rounded-full bg-slate-100"
                     initial={false}
                   >
                     <motion.div
@@ -200,7 +200,7 @@ export default function MatchingLiveOverlay({
 
               {/* Live scoring feed */}
               {phase === 'batches' && (currentCandidate || recentCandidates.length > 0) && (
-                <div className="mt-3 rounded-lg bg-gray-50 p-2.5">
+                <div className="mt-3 rounded-lg bg-slate-50 p-2.5">
                   <AnimatePresence mode="wait">
                     {currentCandidate && (
                       <motion.div
@@ -209,7 +209,7 @@ export default function MatchingLiveOverlay({
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -14 }}
                         transition={{ duration: 0.25, ease: 'easeOut' }}
-                        className="flex items-center gap-2 text-[12.5px] font-medium text-gray-900"
+                        className="flex items-center gap-2 text-[12.5px] font-medium text-slate-900"
                       >
                         <Zap className="h-3.5 w-3.5 shrink-0 text-brand-600" />
                         <span className="truncate">Scoring {currentCandidate}</span>
@@ -227,7 +227,7 @@ export default function MatchingLiveOverlay({
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.8 }}
                             transition={{ duration: 0.2 }}
-                            className="rounded-full bg-white px-2 py-0.5 text-[10.5px] text-gray-500 shadow-sm ring-1 ring-gray-200"
+                            className="rounded-full bg-white px-2 py-0.5 text-[10.5px] text-slate-500 shadow-sm ring-1 ring-gray-200"
                           >
                             {c.cv_name}
                           </motion.span>

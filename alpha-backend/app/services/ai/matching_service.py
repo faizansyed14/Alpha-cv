@@ -979,14 +979,6 @@ class MatchingService:
             logger.error(f"❌ Bulk matching failed: {e}")
             raise
 
-    def find_top_candidates(self, jd_id: str, limit: int = 10, category_filter: str = None) -> List[MatchResult]:
-        try:
-            cv_ids = self._list_all_cv_ids(category_filter)
-            return self.bulk_match(jd_id, cv_ids, top_k=limit)
-        except Exception as e:
-            logger.error(f"❌ Top candidate search failed: {e}")
-            raise
-
     def find_top_candidates_by_jd_category(self, jd_id: str, limit: int = 10) -> List[MatchResult]:
         """
         Find top candidates by automatically detecting JD category and filtering CVs by same category.

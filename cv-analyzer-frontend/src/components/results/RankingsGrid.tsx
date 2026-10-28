@@ -54,8 +54,8 @@ function MiniBar({ label, score }: { label: string; score: number }) {
   return (
     <div className="min-w-[88px]">
       <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-[11px] text-gray-500">{label}</span>
-        <span className="text-[11px] font-medium text-gray-700">{pct}%</span>
+        <span className="text-[11px] text-slate-500">{label}</span>
+        <span className="text-[11px] font-medium text-slate-700">{pct}%</span>
       </div>
       <Progress value={pct} className="h-1.5" />
     </div>
@@ -188,14 +188,14 @@ export default function RankingsGrid() {
                 key={jd.id}
                 onClick={() => selectJD(jd.id)}
                 className={cn(
-                  'rounded-lg border bg-white p-4 text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-colors',
-                  active ? 'border-brand-400 ring-1 ring-brand-400' : 'border-gray-200 hover:border-brand-300'
+                  'rounded-lg border bg-white p-4 text-left shadow-[var(--shadow-sm)] transition-colors',
+                  active ? 'border-brand-400 ring-1 ring-brand-400' : 'border-slate-200 hover:border-brand-300'
                 )}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <h4 className="truncate text-[13px] font-semibold text-gray-900">{jd.job_title}</h4>
-                    <p className="mt-0.5 text-xs text-gray-500">{jd.years_of_experience} years required</p>
+                    <h4 className="truncate text-[13px] font-semibold text-slate-900">{jd.job_title}</h4>
+                    <p className="mt-0.5 text-xs text-slate-500">{jd.years_of_experience} years required</p>
                   </div>
                   {active && <Badge variant="default">Active</Badge>}
                 </div>
@@ -203,7 +203,7 @@ export default function RankingsGrid() {
                   <Badge variant="secondary">{jd.skills_count} skills</Badge>
                   <Badge variant="secondary">{jd.responsibilities_count} resp.</Badge>
                 </div>
-                <p className="mt-2 truncate text-xs text-gray-400">{jd.filename}</p>
+                <p className="mt-2 truncate text-xs text-slate-400">{jd.filename}</p>
               </button>
             );
           })}
@@ -229,12 +229,12 @@ export default function RankingsGrid() {
           </div>
 
           {/* Controls */}
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-[var(--shadow-sm)]">
             <div className="flex flex-wrap items-center gap-3">
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
-                className="h-9 rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-[13px] text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
               >
                 <option value="overall">Sort by overall</option>
                 <option value="skills">Sort by skills</option>
@@ -243,7 +243,7 @@ export default function RankingsGrid() {
                 <option value="experience">Sort by experience</option>
               </select>
               <div className="flex items-center gap-2">
-                <span className="text-[13px] text-gray-500">Filter ≥</span>
+                <span className="text-[13px] text-slate-500">Filter ≥</span>
                 <input
                   type="range"
                   min="0"
@@ -252,10 +252,10 @@ export default function RankingsGrid() {
                   onChange={(e) => setFilterThreshold(parseInt(e.target.value))}
                   className="w-24 accent-brand-600"
                 />
-                <span className="min-w-[40px] text-[13px] font-medium text-gray-700">{filterThreshold}%</span>
+                <span className="min-w-[40px] text-[13px] font-medium text-slate-700">{filterThreshold}%</span>
               </div>
             </div>
-            <span className="text-[13px] text-gray-500">
+            <span className="text-[13px] text-slate-500">
               {sortedCandidates.length} of {analytics.total} shown
             </span>
           </div>
@@ -286,7 +286,7 @@ export default function RankingsGrid() {
                       onClick={() => setSelectedCandidate(candidate)}
                     >
                       <TD>
-                        <span className="inline-flex items-center gap-1 font-semibold text-gray-900">
+                        <span className="inline-flex items-center gap-1 font-semibold text-slate-900">
                           {index === 0 && <Crown className="h-4 w-4 text-amber-500" />}
                           {index + 1}
                         </span>
@@ -295,14 +295,14 @@ export default function RankingsGrid() {
                       <TD>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="truncate font-medium text-gray-900">
+                            <span className="truncate font-medium text-slate-900">
                               {candidate.cv_name || 'Unknown candidate'}
                             </span>
                             {candidate.has_llm_analysis && (
                               <Badge variant="default"><Sparkles className="h-3 w-3" /> LLM verified</Badge>
                             )}
                           </div>
-                          <p className="truncate text-xs text-gray-500">
+                          <p className="truncate text-xs text-slate-500">
                             {candidate.cv_job_title || 'No title'} &middot; {candidate.cv_years} years
                           </p>
                           {/* Sub-scores on small screens */}

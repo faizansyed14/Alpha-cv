@@ -27,6 +27,7 @@ class EmailDatabaseService:
             'database': settings.POSTGRES_DB,
             'user': settings.POSTGRES_USER,
             'password': settings.POSTGRES_PASSWORD,
+            'sslmode': settings.POSTGRES_SSLMODE,
             'connect_timeout': 10,
         }
         self.connection = None

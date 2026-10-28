@@ -7,21 +7,21 @@ import {
   Award,
   Briefcase,
   Target,
-  ArrowRight,
   CheckCircle2,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { PageHeader } from '@/components/ui/page';
 import { StatCard } from '@/components/ui/stat-card';
+import { useWorkspaceNav } from '@/hooks/useWorkspaceNav';
 
 export default function DashboardPage() {
+  const { go } = useWorkspaceNav();
   const {
     cvs,
     jds,
     totalCVs,
     totalJDs,
     matchResult,
-    setCurrentTab,
     setDatabaseActiveTab,
     loadCVs,
     loadJDs,
@@ -37,15 +37,6 @@ export default function DashboardPage() {
     loadJDs();
   }, [loadCVs, loadJDs]);
 
-  const nextStep =
-    cvCount === 0 && jdCount === 0
-      ? 'Upload CVs and a job description to start matching.'
-      : cvCount === 0
-        ? 'Upload candidate CVs to build your database.'
-        : jdCount === 0
-          ? 'Upload a job description so we can rank candidates.'
-          : 'You’re ready — open the Database and run a match.';
-
   const quickActions: {
     icon: typeof Upload;
     title: string;
@@ -57,31 +48,31 @@ export default function DashboardPage() {
       icon: Upload,
       title: 'Upload documents',
       description: 'Add candidate CVs and job descriptions',
-      onClick: () => setCurrentTab('upload'),
+      onClick: () => go('upload'),
     },
     {
       icon: Database,
       title: 'Review database',
       description: 'Browse and manage uploaded documents',
-      onClick: () => { setDatabaseActiveTab('cvs'); setCurrentTab('database'); },
+      onClick: () => { setDatabaseActiveTab('cvs'); go('candidates'); },
       disabled: cvCount === 0 && jdCount === 0,
     },
     {
       icon: Target,
       title: 'Run matching',
       description: 'Rank candidates against a job description',
-      onClick: () => setCurrentTab('match'),
+      onClick: () => go('match'),
     },
     {
       icon: Briefcase,
       title: 'Manage jobs',
       description: 'Post openings and review applicants',
-      onClick: () => setCurrentTab('careers'),
+      onClick: () => go('careers'),
     },
   ];
 
   return (
-    <div>
+    <div className="space-y-1">
       <PageHeader
         title="Dashboard"
         description="Overview of your recruitment workspace"
@@ -94,38 +85,22 @@ export default function DashboardPage() {
           value={loadingStates.cvs.isLoading ? '—' : cvCount}
           icon={Users}
           hint="Ready for matching"
+          className="transition-shadow duration-[var(--duration-fast)] hover:shadow-[var(--shadow-md)]"
         />
         <StatCard
           label="Job positions"
           value={loadingStates.jds.isLoading ? '—' : jdCount}
           icon={Briefcase}
           hint="Available for matching"
+          className="transition-shadow duration-[var(--duration-fast)] hover:shadow-[var(--shadow-md)]"
         />
         <StatCard
           label="AI matches"
           value={loadingStates.cvs.isLoading || loadingStates.jds.isLoading ? '—' : totalMatches}
           icon={Award}
           hint="In the latest run"
+          className="transition-shadow duration-[var(--duration-fast)] hover:shadow-[var(--shadow-md)]"
         />
-      </div>
-
-      {/* Next step banner */}
-      <div className="mt-4 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <p className="section-label">Next step</p>
-          <p className="mt-1 text-[13px] text-gray-700">{nextStep}</p>
-        </div>
-        <button
-          onClick={() =>
-            cvCount === 0 || jdCount === 0
-              ? setCurrentTab('upload')
-              : (setDatabaseActiveTab('cvs'), setCurrentTab('database'))
-          }
-          className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-md bg-brand-600 px-3.5 text-[13px] font-medium text-white transition-colors hover:bg-brand-700"
-        >
-          {cvCount === 0 || jdCount === 0 ? 'Upload documents' : 'Go to database'}
-          <ArrowRight className="h-4 w-4" />
-        </button>
       </div>
 
       {/* Quick actions */}
@@ -138,14 +113,14 @@ export default function DashboardPage() {
               key={a.title}
               onClick={a.onClick}
               disabled={a.disabled}
-              className="group flex flex-col items-start gap-3 rounded-lg border border-gray-200 bg-white p-4 text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-colors hover:border-brand-300 hover:bg-brand-50/30 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gray-200 disabled:hover:bg-white"
+              className="group flex flex-col items-start gap-3 rounded-lg border border-surface-border bg-paper p-4 text-left shadow-[var(--shadow-sm)] transition-colors hover:border-navy-400 hover:bg-navy-50/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-surface-border disabled:hover:bg-paper"
             >
-              <span className="flex h-9 w-9 items-center justify-center rounded-md bg-brand-50 text-brand-600">
+              <span className="flex h-9 w-9 items-center justify-center rounded-md bg-navy-50 text-navy-500">
                 <Icon className="h-[18px] w-[18px]" />
               </span>
               <span className="min-w-0">
-                <span className="block text-[13px] font-semibold text-gray-900">{a.title}</span>
-                <span className="mt-0.5 block text-xs text-gray-500">{a.description}</span>
+                <span className="block text-[13px] font-semibold text-navy-800">{a.title}</span>
+                <span className="mt-0.5 block text-xs text-ink-muted">{a.description}</span>
               </span>
             </button>
           );
@@ -153,14 +128,14 @@ export default function DashboardPage() {
       </div>
 
       {/* System status */}
-      <div className="mt-4 flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      <div className="mt-4 flex items-center justify-between rounded-lg border border-surface-border bg-paper p-4 shadow-[var(--shadow-sm)]">
         <div className="flex items-center gap-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-md bg-success-50 text-success-600">
             <CheckCircle2 className="h-[18px] w-[18px]" />
           </span>
           <div>
-            <p className="text-[13px] font-semibold text-gray-900">System operational</p>
-            <p className="text-xs text-gray-500">AI matching ready &middot; Database connected</p>
+            <p className="text-[13px] font-semibold text-slate-900">System operational</p>
+            <p className="text-xs text-slate-500">AI matching ready &middot; Database connected</p>
           </div>
         </div>
         <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-success-600">

@@ -14,7 +14,7 @@ export default function LoginForm() {
 
   const continueAfterAuth = () => {
     const from = safeRedirectPath(searchParams.get('from'));
-    router.push(from ?? '/');
+    router.push(from ?? '/dashboard');
   };
 
   const [step, setStep] = useState<'password' | 'otp' | 'captcha'>('password');
@@ -161,21 +161,21 @@ export default function LoginForm() {
   const displayError = formError || error;
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-[#F7F8FA] px-4 py-12">
-      <div className="w-full max-w-sm">
+    <div className="min-h-screen w-full flex items-center justify-center bg-[var(--app-bg)] px-4 py-12">
+      <div className="w-full max-w-sm animate-page-enter">
         {/* Brand */}
         <div className="mb-8 flex flex-col items-center text-center">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-gray-200 bg-white p-2 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-slate-200 bg-white p-2 shadow-[var(--shadow-md)]">
             <img src="/alphadatalogo.svg" alt="Alpha Data" className="h-full w-full object-contain" />
           </div>
-          <h1 className="text-lg font-semibold text-gray-900">Sign in to Alpha CV</h1>
-          <p className="mt-1 text-[13px] text-gray-500">
-            AI-powered recruitment platform
+          <h1 className="text-xl font-semibold tracking-tight text-navy-800">Alpha <span className="text-navy-500">CV</span></h1>
+          <p className="mt-1 text-[13px] text-ink-muted">
+            Sign in to your AI recruitment workspace
           </p>
         </div>
 
         {/* Card */}
-        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="rounded-lg border border-surface-border bg-paper p-6 shadow-[var(--shadow-md)]">
           {displayError && (
             <div className="mb-4 flex items-start justify-between gap-2 rounded-md border border-danger-200 bg-danger-50 px-3 py-2.5">
               <div className="flex items-start gap-2">
@@ -211,7 +211,7 @@ export default function LoginForm() {
                     disabled={loading}
                     required
                     autoComplete="username"
-                    className="h-9 w-full rounded-md border border-gray-200 bg-white pl-9 pr-3 text-[13px] text-gray-900 placeholder-gray-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 disabled:opacity-50"
+                    className="h-9 w-full rounded-md border border-surface-border bg-paper pl-9 pr-3 text-[13px] text-ink placeholder-ink-muted/70 transition-colors focus:border-navy-500 focus:outline-none focus:ring-2 focus:ring-navy-500/30 disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -232,7 +232,7 @@ export default function LoginForm() {
                     disabled={loading}
                     required
                     autoComplete="current-password"
-                    className="h-9 w-full rounded-md border border-gray-200 bg-white pl-9 pr-9 text-[13px] text-gray-900 placeholder-gray-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 disabled:opacity-50"
+                    className="h-9 w-full rounded-md border border-surface-border bg-paper pl-9 pr-9 text-[13px] text-ink placeholder-ink-muted/70 transition-colors focus:border-navy-500 focus:outline-none focus:ring-2 focus:ring-navy-500/30 disabled:opacity-50"
                   />
                   <button
                     type="button"
@@ -397,7 +397,7 @@ export default function LoginForm() {
           )}
         </div>
 
-        <p className="mt-6 text-center text-[13px] text-gray-400">
+        <p className="mt-6 text-center text-[13px] text-ink-muted">
           Need an account? Contact your administrator.
         </p>
       </div>

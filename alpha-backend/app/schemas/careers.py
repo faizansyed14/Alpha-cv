@@ -50,6 +50,12 @@ class PublicJobView(BaseModel):
     posted_by_role: Optional[str] = Field(None, description="Role of the user who posted this job (admin/user)")
 
 
+# Fixed notice-period buckets offered on the public apply form (kept as plain
+# strings, not an enum, so HR-entered/legacy applications with a free-text
+# value still display fine instead of failing validation).
+NOTICE_PERIOD_OPTIONS = ["Immediately", "15 days", "30 days", "60 days", "More than 60 days"]
+
+
 class JobApplicationRequest(BaseModel):
     """Request model for job applications"""
     job_id: str = Field(..., description="ID of the job being applied to")
@@ -57,6 +63,9 @@ class JobApplicationRequest(BaseModel):
     applicant_email: EmailStr = Field(..., description="Valid email address for contact")
     applicant_phone: Optional[str] = Field(None, max_length=20, description="Phone number (optional)")
     cover_letter: Optional[str] = Field(None, max_length=2000, description="Optional cover letter or message")
+    location: Optional[str] = Field(None, max_length=200, description="Candidate's current location (city/country)")
+    notice_period: Optional[str] = Field(None, max_length=50, description="Candidate's notice period, e.g. one of NOTICE_PERIOD_OPTIONS")
+    nationality: Optional[str] = Field(None, max_length=100, description="Candidate's nationality (country name)")
 
 
 class JobApplicationResponse(BaseModel):
@@ -78,6 +87,9 @@ class JobApplicationSummary(BaseModel):
     cv_filename: str = Field(..., description="Original filename of submitted CV")
     expected_salary: Optional[float] = Field(None, description="Expected salary in AED")
     years_of_experience: Optional[float] = Field(None, description="Years of experience")
+    location: Optional[str] = Field(None, description="Candidate's current location")
+    notice_period: Optional[str] = Field(None, description="Candidate's notice period")
+    nationality: Optional[str] = Field(None, description="Candidate's nationality")
     match_score: Optional[float] = Field(None, description="AI-calculated match score if available")
     status: str = Field("pending", description="Application status (pending, reviewed, etc.)")
     source: Optional[str] = Field(None, description="Application source: 'email_application' for Naukri/email, 'website' for direct applications")

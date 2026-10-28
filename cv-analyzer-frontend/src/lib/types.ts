@@ -34,6 +34,19 @@ export interface CVListItem extends BaseDocument {
   /** Convenience: expected salary surfaced for application CVs */
   job_application?: { expected_salary?: string | number | null } | null;
   expected_salary?: string | number | null;
+  /** Candidate's current location, collected on the careers apply form (application CVs only) */
+  location?: string | null;
+  /** Candidate's notice period, collected on the careers apply form (application CVs only) */
+  notice_period?: string | null;
+  /** Candidate's nationality, collected on the careers apply form (application CVs only) */
+  nationality?: string | null;
+  /** Candidate contact (from CV PII / careers apply form) */
+  email?: string | null;
+  phone?: string | null;
+  /** LLM-inferred gender when stated/clear from CV; otherwise null */
+  gender?: string | null;
+  /** Languages explicitly listed on the CV */
+  languages?: string[];
   /** Keyword-search: which of the searched keywords this CV matched */
   matched_keywords?: string[];
   matched_count?: number;
@@ -643,6 +656,9 @@ export interface JobApplicationListItem {
   application_date: string;
   expected_salary?: number;
   years_of_experience?: number;
+  location?: string;
+  notice_period?: string;
+  nationality?: string;
   match_score?: number;
   status?: string;
   source?: string; // 'email_application' for Naukri/email CVs, 'website' for direct applications

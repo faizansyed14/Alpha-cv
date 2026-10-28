@@ -10,6 +10,11 @@ import {
 } from 'lucide-react';
 import { useCareersStore } from '@/stores/careersStore';
 import { Button } from '@/components/ui/button';
+import LocationAutocomplete from '@/components/common/LocationAutocomplete';
+import NationalityAutocomplete from '@/components/common/NationalityAutocomplete';
+
+// Keep in sync with NOTICE_PERIOD_OPTIONS in alpha-backend/app/schemas/careers.py
+export const NOTICE_PERIOD_OPTIONS = ['Immediately', '15 days', '30 days', '60 days', 'More than 60 days'];
 
 interface JobApplicationFormProps {
   jobToken: string;
@@ -34,7 +39,10 @@ export default function JobApplicationForm({
     email: '',
     phone: '',
     expectedSalary: '',
-    yearsOfExperience: ''
+    yearsOfExperience: '',
+    location: '',
+    noticePeriod: '',
+    nationality: ''
   });
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -164,6 +172,21 @@ export default function JobApplicationForm({
       }
     }
 
+    // Location validation
+    if (!formData.location.trim()) {
+      errors.location = 'Location is required';
+    }
+
+    // Notice period validation
+    if (!formData.noticePeriod) {
+      errors.noticePeriod = 'Notice period is required';
+    }
+
+    // Nationality validation
+    if (!formData.nationality.trim()) {
+      errors.nationality = 'Nationality is required';
+    }
+
     if (!selectedFile) {
       errors.file = 'CV file is required';
     }
@@ -172,8 +195,23 @@ export default function JobApplicationForm({
     return Object.keys(errors).length === 0;
   };
 
+  const sanitizeFieldValue = (field: string, value: string): string => {
+    if (field === 'phone') {
+      // Digits + common phone punctuation only (no letters)
+      return value.replace(/[^\d+\s\-()]/g, '');
+    }
+    if (field === 'expectedSalary' || field === 'yearsOfExperience') {
+      // Digits and at most one decimal point
+      const cleaned = value.replace(/[^\d.]/g, '');
+      const [whole, ...rest] = cleaned.split('.');
+      return rest.length > 0 ? `${whole}.${rest.join('').replace(/\./g, '')}` : whole;
+    }
+    return value;
+  };
+
   const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    const next = sanitizeFieldValue(field, value);
+    setFormData(prev => ({ ...prev, [field]: next }));
     if (formErrors[field]) {
       setFormErrors(prev => ({ ...prev, [field]: '' }));
     }
@@ -181,7 +219,7 @@ export default function JobApplicationForm({
 
     // Check experience requirements when years of experience changes
     if (field === 'yearsOfExperience' && jobData?.years_of_experience) {
-      checkExperienceRequirements(value);
+      checkExperienceRequirements(next);
     }
   };
 
@@ -272,7 +310,10 @@ export default function JobApplicationForm({
       formData.phone,
       parseFloat(formData.expectedSalary),
       parseFloat(formData.yearsOfExperience),
-      selectedFile!
+      selectedFile!,
+      formData.location.trim(),
+      formData.noticePeriod,
+      formData.nationality.trim()
     );
 
     if (result) {
@@ -285,20 +326,20 @@ export default function JobApplicationForm({
 
   // Shared field classes
   const inputClass = (hasError?: boolean) =>
-    `h-10 w-full rounded-md border bg-white px-3 text-[14px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 ${
+    `field-input h-10 w-full text-[14px] ${
       hasError
         ? 'border-red-300 focus:border-red-400 focus:ring-red-500/20'
-        : 'border-gray-200 focus:border-brand-500 focus:ring-brand-500/30'
+        : ''
     }`;
 
   if (success) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6 text-center shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      <div className="surface-panel p-6 text-center">
         <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-success-50">
           <CheckCircle2 className="h-5 w-5 text-success-600" />
         </div>
-        <h3 className="text-[15px] font-semibold text-gray-900">Application received</h3>
-        <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-relaxed text-gray-500">
+        <h3 className="text-[15px] font-semibold text-slate-900">Application received</h3>
+        <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-relaxed text-slate-500">
           Thank you for applying. Our recruitment team will review your CV and reach out by email
           if your profile matches the role.
         </p>
@@ -355,9 +396,17 @@ export default function JobApplicationForm({
           <label className="section-label mb-1.5 block">Phone number</label>
           <input
             type="tel"
+            inputMode="tel"
+            autoComplete="tel"
             placeholder="+971 50 123 4567"
             value={formData.phone}
             onChange={(e) => handleInputChange('phone', e.target.value)}
+            onKeyDown={(e) => {
+              if (e.ctrlKey || e.metaKey || e.altKey) return;
+              const allowed = ['Backspace', 'Delete', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'];
+              if (allowed.includes(e.key)) return;
+              if (!/^[0-9+\s\-()]$/.test(e.key)) e.preventDefault();
+            }}
             className={inputClass(!!formErrors.phone)}
           />
           {formErrors.phone && (
@@ -371,9 +420,16 @@ export default function JobApplicationForm({
           <input
             type="text"
             inputMode="decimal"
+            pattern="[0-9]*[.]?[0-9]*"
             placeholder="e.g. 15000"
             value={formData.expectedSalary}
             onChange={(e) => handleInputChange('expectedSalary', e.target.value)}
+            onKeyDown={(e) => {
+              if (e.ctrlKey || e.metaKey || e.altKey) return;
+              const allowed = ['Backspace', 'Delete', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'];
+              if (allowed.includes(e.key)) return;
+              if (!/^[0-9.]$/.test(e.key)) e.preventDefault();
+            }}
             className={inputClass(!!formErrors.expectedSalary)}
           />
           {formErrors.expectedSalary && (
@@ -382,18 +438,73 @@ export default function JobApplicationForm({
         </div>
 
         {/* Years of experience */}
-        <div className="sm:col-span-2">
+        <div>
           <label className="section-label mb-1.5 block">Years of experience</label>
           <input
             type="text"
             inputMode="decimal"
+            pattern="[0-9]*[.]?[0-9]*"
             placeholder="e.g. 5"
             value={formData.yearsOfExperience}
             onChange={(e) => handleInputChange('yearsOfExperience', e.target.value)}
-            className={`sm:max-w-[200px] ${inputClass(!!formErrors.yearsOfExperience)}`}
+            onKeyDown={(e) => {
+              if (e.ctrlKey || e.metaKey || e.altKey) return;
+              const allowed = ['Backspace', 'Delete', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'];
+              if (allowed.includes(e.key)) return;
+              if (!/^[0-9.]$/.test(e.key)) e.preventDefault();
+            }}
+            className={inputClass(!!formErrors.yearsOfExperience)}
           />
           {formErrors.yearsOfExperience && (
             <p className="mt-1 text-xs text-red-600">{formErrors.yearsOfExperience}</p>
+          )}
+        </div>
+
+        {/* Location */}
+        <div>
+          <label className="section-label mb-1.5 block">Current location</label>
+          <LocationAutocomplete
+            value={formData.location}
+            onChange={(value) => handleInputChange('location', value)}
+            placeholder="Start typing a city…"
+            hasError={!!formErrors.location}
+            className={inputClass(!!formErrors.location)}
+          />
+          {formErrors.location && (
+            <p className="mt-1 text-xs text-red-600">{formErrors.location}</p>
+          )}
+        </div>
+
+        {/* Notice period */}
+        <div>
+          <label className="section-label mb-1.5 block">Notice period</label>
+          <select
+            value={formData.noticePeriod}
+            onChange={(e) => handleInputChange('noticePeriod', e.target.value)}
+            className={inputClass(!!formErrors.noticePeriod)}
+          >
+            <option value="" disabled>Select notice period…</option>
+            {NOTICE_PERIOD_OPTIONS.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+          {formErrors.noticePeriod && (
+            <p className="mt-1 text-xs text-red-600">{formErrors.noticePeriod}</p>
+          )}
+        </div>
+
+        {/* Nationality */}
+        <div>
+          <label className="section-label mb-1.5 block">Nationality</label>
+          <NationalityAutocomplete
+            value={formData.nationality}
+            onChange={(value) => handleInputChange('nationality', value)}
+            placeholder="Start typing a country…"
+            hasError={!!formErrors.nationality}
+            className={inputClass(!!formErrors.nationality)}
+          />
+          {formErrors.nationality && (
+            <p className="mt-1 text-xs text-red-600">{formErrors.nationality}</p>
           )}
         </div>
       </div>
@@ -402,14 +513,14 @@ export default function JobApplicationForm({
       <div>
         <label className="section-label mb-1.5 block">CV / Resume</label>
         {selectedFile ? (
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3">
+          <div className="surface-panel flex items-center justify-between gap-3 p-3">
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-brand-50">
                 <FileText className="h-4 w-4 text-brand-600" />
               </div>
               <div className="min-w-0">
-                <p className="truncate text-[13px] font-medium text-gray-900">{selectedFile.name}</p>
-                <p className="text-xs text-gray-500">
+                <p className="truncate text-[13px] font-medium text-slate-900">{selectedFile.name}</p>
+                <p className="text-xs text-slate-500">
                   {(selectedFile.size / 1024 / 1024).toFixed(2)} MB · Ready to upload
                 </p>
               </div>
@@ -417,7 +528,7 @@ export default function JobApplicationForm({
             <button
               type="button"
               onClick={() => setSelectedFile(null)}
-              className="inline-flex items-center gap-1 rounded p-1 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-red-600"
+              className="inline-flex items-center gap-1 rounded p-1 text-xs font-medium text-slate-500 transition-colors duration-200 hover:bg-slate-100 hover:text-red-600"
               aria-label="Remove file"
             >
               <X className="h-4 w-4" />
@@ -430,17 +541,17 @@ export default function JobApplicationForm({
                 ? 'border-brand-400 bg-brand-50/40'
                 : formErrors.file
                 ? 'border-red-300 bg-red-50/40'
-                : 'border-gray-300 hover:border-brand-300 hover:bg-gray-50'
+                : 'border-slate-300 hover:border-brand-300 hover:bg-slate-50'
             }`}
             onDragEnter={(e) => { e.preventDefault(); setDragActive(true); }}
             onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
           >
-            <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-gray-100">
-              <UploadCloud className="h-5 w-5 text-gray-400" />
+            <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100">
+              <UploadCloud className="h-5 w-5 text-slate-400" />
             </div>
-            <p className="text-[13px] font-medium text-gray-900">
+            <p className="text-[13px] font-medium text-slate-900">
               Drop your CV here or{' '}
               <button
                 type="button"
@@ -450,7 +561,7 @@ export default function JobApplicationForm({
                 browse files
               </button>
             </p>
-            <p className="mt-1 text-xs text-gray-500">PDF, DOC, DOCX or TXT · max 10MB</p>
+            <p className="mt-1 text-xs text-slate-500">PDF, DOC, DOCX or TXT · max 10MB</p>
             <input
               type="file"
               accept=".pdf,.doc,.docx,.txt"
@@ -471,17 +582,17 @@ export default function JobApplicationForm({
 
       {/* Experience warning modal */}
       {experienceWarning && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-950/40 p-4">
-          <div className="w-full max-w-md rounded-lg border border-gray-200 bg-white p-6 shadow-xl">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="animate-page-enter w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-[var(--shadow-md)]">
             <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-amber-50">
               <AlertCircle className="h-5 w-5 text-amber-600" />
             </div>
-            <h3 className="text-[15px] font-semibold text-gray-900">Experience check</h3>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-gray-600">
+            <h3 className="text-[15px] font-semibold text-slate-900">Experience check</h3>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-slate-600">
               This role typically requires{' '}
-              <span className="font-medium text-gray-900">{experienceWarning.required} years</span>.
+              <span className="font-medium text-slate-900">{experienceWarning.required} years</span>.
               You listed{' '}
-              <span className="font-medium text-gray-900">{experienceWarning.candidate} years</span>.
+              <span className="font-medium text-slate-900">{experienceWarning.candidate} years</span>.
               You can still proceed or update your experience.
             </p>
             <div className="mt-4 flex gap-2">
@@ -507,7 +618,7 @@ export default function JobApplicationForm({
       )}
 
       {/* Submit buttons */}
-      <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4">
+      <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4">
         <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>

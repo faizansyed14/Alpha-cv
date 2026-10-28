@@ -1,51 +1,68 @@
-# Python caches
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
+# Build-context ignores for the backend image (context = ./alpha-backend).
+#
+# NOTE: unlike .gitignore, Docker patterns are anchored at the context root.
+# `__pycache__` only matches ./__pycache__, NOT ./app/foo/__pycache__ — use a
+# `**/` prefix for anything that can appear at any depth.
 
-# Virtualenvs
-.venv/
-venv/
-ENV/
+# --- Python bytecode & tool caches (any depth) ---------------------------
+# Host-generated .pyc files are the wrong interpreter version for the image
+# and, because every local `python` run rewrites them, they invalidate the
+# `COPY . .` layer — forcing a rebuild of every layer after it — for no reason.
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
 
-# Test / tooling artifacts
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+# --- Test coverage output (pytest.ini runs with --cov) --------------------
+htmlcov
+coverage.xml
 .coverage
-coverage/
+.coverage.*
 
-# Git / IDE
-.git/
+# --- Virtualenvs / packaging ---------------------------------------------
+.venv
+venv
+ENV
+**/*.egg-info
+build
+dist
+
+# --- Secrets & local config: never bake into an image (compose injects env)
+**/.env
+**/.env.*
+
+# --- Local runtime state (created by running the app/tests on the host) ---
+storage
+uploads
+upload
+media
+data
+backups
+tmp
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+**/*.log
+
+# --- VCS / editor / OS ----------------------------------------------------
+.git
 .gitignore
-.vscode/
-.idea/
+.vscode
+.idea
+**/.DS_Store
+**/Thumbs.db
 
-# Logs
-*.log
+# --- Docs (nothing reads these at runtime) -------------------------------
+**/*.md
 
-# Local environment files (do not send to Docker build context)
-.env
-.env.*
+# --- Build files -----------------------------------------------------------
+# Excluded from COPY so that editing the Dockerfile doesn't bust the
+# source-copy layer. Docker still reads both files itself to run the build.
+Dockerfile
+.dockerignore
 
-# Local storage / runtime artifacts (large, not needed for image build)
-storage/
-uploads/
-upload/
-media/
-data/
-backups/
-tmp/
-*.sqlite
-*.db
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# ML Models / Caches
-.cache/
-huggingface/
-.huggingface/
-
+# --- Model caches (the HF model is baked in by the Dockerfile itself) ------
+.cache
+huggingface
+.huggingface

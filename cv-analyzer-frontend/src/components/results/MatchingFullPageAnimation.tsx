@@ -82,12 +82,12 @@ export default function MatchingFullPageAnimation({
   const pureQueueWait = isQueued && processedCVs === 0;
 
   return (
-    <div className="relative flex min-h-[70vh] flex-col items-center justify-center overflow-hidden rounded-2xl border border-gray-100 bg-white px-6 py-16">
+    <div className="relative flex min-h-[70vh] flex-col items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white px-6 py-16 shadow-[var(--shadow-sm)]">
       {/* Ambient animated backdrop */}
       <motion.div
         aria-hidden
-        className="pointer-events-none absolute -top-24 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-brand-100/60 blur-3xl"
-        animate={{ scale: [1, 1.15, 1], opacity: [0.5, 0.8, 0.5] }}
+        className="pointer-events-none absolute -top-24 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-brand-100/50 blur-3xl"
+        animate={{ scale: [1, 1.12, 1], opacity: [0.4, 0.7, 0.4] }}
         transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
       />
 
@@ -103,9 +103,9 @@ export default function MatchingFullPageAnimation({
               />
               <ListOrdered className="relative h-10 w-10 text-brand-600" />
             </div>
-            <h2 className="mt-6 text-xl font-bold text-gray-900">You're in the queue</h2>
+            <h2 className="mt-6 text-xl font-bold tracking-tight text-slate-900">You're in the queue</h2>
             {queuePosition != null && (
-              <p className="mt-1 text-[15px] text-gray-500">
+              <p className="mt-1 text-[15px] text-slate-500">
                 Position{' '}
                 <AnimatePresence mode="wait">
                   <motion.span
@@ -113,7 +113,7 @@ export default function MatchingFullPageAnimation({
                     initial={{ opacity: 0, y: -6 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 6 }}
-                    className="font-bold text-gray-900"
+                    className="font-bold text-slate-900"
                   >
                     #{queuePosition}
                   </motion.span>
@@ -123,14 +123,14 @@ export default function MatchingFullPageAnimation({
                 )}
               </p>
             )}
-            {queueMessage && <p className="mt-3 max-w-sm text-[13px] text-gray-500">{queueMessage}</p>}
+            {queueMessage && <p className="mt-3 max-w-sm text-[13px] text-slate-500">{queueMessage}</p>}
           </>
         ) : (
           <>
             {/* Big progress ring */}
             <div className="relative flex h-36 w-36 items-center justify-center">
               <svg width="144" height="144" viewBox="0 0 128 128" className="-rotate-90">
-                <circle cx="64" cy="64" r={radius} strokeWidth="8" className="fill-none stroke-gray-100" />
+                <circle cx="64" cy="64" r={radius} strokeWidth="8" className="fill-none stroke-slate-100" />
                 <motion.circle
                   cx="64"
                   cy="64"
@@ -154,7 +154,7 @@ export default function MatchingFullPageAnimation({
                   {phase === 'finalizing' ? (
                     <CheckCircle2 className="h-10 w-10 text-emerald-600" />
                   ) : (
-                    <span className="text-3xl font-bold tabular-nums text-gray-900">{displayPct}%</span>
+                    <span className="text-3xl font-bold tabular-nums text-slate-900">{displayPct}%</span>
                   )}
                 </motion.div>
               </AnimatePresence>
@@ -166,13 +166,13 @@ export default function MatchingFullPageAnimation({
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
-                className="mt-5 text-xl font-bold text-gray-900"
+                className="mt-5 text-xl font-bold text-slate-900"
               >
                 {STAGES[activeIndex]?.label ?? 'Matching candidates'}
               </motion.h2>
             </AnimatePresence>
-            <p className="mt-1 text-[14px] text-gray-500">
-              <span className="font-semibold tabular-nums text-gray-900">{processedCVs}</span>
+            <p className="mt-1 text-[14px] text-slate-500">
+              <span className="font-semibold tabular-nums text-slate-900">{processedCVs}</span>
               <span className="tabular-nums"> / {totalCVs}</span> candidates
               {phase === 'batches' && totalBatches > 0 && currentBatch >= 1 && (
                 <> · batch {Math.min(currentBatch, totalBatches)} of {totalBatches}</>
@@ -183,14 +183,31 @@ export default function MatchingFullPageAnimation({
             </p>
 
             {/* Stage stepper */}
-            <div className="mt-6 flex w-full max-w-xs items-center gap-1.5">
+            <div className="ai-stage-rail mt-6 w-full max-w-md justify-center">
+              {STAGES.map((s, i) => {
+                const Icon = s.icon;
+                const cls =
+                  i < activeIndex
+                    ? 'ai-stage-pill ai-stage-pill-done'
+                    : i === activeIndex
+                      ? 'ai-stage-pill ai-stage-pill-active'
+                      : 'ai-stage-pill ai-stage-pill-todo';
+                return (
+                  <span key={s.key} className={cls}>
+                    <Icon className="h-3.5 w-3.5" />
+                    {s.label}
+                  </span>
+                );
+              })}
+            </div>
+            <div className="mt-3 flex w-full max-w-xs items-center gap-1.5">
               {STAGES.map((s, i) => (
-                <div key={s.key} className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100">
+                <div key={s.key} className="h-1 flex-1 overflow-hidden rounded-full bg-slate-100">
                   <motion.div
                     className={`h-full rounded-full ${i < activeIndex ? 'bg-brand-600' : i === activeIndex ? 'bg-brand-400' : 'bg-transparent'}`}
                     initial={{ width: '0%' }}
                     animate={{ width: i <= activeIndex ? '100%' : '0%' }}
-                    transition={{ duration: 0.4, ease: 'easeOut' }}
+                    transition={{ duration: 0.35, ease: 'easeOut' }}
                   />
                 </div>
               ))}
@@ -198,7 +215,7 @@ export default function MatchingFullPageAnimation({
 
             {/* Live scoring feed */}
             {phase === 'batches' && (currentCandidate || recentCandidates.length > 0) && (
-              <div className="mt-6 w-full rounded-xl bg-gray-50 p-4">
+              <div className="mt-6 w-full rounded-xl bg-slate-50 p-4">
                 <AnimatePresence mode="wait">
                   {currentCandidate && (
                     <motion.div
@@ -207,7 +224,7 @@ export default function MatchingFullPageAnimation({
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -16 }}
                       transition={{ duration: 0.25, ease: 'easeOut' }}
-                      className="flex items-center justify-center gap-2 text-[14px] font-semibold text-gray-900"
+                      className="flex items-center justify-center gap-2 text-[14px] font-semibold text-slate-900"
                     >
                       <Zap className="h-4 w-4 shrink-0 text-brand-600" />
                       <span className="truncate">Scoring {currentCandidate}</span>
@@ -225,7 +242,7 @@ export default function MatchingFullPageAnimation({
                           animate={{ opacity: 1, scale: 1 }}
                           exit={{ opacity: 0, scale: 0.8 }}
                           transition={{ duration: 0.2 }}
-                          className="rounded-full bg-white px-2.5 py-1 text-[11.5px] text-gray-500 shadow-sm ring-1 ring-gray-200"
+                          className="rounded-full bg-white px-2.5 py-1 text-[11.5px] text-slate-500 shadow-sm ring-1 ring-gray-200"
                         >
                           {c.cv_name}
                         </motion.span>
@@ -259,9 +276,9 @@ export default function MatchingFullPageAnimation({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3 }}
-          className="mt-10 flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-4 py-2 text-[12.5px] text-gray-500"
+          className="mt-10 flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-[12.5px] text-slate-500"
         >
-          <LayoutGrid className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+          <LayoutGrid className="h-3.5 w-3.5 shrink-0 text-slate-400" />
           Feel free to check other tabs — matching keeps running in the background.
           You can come back to this page anytime to see live progress.
         </motion.div>

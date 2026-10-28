@@ -78,6 +78,15 @@ fi
 
 log "Docker check: OK"
 
+# Load POSTGRES_* (RDS endpoint/creds) from .env for the optional logical
+# dump step below. Safe to skip if .env isn't there; that step just no-ops.
+if [ -f /home/ubuntu/.env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . /home/ubuntu/.env
+    set +a
+fi
+
 # Create backup directory
 mkdir -p "$BACKUP_DIR"
 log "Created backup directory: $BACKUP_DIR"
@@ -118,37 +127,38 @@ docker exec ubuntu_qdrant_1 curl -s 'http://localhost:6333/collections' > "$BACK
 log "✅ Collection stats saved"
 
 ###############################################################################
-# 2. Backup PostgreSQL (Email Processing & Auth Database)
+# 2. PostgreSQL (Email Processing & Auth Database) — now on AWS RDS
 ###############################################################################
 
 log "=========================================="
-log "2. BACKING UP POSTGRESQL DATABASE"
+log "2. POSTGRESQL DATABASE (RDS)"
 log "=========================================="
 
-log "Backing up PostgreSQL volume (uncompressed - exact copy)..."
-log "This contains:"
-log "  - Email processing metadata"
-log "  - Processed email IDs"
-log "  - User authentication data"
+log "Postgres runs on AWS RDS in this environment — there is no local"
+log "'postgres' container or docker volume to copy any more. RDS's own"
+log "automated backups / snapshots are the primary backup for this data."
+log "Enable/verify them in the RDS console (Maintenance & backups tab)."
 
-# Create PostgreSQL backup directory
-POSTGRES_BACKUP_DIR="$BACKUP_DIR/postgres_data"
-mkdir -p "$POSTGRES_BACKUP_DIR"
-
-# Copy PostgreSQL volume (preserve all permissions, timestamps, etc.)
-# SAFE: This is a COPY operation only - does NOT delete original data
-sudo cp -a /var/lib/docker/volumes/ubuntu_postgres_data "$POSTGRES_BACKUP_DIR/"
-
-# Fix ownership
-sudo chown -R ubuntu:ubuntu "$POSTGRES_BACKUP_DIR"
-
-POSTGRES_SIZE=$(du -sh "$POSTGRES_BACKUP_DIR" | awk '{print $1}')
-log "✅ PostgreSQL backup complete: $POSTGRES_SIZE (uncompressed, exact copy)"
-
-# Also create SQL dump as additional backup
-log "Creating PostgreSQL SQL dump (additional backup)..."
-docker exec ubuntu_postgres_1 pg_dump -U cv_user cv_database > "$BACKUP_DIR/postgres_dump.sql" 2>/dev/null || log "SQL dump skipped (container may be busy)"
-log "✅ PostgreSQL SQL dump created"
+# Optional supplementary logical dump, taken directly from RDS over the
+# network. Runs only if POSTGRES_HOST/USER/DB are present in .env (sourced
+# by the caller) and the 'psql' client is installed on this host; skipped
+# (not fatal) otherwise so a backup run never breaks on a missing client.
+POSTGRES_BACKUP_DIR="$BACKUP_DIR/postgres_dump"
+if [ -n "${POSTGRES_HOST:-}" ] && command -v pg_dump > /dev/null 2>&1; then
+    mkdir -p "$POSTGRES_BACKUP_DIR"
+    log "Creating PostgreSQL SQL dump from RDS ($POSTGRES_HOST)..."
+    PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_dump \
+        -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-cv_user}" \
+        "${POSTGRES_DB:-cv_database}" > "$POSTGRES_BACKUP_DIR/cv_database_dump.sql" \
+        2>/dev/null || log "RDS SQL dump skipped (check POSTGRES_* / network access to RDS)"
+    PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_dump \
+        -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-cv_user}" \
+        auth_db > "$POSTGRES_BACKUP_DIR/auth_db_dump.sql" \
+        2>/dev/null || log "RDS auth_db dump skipped (check POSTGRES_* / network access to RDS)"
+    log "✅ RDS logical dump attempt complete (see $POSTGRES_BACKUP_DIR)"
+else
+    log "Skipping RDS logical dump (POSTGRES_HOST not set or pg_dump not installed on this host)"
+fi
 
 ###############################################################################
 # 3. Backup Redis (Cache Data)
@@ -229,11 +239,9 @@ CONTENTS:
    - Format: Exact copy of Docker volume
 
 2. PostgreSQL Database:
-   - Location: $BACKUP_DIR/postgres_data/
-   - Contains: Email processing metadata, user authentication
-   - Size: $POSTGRES_SIZE
-   - Format: Exact copy of Docker volume
-   - Additional: postgres_dump.sql (SQL dump)
+   - Location: AWS RDS (not on this host) — RDS automated backups/snapshots
+     are the primary backup; verify they're enabled in the RDS console.
+   - Optional supplementary dump: $BACKUP_DIR/postgres_dump/ (if pg_dump ran)
 
 3. Redis Cache:
    - Location: $BACKUP_DIR/redis_data/
@@ -275,15 +283,18 @@ To restore from this backup (run these commands manually when needed):
    docker-compose down
 
 2. Delete volumes (if needed - MANUAL STEP):
-   docker volume rm ubuntu_qdrant_data ubuntu_postgres_data ubuntu_redis_data
+   docker volume rm ubuntu_qdrant_data ubuntu_redis_data
 
 3. Restore Qdrant:
    sudo cp -a $BACKUP_DIR/qdrant_data/ubuntu_qdrant_data /var/lib/docker/volumes/
    sudo chown -R root:root /var/lib/docker/volumes/ubuntu_qdrant_data
 
-4. Restore PostgreSQL:
-   sudo cp -a $BACKUP_DIR/postgres_data/ubuntu_postgres_data /var/lib/docker/volumes/
-   sudo chown -R root:root /var/lib/docker/volumes/ubuntu_postgres_data
+4. Restore PostgreSQL (RDS, not a local volume):
+   - Point-in-time / snapshot restore: use the RDS console or
+     "aws rds restore-db-instance-to-point-in-time" / "...-from-db-snapshot".
+   - Or, from the optional logical dump in this backup:
+     psql -h <rds-endpoint> -U cv_user -d cv_database < $BACKUP_DIR/postgres_dump/cv_database_dump.sql
+     psql -h <rds-endpoint> -U cv_user -d auth_db      < $BACKUP_DIR/postgres_dump/auth_db_dump.sql
 
 5. Restore Redis:
    sudo cp -a $BACKUP_DIR/redis_data/ubuntu_redis_data /var/lib/docker/volumes/
@@ -294,7 +305,7 @@ To restore from this backup (run these commands manually when needed):
 
 7. Verify restore:
    docker exec ubuntu_qdrant_1 curl -s 'http://localhost:6333/collections'
-   docker exec ubuntu_postgres_1 psql -U cv_user -d cv_database -c "\dt"
+   psql -h <rds-endpoint> -U cv_user -d cv_database -c "\dt"
 
 ⚠️  KEEP THIS BACKUP SAFE - It contains all your production data!
 ⚠️  Store a copy OFF-SERVER (S3, external drive, etc.)
@@ -323,7 +334,8 @@ echo "Log File: $LOG_FILE"
 echo ""
 echo "CRITICAL DATA BACKED UP:"
 echo "✅ Qdrant ($QDRANT_SIZE) - ALL CVs, JDs, job postings, embeddings"
-echo "✅ PostgreSQL ($POSTGRES_SIZE) - Email processing, auth data"
+echo "ℹ️  PostgreSQL - lives on RDS; rely on RDS automated backups/snapshots"
+echo "   (optional logical dump attempted in $POSTGRES_BACKUP_DIR)"
 echo "✅ Redis ($REDIS_SIZE) - Cache data"
 echo "✅ Configuration files"
 echo ""
@@ -369,7 +381,7 @@ Status: SUCCESS
 
 All critical data backed up:
 - Qdrant vector database ($QDRANT_SIZE)
-- PostgreSQL database ($POSTGRES_SIZE)
+- PostgreSQL: on RDS (automated backups/snapshots); optional dump in $POSTGRES_BACKUP_DIR
 - Redis cache ($REDIS_SIZE)
 - Configuration files
 

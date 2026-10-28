@@ -60,31 +60,31 @@ export default function FileDrop({
       <div
         {...getRootProps()}
         className={cn(
-          'cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors',
-          isDragActive && !isDragReject && 'border-brand-400 bg-brand-50/40',
-          isDragReject && 'border-red-400 bg-red-50/40',
-          !isDragActive && !isDragReject && 'border-gray-300 hover:border-brand-400'
+          'dropzone-base',
+          isDragActive && !isDragReject && 'dropzone-active',
+          isDragReject && 'dropzone-reject',
+          !isDragActive && !isDragReject && 'dropzone-idle'
         )}
       >
         <input {...getInputProps()} />
 
-        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-[var(--shadow-sm)] ring-1 ring-slate-200">
           {isDragReject ? (
             <AlertCircle className="h-6 w-6 text-red-500" />
           ) : (
-            <UploadCloud className="h-6 w-6 text-gray-400" />
+            <UploadCloud className={cn('h-6 w-6', isDragActive ? 'text-brand-600' : 'text-slate-400')} />
           )}
         </div>
 
-        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-        <p className="mt-1 text-[13px] text-gray-500">{description}</p>
+        <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+        <p className="mt-1 text-[13px] text-slate-500">{description}</p>
 
         {isDragActive ? (
           <p className="mt-3 text-[13px] font-medium text-brand-600">
             {isDragReject ? 'Some files are not supported' : 'Drop files here…'}
           </p>
         ) : (
-          <div className="mt-3 text-xs text-gray-500">
+          <div className="mt-3 text-xs text-slate-500">
             <p>Drag &amp; drop files here, or click to browse</p>
             <p className="mt-1">Supports: PDF, DOCX, DOC, TXT, Images</p>
             <p className="mt-1">
@@ -101,7 +101,7 @@ export default function FileDrop({
             <AlertCircle className="h-4 w-4 text-red-500" />
             <span className="text-[13px] font-medium text-red-700">Some files were rejected:</span>
           </div>
-          <ul className="space-y-1 text-[13px] text-gray-600">
+          <ul className="space-y-1 text-[13px] text-slate-600">
             {fileRejections.map(({ file, errors }) => (
               <li key={file.name} className="flex items-center gap-2">
                 <FileText className="h-3.5 w-3.5" />

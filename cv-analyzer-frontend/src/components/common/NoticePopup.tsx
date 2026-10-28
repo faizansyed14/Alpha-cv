@@ -79,7 +79,7 @@ export default function NoticePopup() {
       >
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-brand-50 px-4 py-3">
           <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-navy-800 text-paper">
               <Megaphone className="h-4 w-4" />
             </span>
             <h2 className="text-[15px] font-semibold text-gray-900">Notice</h2>
@@ -101,7 +101,7 @@ export default function NoticePopup() {
           <button
             type="button"
             onClick={dismiss}
-            className="rounded-md bg-brand-600 px-4 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-brand-700"
+            className="rounded-md bg-navy-500 px-4 py-1.5 text-[13px] font-medium text-paper transition-colors hover:bg-navy-400"
           >
             Got it
           </button>

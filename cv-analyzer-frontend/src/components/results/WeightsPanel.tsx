@@ -74,16 +74,16 @@ export default function WeightsPanel() {
   const total = Object.values(localWeights).reduce((sum, val) => sum + val, 0);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+    <div className="rounded-lg border border-slate-200 bg-white shadow-[var(--shadow-sm)]">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-50">
             <SlidersHorizontal className="h-4 w-4 text-brand-600" />
           </div>
           <div>
-            <h3 className="text-[13px] font-semibold text-gray-900">Matching weights</h3>
-            <p className="text-xs text-gray-500">{total.toFixed(1)}% total &middot; normalized before matching</p>
+            <h3 className="text-[13px] font-semibold text-slate-900">Matching weights</h3>
+            <p className="text-xs text-slate-500">{total.toFixed(1)}% total &middot; normalized before matching</p>
           </div>
         </div>
         <Button variant="secondary" size="sm" icon={<RotateCcw className="h-4 w-4" />} onClick={resetToDefaults}>
@@ -93,17 +93,17 @@ export default function WeightsPanel() {
 
       <div className="space-y-5 p-4">
         {/* Info note */}
-        <div className="flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50/60 px-3 py-2 text-[13px] text-gray-600">
-          <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+        <div className="flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2 text-[13px] text-slate-600">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
           <span>Weights are automatically normalized before matching. Higher weights give more importance to that dimension.</span>
         </div>
 
         {/* Sliders */}
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
           {DIMENSIONS.map((dim) => (
-            <div key={dim.key} className="space-y-3 rounded-lg border border-gray-200 p-4">
+            <div key={dim.key} className="space-y-3 rounded-lg border border-slate-200 p-4">
               <div className="flex items-center justify-between gap-2">
-                <label className="text-[13px] font-medium text-gray-900">{dim.label}</label>
+                <label className="text-[13px] font-medium text-slate-900">{dim.label}</label>
                 <span className="inline-flex min-w-[44px] justify-center rounded-md bg-brand-50 px-2 py-0.5 text-[12px] font-semibold text-brand-700">
                   {localWeights[dim.key]}%
                 </span>
@@ -115,21 +115,21 @@ export default function WeightsPanel() {
                 step={dim.step}
                 onValueChange={(v) => handleWeightChange(dim.key, v[0])}
               />
-              <p className="text-xs text-gray-500">{dim.hint}</p>
+              <p className="text-xs text-slate-500">{dim.hint}</p>
             </div>
           ))}
         </div>
 
         {/* Normalized readout */}
-        <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-4">
+        <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
           <p className="section-label mb-3">Normalized weights (total 100%)</p>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             {DIMENSIONS.map((dim) => (
               <div key={dim.key} className="text-center">
-                <div className="text-lg font-semibold text-gray-900">
+                <div className="text-lg font-semibold text-slate-900">
                   {normalizedWeights[dim.key].toFixed(1)}%
                 </div>
-                <div className="text-xs text-gray-500">{dim.label.split(' ')[0]}</div>
+                <div className="text-xs text-slate-500">{dim.label.split(' ')[0]}</div>
               </div>
             ))}
           </div>

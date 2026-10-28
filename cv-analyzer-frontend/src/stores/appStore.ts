@@ -13,6 +13,7 @@ import {
   // Queue types removed
 } from '@/lib/types';
 import { api } from '@/lib/api';
+import { matchingService } from '@/services/matchingService';
 import { logger } from '@/lib/logger';
 import { useAuthStore } from './authStore';
 
@@ -542,7 +543,7 @@ export const useAppStore = create<AppState>()(
 
           logger.info('Starting candidate matching', matchRequest);
 
-          const result = await api.matchCandidates(matchRequest);
+          const result = await matchingService.matchCandidates(matchRequest);
           
           // Check if request was queued
           if (result.is_queued) {
@@ -568,7 +569,7 @@ export const useAppStore = create<AppState>()(
             };
             const pollInterval = setInterval(async () => {
               try {
-                const pollResult = await api.matchCandidates(matchRequest);
+                const pollResult = await matchingService.matchCandidates(matchRequest);
 
                 if (pollResult.status === 'failed') {
                   stopPolling();

@@ -42,6 +42,7 @@ from app.services.ai.llm_service import get_llm_service
 from app.services.ai.embedding_service import get_embedding_service
 from app.utils.qdrant_utils import get_qdrant_utils, get_decompressed_content
 from app.services.storage import get_storage_service
+from app.services import locations_service
 from app.deps.auth import require_admin, require_core_app
 from app.models.user import User
 from app.routes.cv_routes import process_cv_async
@@ -246,6 +247,17 @@ async def get_public_job(public_token: str) -> PublicJobView:
         logger.error(f"❌ Failed to get public job: {e}")
         raise HTTPException(status_code=500, detail="Failed to load job posting")
 
+@router.get("/locations/search")
+async def search_locations(q: str = "", limit: int = 10) -> JSONResponse:
+    """Public city/country autocomplete for the apply form's "current location"
+    field. Local dataset (GeoNames), no external API call, no auth required —
+    candidates use this before they've logged in.
+    """
+    limit = max(1, min(limit, 20))
+    results = locations_service.search_locations(q, limit=limit)
+    return JSONResponse({"results": results})
+
+
 @router.post("/jobs/{public_token}/apply", response_model=JobApplicationResponse)
 async def apply_to_job(
     public_token: str,
@@ -256,6 +268,9 @@ async def apply_to_job(
     cover_letter: Optional[str] = Form(None),
     expected_salary: float = Form(..., description="Expected salary in AED"),
     years_of_experience: float = Form(..., description="Years of experience"),
+    location: Optional[str] = Form(None, max_length=200, description="Candidate's current location"),
+    notice_period: Optional[str] = Form(None, max_length=50, description="Candidate's notice period"),
+    nationality: Optional[str] = Form(None, max_length=100, description="Candidate's nationality"),
     cv_file: UploadFile = File(...),
     background_processing: bool = Form(True)  # Enable async processing by default
 ) -> JobApplicationResponse:
@@ -365,6 +380,9 @@ async def apply_to_job(
                 "cover_letter": cover_letter,
                 "expected_salary": expected_salary,
                 "years_of_experience": years_of_experience,
+                "location": location,
+                "notice_period": notice_period,
+                "nationality": nationality,
                 "experience_warning": experience_warning,
                 "cv_file_path": persisted_path,
                 "cv_filename": cv_file.filename,
@@ -469,6 +487,9 @@ async def apply_to_job(
             "cover_letter": cover_letter,
             "expected_salary": expected_salary,
             "years_of_experience": years_of_experience,
+            "location": location,
+            "notice_period": notice_period,
+            "nationality": nationality,
             "experience_warning": experience_warning,
             "public_token": public_token,
             "job_title": job_data.get("job_title", "Position"),
@@ -1313,6 +1334,9 @@ async def get_job_applications(
                 cv_filename=app.get("cv_filename", "unknown.pdf"),
                 expected_salary=app.get("expected_salary"),
                 years_of_experience=app.get("years_of_experience"),
+                location=app.get("location"),
+                notice_period=app.get("notice_period"),
+                nationality=app.get("nationality"),
                 match_score=app.get("match_score"),  # Persisted when a match runs for this job
                 status=app.get("status", "pending"),
                 source=app.get("source", "website")  # Default to 'website' if not specified

@@ -23,12 +23,72 @@ from qdrant_client.http.models import (
     MatchValue,
     MatchAny,
     FilterSelector,
+    Range,
+    PayloadSchemaType,
 )
 
 logger = logging.getLogger(__name__)
 
 _CAREERS_LIST_CACHE: dict[str, tuple[float, tuple[list[dict[str, Any]], int]]] = {}
 _CAREERS_LIST_CACHE_LOCK = threading.Lock()
+
+
+def resolve_candidate_full_name(payload: Dict[str, Any], structured: Dict[str, Any]) -> str:
+    """
+    Display name for a CV: prefer applicant_name (what the candidate actually
+    typed on the careers apply form) over the LLM-extracted contact_info.name
+    from the CV content.
+
+    The LLM name is extracted from free-form document text and can misfire on
+    a prominent non-name string when the CV's layout confuses it (e.g.
+    returning a city like "Riyadh" instead of the person's name) — see
+    DEFAULT_CV_PROMPT's name-extraction guardrails for the corresponding fix
+    on the extraction side. applicant_name has no such ambiguity: it's a
+    literal form field the candidate filled in themselves. Only CVs uploaded
+    directly (not through a job application) lack it, hence the fallback.
+    """
+    applicant_name = (payload or {}).get("applicant_name")
+    if applicant_name and str(applicant_name).strip():
+        return str(applicant_name).strip()
+    structured = structured or {}
+    llm_name = (structured.get("contact_info") or {}).get("name") or structured.get("full_name")
+    return str(llm_name).strip() if llm_name and str(llm_name).strip() else "Not specified"
+
+
+def resolve_candidate_contact(
+    payload: Optional[Dict[str, Any]],
+    structured: Optional[Dict[str, Any]],
+) -> Dict[str, Optional[str]]:
+    """
+    Best-effort email/phone for list + detail UIs.
+
+    Same precedence as resolve_candidate_full_name and for the same reason:
+    applicant_email/applicant_phone are literal form fields the candidate
+    typed themselves on the careers apply form, so they're ground truth.
+    contact_info.email/phone (and the top-level email/phone PII fields) are
+    extracted from free-form CV text/OCR — reliable for CVs with no
+    application (direct upload / email intake, where there's no applicant_*
+    to prefer), but strictly a fallback whenever a candidate-entered value
+    exists, since extraction can misread noisy or scanned documents.
+    """
+    payload = payload or {}
+    structured = structured or {}
+    contact = structured.get("contact_info") or {}
+    email = (
+        payload.get("applicant_email")
+        or contact.get("email")
+        or structured.get("email")
+        or payload.get("email")
+    )
+    phone = (
+        payload.get("applicant_phone")
+        or contact.get("phone")
+        or structured.get("phone")
+        or payload.get("phone")
+    )
+    email_s = str(email).strip() if email and str(email).strip() else None
+    phone_s = str(phone).strip() if phone and str(phone).strip() else None
+    return {"email": email_s, "phone": phone_s}
 
 
 def _careers_cache_get(key: str, ttl_seconds: float) -> Optional[tuple[list[dict[str, Any]], int]]:
@@ -154,6 +214,31 @@ class QdrantUtils:
                 logger.info(f"✅ Collection created: {name}")
             else:
                 logger.info(f"✅ Collection exists: {name}")
+        self._ensure_payload_indexes()
+
+    def _ensure_payload_indexes(self) -> None:
+        """
+        Indexes backing the advanced CV search (search_cvs_advanced): without
+        these, every filtered search would fall back to a full collection
+        scan inside Qdrant on every request. Idempotent — safe to call on
+        every startup; Qdrant no-ops (or errors harmlessly, caught below) if
+        the index already exists.
+        """
+        index_specs = [
+            ("cv_structured", "location", PayloadSchemaType.KEYWORD),
+            ("cv_structured", "nationality", PayloadSchemaType.KEYWORD),
+            ("cv_structured", "notice_period", PayloadSchemaType.KEYWORD),
+            ("cv_structured", "structured_info.keywords", PayloadSchemaType.KEYWORD),
+            ("cv_structured", "structured_info.years_of_experience", PayloadSchemaType.FLOAT),
+            ("cv_structured", "is_job_application", PayloadSchemaType.BOOL),
+        ]
+        for collection, field, schema in index_specs:
+            try:
+                self.client.create_payload_index(
+                    collection_name=collection, field_name=field, field_schema=schema
+                )
+            except Exception as e:  # noqa: BLE001 - already-exists / not-yet-ready, non-fatal
+                logger.debug(f"Payload index {collection}.{field} skipped: {e}")
 
     # ---------- basic health ----------
 
@@ -503,6 +588,93 @@ class QdrantUtils:
             logger.error(f"❌ list_all_cvs failed: {e}")
             return []
 
+    def search_cvs_advanced(
+        self,
+        keywords: Optional[List[str]] = None,
+        experience_min: Optional[float] = None,
+        experience_max: Optional[float] = None,
+        locations: Optional[List[str]] = None,
+        nationalities: Optional[List[str]] = None,
+        limit: int = 50,
+        cursor: Optional[str] = None,
+    ) -> tuple[list, Optional[str]]:
+        """
+        Production search path for the CV database's advanced search: a single
+        indexed Qdrant filter (see _ensure_payload_indexes) evaluated server-side
+        against the WHOLE cv_structured collection, with cursor-based pagination
+        so "load next 50" is a real next page, not "re-run and slice" — a numeric
+        offset would mean each successive page still has to be filtered from
+        scratch, walking every prior point again as the collection grows;
+        Qdrant's opaque next_page_offset cursor picks up exactly where the last
+        page ended in O(1), which is what makes this stay fast at CV-database
+        scale rather than only in a small demo dataset.
+
+        keywords / locations / nationalities are ANY-match (OR within each list,
+        AND across the different filter dimensions) — see the "ANY vs ALL"
+        decision this was built against: broader recall is what recruiters
+        expect from a keyword search, matching Naukri Resdex-style tools.
+
+        Returns (points, next_cursor) — next_cursor is None when there are no
+        more results to page through.
+        """
+        must: List[FieldCondition] = []
+        if keywords:
+            must.append(FieldCondition(key="structured_info.keywords", match=MatchAny(any=keywords)))
+        if locations:
+            must.append(FieldCondition(key="location", match=MatchAny(any=locations)))
+        if nationalities:
+            must.append(FieldCondition(key="nationality", match=MatchAny(any=nationalities)))
+        if experience_min is not None or experience_max is not None:
+            must.append(FieldCondition(
+                key="structured_info.years_of_experience",
+                range=Range(gte=experience_min, lte=experience_max),
+            ))
+
+        scroll_filter = Filter(must=must) if must else None
+        try:
+            points, next_offset = self.client.scroll(
+                collection_name="cv_structured",
+                scroll_filter=scroll_filter,
+                limit=max(1, min(limit, 100)),
+                offset=cursor,
+                with_payload=True,
+                with_vectors=False,
+            )
+            next_cursor = str(next_offset) if next_offset is not None else None
+            return points, next_cursor
+        except Exception as e:
+            logger.error(f"❌ search_cvs_advanced failed: {e}")
+            return [], None
+
+    # Fields the advanced-search UI is allowed to request facets for, mapped
+    # to their actual Qdrant payload path (keywords lives nested under
+    # structured_info, the rest are top-level) — keep in sync with the
+    # payload indexes in _ensure_payload_indexes so a facet call is always
+    # served from an index, never a full collection scan.
+    CV_FACET_FIELDS = {
+        "location": "location",
+        "nationality": "nationality",
+        "notice_period": "notice_period",
+        "keywords": "structured_info.keywords",
+    }
+
+    def get_cv_facet(self, field: str, limit: int = 200) -> List[Dict[str, Any]]:
+        """
+        Distinct values + counts for one payload field across the WHOLE
+        cv_structured collection — powers the searchable checkbox lists (and
+        the keyword-search autocomplete) in the advanced search modal without
+        pulling every CV to the client to compute that itself.
+        """
+        qdrant_field = self.CV_FACET_FIELDS.get(field)
+        if not qdrant_field:
+            raise ValueError(f"Facet not allowed for field: {field}")
+        try:
+            resp = self.client.facet(collection_name="cv_structured", key=qdrant_field, limit=limit, exact=True)
+            return [{"value": hit.value, "count": hit.count} for hit in resp.hits if hit.value]
+        except Exception as e:
+            logger.error(f"❌ get_cv_facet({field}) failed: {e}")
+            return []
+
     def list_cvs_by_category(self, category: str) -> List[Dict[str, Any]]:
         """
         List CVs filtered by category with full details.
@@ -552,6 +724,11 @@ class QdrantUtils:
 
                 skills = structured.get("skills_sentences", structured.get("skills", []))
                 resps = structured.get("responsibility_sentences", structured.get("responsibilities", []))
+                skills_nonempty = [s for s in skills if isinstance(s, str) and s.strip()][:20]
+                keywords_nonempty = [k for k in (structured.get("keywords") or []) if k][:20]
+                languages = structured.get("languages") or []
+                if not isinstance(languages, list):
+                    languages = []
 
                 # Clean up filename - extract just the filename from path
                 filename = doc_meta.get("filename", "Unknown")
@@ -562,13 +739,20 @@ class QdrantUtils:
                     "id": doc_id,
                     "filename": filename,
                     "upload_date": doc_meta.get("upload_date", "Unknown"),
-                    "full_name": structured.get("contact_info", {}).get("name") or structured.get("full_name", "Not specified"),
+                    "full_name": resolve_candidate_full_name(payload, structured),
                     "job_title": structured.get("job_title", "Not specified"),
                     "years_of_experience": structured.get("years_of_experience", structured.get("experience_years", "Not specified")),
-                    "skills_count": len(skills),
+                    "skills_count": len(skills_nonempty),
+                    "skills": skills_nonempty,
+                    "skill_keywords": keywords_nonempty,
                     "responsibilities_count": len(resps),
                     "has_structured_data": True,
-                    "category": structured.get("category", "General")
+                    "category": structured.get("category", "General"),
+                    "gender": structured.get("gender"),
+                    "languages": [str(x).strip() for x in languages if str(x).strip()][:20],
+                    "location": payload.get("location") or structured.get("location"),
+                    "nationality": payload.get("nationality"),
+                    **resolve_candidate_contact(payload, structured),
                 })
 
             enhanced.sort(key=lambda x: x.get("upload_date", ""), reverse=True)
@@ -1310,6 +1494,9 @@ class QdrantUtils:
                     "cover_letter": applicant_data.get("cover_letter"),
                     "expected_salary": applicant_data.get("expected_salary"),
                     "years_of_experience": applicant_data.get("years_of_experience"),
+                    "location": applicant_data.get("location"),
+                    "notice_period": applicant_data.get("notice_period"),
+                    "nationality": applicant_data.get("nationality"),
                     "experience_warning": applicant_data.get("experience_warning"),
                     "is_job_application": True
                 })

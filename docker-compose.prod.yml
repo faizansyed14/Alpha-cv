@@ -3,6 +3,22 @@
 # Configuration comes exclusively from ./.env (copy .env.example and fill in).
 # Start:  ./scripts/start.sh prod        Stop: ./scripts/stop.sh prod
 # Volumes are named and are NEVER deleted by the start/stop scripts.
+#
+# Managed data plane: this stack intentionally runs NO local Postgres and NO
+# local file-storage volume. Both live off-box so the EC2 instance holds no
+# durable application data and can be replaced/rebuilt/scaled without a data
+# migration:
+#   - AUTH_DB_URL / TRACKER_DB_URL / POSTGRES_* -> point at an AWS RDS
+#     (PostgreSQL) endpoint. Enable "Multi-AZ" + automated backups on the RDS
+#     instance itself; see db/init/rds-bootstrap.sql for the one-time setup.
+#   - STORAGE_BACKEND=s3, S3_BUCKET / S3_REGION -> CV/JD files go straight to
+#     S3 (credentials via the EC2 instance's IAM role — no static keys on the
+#     box). Enable bucket versioning + default SSE-S3/KMS encryption on the
+#     bucket itself.
+# Qdrant (vector store) and Redis (cache/queue) still run as local containers
+# with named volumes — they are not in scope for this migration, but note
+# they remain single points of failure on this one EC2 host (see the ops
+# notes at the bottom of this file for how to harden them later).
 # =============================================================================
 
 services:
@@ -10,6 +26,7 @@ services:
   # Backend (FastAPI)
   # ---------------------------------------------------------------------------
   backend:
+    image: alpha-backend:prod
     build:
       context: ./alpha-backend
     env_file:
@@ -20,15 +37,16 @@ services:
       TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
       ENABLE_MATCH_QUEUE: "true"
     depends_on:
-      postgres:
-        condition: service_healthy
       qdrant:
         condition: service_started
       redis:
         condition: service_started
     restart: unless-stopped
     volumes:
-      - uploads_data:/data/uploads
+      # No uploads_data here: STORAGE_BACKEND=s3 means CV/JD files never touch
+      # local disk (temp files during parse/preview live in the container's
+      # own /tmp and are discarded on restart). llm_cache is a disposable
+      # performance cache (safe to lose on redeploy), not source-of-truth data.
       - llm_cache:/data/llm_cache
     networks:
       - cv-network
@@ -51,8 +69,8 @@ services:
   # CPU-bound Hungarian/cosine scoring never runs inside the API process.
   # Scale with `--scale match-worker=N` once the host has spare cores.
   match-worker:
-    build:
-      context: ./alpha-backend
+    image: alpha-backend:prod
+    pull_policy: never
     command: ["python", "-m", "app.worker.match_worker"]
     env_file:
       - ./.env
@@ -62,14 +80,11 @@ services:
       MATCH_THREAD_POOL_WORKERS: ${MATCH_THREAD_POOL_WORKERS:-4}
       MATCH_QUEUE_MAX_CONCURRENT_JOBS: ${MATCH_QUEUE_MAX_CONCURRENT_JOBS:-1}
     depends_on:
-      postgres:
-        condition: service_healthy
       qdrant:
         condition: service_started
       redis:
         condition: service_started
     volumes:
-      - uploads_data:/data/uploads
       - llm_cache:/data/llm_cache
     networks:
       - cv-network
@@ -90,8 +105,8 @@ services:
   # (the one genuinely CPU-hungry job) still gets its own dedicated
   # match-worker container above.
   background-worker:
-    build:
-      context: ./alpha-backend
+    image: alpha-backend:prod
+    pull_policy: never
     command: ["python", "-m", "app.worker.background_worker"]
     env_file:
       - ./.env
@@ -100,14 +115,11 @@ services:
       ENABLE_PUBLIC_CV_QUEUE: "true"
       TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
     depends_on:
-      postgres:
-        condition: service_healthy
       qdrant:
         condition: service_started
       redis:
         condition: service_started
     volumes:
-      - uploads_data:/data/uploads
       - llm_cache:/data/llm_cache
     networks:
       - cv-network
@@ -131,6 +143,8 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
         BACKEND_INTERNAL_URL: "http://backend:8000"
+        # Set by scripts/start.sh so source edits invalidate the Next.js build layer
+        FRONTEND_CACHEBUST: ${FRONTEND_CACHEBUST:-0}
     read_only: true
     tmpfs:
       - /tmp
@@ -154,52 +168,12 @@ services:
           cpus: '0.25'
 
   # ---------------------------------------------------------------------------
-  # PostgreSQL (auth_db + cv_database; auth_db created by db/init scripts)
+  # PostgreSQL: NOT run here in production. AUTH_DB_URL / TRACKER_DB_URL /
+  # POSTGRES_* in ./.env point at an AWS RDS PostgreSQL instance instead (see
+  # the header comment above and db/init/rds-bootstrap.sql for one-time setup:
+  # RDS doesn't execute docker-entrypoint-initdb.d, so the auth_db database
+  # and its grant have to be created once against the RDS endpoint directly).
   # ---------------------------------------------------------------------------
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-cv_database}
-      POSTGRES_USER: ${POSTGRES_USER:-cv_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
-    restart: unless-stopped
-    networks:
-      - cv-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '1.0'
-        reservations:
-          memory: 768M
-          cpus: '0.5'
-    command: >
-      postgres
-      -c shared_buffers=512MB
-      -c effective_cache_size=1GB
-      -c maintenance_work_mem=128MB
-      -c max_connections=80
-      -c work_mem=16MB
-      -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c min_wal_size=256MB
-      -c max_wal_size=1GB
-      -c checkpoint_timeout=15min
-      -c max_worker_processes=4
-      -c max_parallel_workers_per_gather=2
-      -c max_parallel_workers=4
 
   # ---------------------------------------------------------------------------
   # Qdrant (vector store)
@@ -292,13 +266,30 @@ services:
           cpus: '0.25'
 
 volumes:
-  postgres_data:
+  # postgres_data / uploads_data intentionally removed: Postgres lives on RDS
+  # and CV/JD files live in S3 (see the header comment). Neither the database
+  # nor the file store has state on this host anymore.
   qdrant_data:
   redis_data:
-  uploads_data:
   llm_cache:
   nginx_cache:
 
 networks:
   cv-network:
     driver: bridge
+
+# =============================================================================
+# Ops notes — remaining single points of failure on this one-EC2-host layout
+# (left as-is here; each is a separate infra decision, not part of this
+# RDS/S3 migration):
+#   - qdrant_data / redis_data are still local named volumes. If this EC2
+#     instance is lost, the vector index (all CVs/JDs/embeddings) and the
+#     Redis-backed match-job queue/cache go with it. Mitigate today with a
+#     scheduled `docker exec ... snapshot` (Qdrant has a snapshot API) or an
+#     EBS snapshot of the volumes; longer-term, Qdrant Cloud or a replicated
+#     Qdrant cluster + Amazon ElastiCache remove this host as a SPOF entirely.
+#   - Scaling `match-worker` beyond this host (or moving to ECS/Fargate) needs
+#     Qdrant/Redis reachable from wherever the new containers land — i.e. they
+#     stop being "local containers on the same docker network" and become
+#     real network services (managed or on their own host) at that point.
+# =============================================================================

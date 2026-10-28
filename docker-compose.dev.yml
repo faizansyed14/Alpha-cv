@@ -16,6 +16,8 @@ services:
       args:
         NEXT_PUBLIC_API_URL: http://localhost
         BACKEND_INTERNAL_URL: http://backend-dev:8000
+        # Set by scripts/start.sh so source edits invalidate the Next.js build layer
+        FRONTEND_CACHEBUST: ${FRONTEND_CACHEBUST:-0}
     ports:
       - "3000:3000"
     environment:
@@ -31,6 +33,7 @@ services:
 
   # Development Backend (port 8000, CPU-only PyTorch, hot-reload source mount)
   backend-dev:
+    image: alpha-backend:dev
     build:
       context: ./alpha-backend
       dockerfile: Dockerfile
@@ -54,9 +57,8 @@ services:
   # Merged (see docker-compose.prod.yml for why) — match-worker-dev below
   # stays separate since it's the only genuinely CPU-heavy one.
   background-worker-dev:
-    build:
-      context: ./alpha-backend
-      dockerfile: Dockerfile
+    image: alpha-backend:dev
+    pull_policy: never
     command: ["python", "-m", "app.worker.background_worker"]
     env_file:
       - .env.dev
@@ -78,9 +80,8 @@ services:
 
   # Dedicated matching worker (consumes the Redis match-job queue)
   match-worker-dev:
-    build:
-      context: ./alpha-backend
-      dockerfile: Dockerfile
+    image: alpha-backend:dev
+    pull_policy: never
     command: ["python", "-m", "app.worker.match_worker"]
     env_file:
       - .env.dev

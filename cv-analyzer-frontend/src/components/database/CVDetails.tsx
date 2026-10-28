@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { AlertCircle, FileText, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
+import ContactActions from '@/components/common/ContactActions';
 
 /* ----------------------------- Small utilities ---------------------------- */
 const formatDate = (dateString?: string) => {
@@ -108,12 +109,14 @@ export function CVDetails({ cvId }: { cvId: string }) {
         cv.structured_info?.contact_info?.email ||
         cv.structured_info?.email ||
         cv.candidate?.contact_info?.email ||
-        'Not available';
+        cv.job_application?.applicant_email ||
+        null;
     const phone =
         cv.structured_info?.contact_info?.phone ||
         cv.structured_info?.phone ||
         cv.candidate?.contact_info?.phone ||
-        'Not available';
+        cv.job_application?.applicant_phone ||
+        null;
     const skills = cv?.candidate?.skills || cv?.skills || [];
     const responsibilities = cv?.candidate?.responsibilities || cv?.responsibilities || [];
 
@@ -130,9 +133,13 @@ export function CVDetails({ cvId }: { cvId: string }) {
                     <Field label="CV ID" value={`#${cvId.slice(-8)}`} />
                     <Field label="Uploaded" value={formatDate(cv?.upload_date)} />
                     <Field label="Category" value={cv.structured_info?.category ?? 'General'} />
-                    <Field label="Email" value={email} />
-                    <Field label="Phone" value={phone} />
                 </dl>
+                {(email || phone) && (
+                    <div className="mt-4">
+                        <p className="section-label mb-1.5">Contact</p>
+                        <ContactActions email={email} phone={phone} privacy />
+                    </div>
+                )}
             </Panel>
 
             {/* Skills */}

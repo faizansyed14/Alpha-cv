@@ -252,5 +252,24 @@ export const trackerApi = {
     });
     return res.data as any;
   },
+
+  /** POST /api/tracker/admin/clear-team */
+  async clearTeam(token: string, team: TrackerTeam, confirm: string): Promise<{ success?: boolean; message?: string }> {
+    const res = await client(token).post('/api/tracker/admin/clear-team', null, {
+      params: { team, confirm },
+    });
+    return res.data as any;
+  },
+
+  /** POST /api/tracker/admin/import/selections-xlsx */
+  async importSelectionsXlsx(token: string, team: TrackerTeam, file: File): Promise<any> {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await client(token).post('/api/tracker/admin/import/selections-xlsx', fd, {
+      params: { team },
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  },
 };
 

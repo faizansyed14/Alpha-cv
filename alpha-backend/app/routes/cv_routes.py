@@ -5,7 +5,7 @@ Single responsibility: CV document management through REST API.
 """
 
 import logging
-from qdrant_client.http.models import FieldCondition, Filter, MatchValue
+from qdrant_client.http.models import FieldCondition, Filter, MatchValue, MatchAny
 import os
 import re
 import uuid
@@ -21,10 +21,11 @@ from app.models.user import User
 from app.services.ai.parsing_service import get_parsing_service
 from app.services.ai.llm_service import get_llm_service
 from app.services.ai.embedding_service import get_embedding_service
-from app.utils.qdrant_utils import get_qdrant_utils, get_decompressed_content
+from app.utils.qdrant_utils import get_qdrant_utils, get_decompressed_content, resolve_candidate_full_name, resolve_candidate_contact
 from app.services.storage import get_storage_service
 from app.utils.cache import get_cache_service
 from app.utils.skill_keywords import extract_skill_keywords
+from app.schemas.cv_search import CVAdvancedSearchRequest, CVAdvancedSearchResponse, CVSearchResultItem
 # at top of the file
 import mimetypes
 import shutil
@@ -216,6 +217,9 @@ async def process_cv_async(cv_data: dict) -> dict:
                 "cover_letter": cv_data.get("cover_letter"),
                 "expected_salary": cv_data.get("expected_salary"),
                 "years_of_experience": cv_data.get("years_of_experience"),
+                "location": cv_data.get("location"),
+                "notice_period": cv_data.get("notice_period"),
+                "nationality": cv_data.get("nationality"),
                 "experience_warning": cv_data.get("experience_warning"),
                 "application_date": _now_iso(),
                 "application_status": "processed",
@@ -263,6 +267,9 @@ async def process_cv_async(cv_data: dict) -> dict:
                     "cover_letter": cv_data.get("cover_letter"),
                     "expected_salary": cv_data.get("expected_salary"),
                     "years_of_experience": cv_data.get("years_of_experience"),
+                    "location": cv_data.get("location"),
+                    "notice_period": cv_data.get("notice_period"),
+                    "nationality": cv_data.get("nationality"),
                     "experience_warning": cv_data.get("experience_warning"),
                     "public_token": cv_data.get("public_token"),
                     "job_title": cv_data.get("job_title", "Position"),
@@ -682,15 +689,25 @@ async def list_cvs(
             # for a CV's own applied job, so no per-job lookup is needed here.
             applied_job_match = payload.get("applied_job_match")
             applied_score = applied_job_match.get("overall_score") if isinstance(applied_job_match, dict) else None
+            contact = resolve_candidate_contact(payload, structured)
+            skills_nonempty = [s for s in skills if isinstance(s, str) and s.strip()][:20]
+            keywords_nonempty = [k for k in (structured.get("keywords") or []) if k][:20]
+            languages = structured.get("languages") or []
+            if not isinstance(languages, list):
+                languages = []
             enhanced.append({
                 "id": doc_id,
                 "filename": filename,
                 "upload_date": doc_meta.get("upload_date", "Unknown"),
-                "full_name": structured.get("contact_info", {}).get("name") or structured.get("full_name", "Not specified"),
+                "full_name": resolve_candidate_full_name(payload, structured),
                 "job_title": structured.get("job_title", "Not specified"),
                 "years_of_experience": structured.get("years_of_experience", structured.get("experience_years", "Not specified")),
-                "skills_count": len(skills),
-                "skill_keywords": _extract_skill_keywords(skills, limit=12),
+                "skills_count": len(skills_nonempty),
+                "skills": skills_nonempty,
+                # LLM-generated (see llm_service.DEFAULT_CV_PROMPT's "keywords" field),
+                # not the old regex truncation of skill sentences — this is also the
+                # exact field the advanced CV search filters against, so keep them in sync.
+                "skill_keywords": keywords_nonempty,
                 "responsibilities_count": len(resps),
                 "has_structured_data": True,
                 "category": structured.get("category", "General"),
@@ -699,6 +716,13 @@ async def list_cvs(
                 "applied_job_title": (job_title_by_id.get(applied_job_id) if applied_job_id else None),
                 "match_score": applied_score,
                 "is_top_for_job": False,  # set below after ranking within each job
+                "location": payload.get("location") or structured.get("location"),
+                "notice_period": payload.get("notice_period"),
+                "nationality": payload.get("nationality"),
+                "gender": structured.get("gender"),
+                "languages": [str(x).strip() for x in languages if str(x).strip()][:20],
+                "email": contact.get("email"),
+                "phone": contact.get("phone"),
                 "job_application": {
                     "expected_salary": payload.get("expected_salary"),
                 } if is_job_application else None
@@ -868,7 +892,7 @@ async def keyword_search_cvs(
 
                 skills = structured.get("skills_sentences", structured.get("skills", [])) or []
                 resps = structured.get("responsibility_sentences", structured.get("responsibilities", [])) or []
-                full_name = structured.get("contact_info", {}).get("name") or structured.get("full_name", "")
+                full_name = resolve_candidate_full_name(payload, structured)
                 job_title = structured.get("job_title", "")
 
                 blob = " ".join([
@@ -894,6 +918,12 @@ async def keyword_search_cvs(
                 # applied_job_match is only ever written for a CV's own applied job.
                 applied_job_match = payload.get("applied_job_match")
                 applied_score = applied_job_match.get("overall_score") if isinstance(applied_job_match, dict) else None
+                contact = resolve_candidate_contact(payload, structured)
+                skills_nonempty = [s for s in skills if isinstance(s, str) and s.strip()][:20]
+                keywords_nonempty = [k for k in (structured.get("keywords") or []) if k][:20]
+                languages = structured.get("languages") or []
+                if not isinstance(languages, list):
+                    languages = []
 
                 results.append({
                     "id": doc_id,
@@ -902,8 +932,9 @@ async def keyword_search_cvs(
                     "full_name": full_name or "Not specified",
                     "job_title": job_title or "Not specified",
                     "years_of_experience": structured.get("years_of_experience", structured.get("experience_years", "Not specified")),
-                    "skills_count": len(skills),
-                    "skill_keywords": _extract_skill_keywords(skills, limit=12),
+                    "skills_count": len(skills_nonempty),
+                    "skills": skills_nonempty,
+                    "skill_keywords": keywords_nonempty,
                     "responsibilities_count": len(resps),
                     "has_structured_data": True,
                     "category": cat,
@@ -913,6 +944,12 @@ async def keyword_search_cvs(
                     "match_score": applied_score,
                     "matched_keywords": matched,
                     "matched_count": len(matched),
+                    "location": payload.get("location") or structured.get("location"),
+                    "nationality": payload.get("nationality"),
+                    "gender": structured.get("gender"),
+                    "languages": [str(x).strip() for x in languages if str(x).strip()][:20],
+                    "email": contact.get("email"),
+                    "phone": contact.get("phone"),
                     "job_application": {"expected_salary": payload.get("expected_salary")} if is_job_application else None,
                 })
             if not next_offset:
@@ -938,6 +975,131 @@ async def keyword_search_cvs(
     except Exception as e:
         logger.error(f"❌ Keyword search failed: {e}")
         raise HTTPException(status_code=500, detail=f"Keyword search failed: {e}")
+
+
+@router.get("/search/facets/{field}")
+async def get_cv_search_facet(
+    field: str,
+    limit: int = Query(200, ge=1, le=1000),
+    _: User = Depends(require_core_app),
+) -> JSONResponse:
+    """
+    Distinct values + counts for a filterable field (location, nationality,
+    notice_period, keywords), across every CV — feeds the searchable checkbox
+    lists and the keyword-search autocomplete in the advanced search modal.
+    See QdrantUtils.CV_FACET_FIELDS for the allowlist. `keywords` defaults to
+    a higher limit than the others since its vocabulary is naturally larger
+    (up to 20 LLM-extracted terms per CV vs. one location/nationality each).
+    """
+    qdrant = get_qdrant_utils()
+    if field not in qdrant.CV_FACET_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Unsupported facet field: {field}")
+    effective_limit = max(limit, 500) if field == "keywords" else limit
+    values = qdrant.get_cv_facet(field, limit=effective_limit)
+    values.sort(key=lambda v: -v["count"])
+    return JSONResponse({"field": field, "values": values})
+
+
+@router.post("/search/advanced", response_model=CVAdvancedSearchResponse)
+async def search_cvs_advanced(
+    req: CVAdvancedSearchRequest,
+    _: User = Depends(require_core_app),
+) -> CVAdvancedSearchResponse:
+    """
+    Advanced CV search (keywords + experience range + location + nationality),
+    evaluated server-side against the whole cv_structured collection via an
+    indexed Qdrant filter — not an in-process scan of every CV like the older
+    /keyword-search endpoint. Paginated with an opaque cursor: pass the
+    previous response's next_cursor back in to get the next page (the
+    frontend's "load 50, then fetch more as you scroll" flow).
+    """
+    try:
+        qdrant = get_qdrant_utils()
+
+        job_title_by_id: Dict[str, str] = {}
+        try:
+            for j in qdrant.get_all_job_postings(include_inactive=True):
+                jid = str(j.get("id") or j.get("job_id") or "").strip()
+                structured_jd = j.get("structured_info") or {}
+                title = structured_jd.get("job_title") or j.get("job_title") or ""
+                if jid and title:
+                    job_title_by_id[jid] = str(title)
+        except Exception:
+            job_title_by_id = {}
+
+        points, next_cursor = qdrant.search_cvs_advanced(
+            keywords=req.keywords,
+            experience_min=req.experience_min,
+            experience_max=req.experience_max,
+            locations=req.locations,
+            nationalities=req.nationalities,
+            limit=req.limit,
+            cursor=req.cursor,
+        )
+
+        doc_ids = [str(p.id) for p in points]
+        docs_map: Dict[str, Dict[str, Any]] = {}
+        if doc_ids:
+            docs_points, _ = qdrant.client.scroll(
+                collection_name="cv_documents",
+                scroll_filter=Filter(must=[FieldCondition(key="id", match=MatchValue(value=doc_ids[0]))])
+                if len(doc_ids) == 1 else Filter(must=[FieldCondition(key="id", match=MatchAny(any=doc_ids))]),
+                limit=len(doc_ids),
+                with_payload=True,
+                with_vectors=False,
+            )
+            docs_map = {str(p.id): (p.payload or {}) for p in docs_points}
+
+        results: List[CVSearchResultItem] = []
+        for p in points:
+            doc_id = str(p.id)
+            payload = p.payload or {}
+            structured = payload.get("structured_info", {}) or {}
+            doc_meta = docs_map.get(doc_id, {})
+
+            filename = doc_meta.get("filename", "Unknown")
+            if filename and "/" in filename:
+                filename = filename.split("/")[-1]
+
+            is_job_application = bool(payload.get("is_job_application", False))
+            applied_job_id = str(payload.get("job_id") or "").strip() if is_job_application else ""
+            applied_job_match = payload.get("applied_job_match")
+            applied_score = applied_job_match.get("overall_score") if isinstance(applied_job_match, dict) else None
+
+            skills_src = structured.get("skills_sentences", structured.get("skills", [])) or []
+            skills_nonempty = [s for s in skills_src if isinstance(s, str) and s.strip()][:20]
+            languages = structured.get("languages") or []
+            if not isinstance(languages, list):
+                languages = []
+            contact = resolve_candidate_contact(payload, structured)
+
+            results.append(CVSearchResultItem(
+                id=doc_id,
+                filename=filename,
+                upload_date=doc_meta.get("upload_date", "Unknown"),
+                full_name=resolve_candidate_full_name(payload, structured),
+                job_title=structured.get("job_title") or "Not specified",
+                years_of_experience=structured.get("years_of_experience", structured.get("experience_years", "Not specified")),
+                category=structured.get("category", "General"),
+                skills=skills_nonempty,
+                skill_keywords=[k for k in (structured.get("keywords") or []) if k][:20],
+                location=payload.get("location") or structured.get("location"),
+                nationality=payload.get("nationality"),
+                notice_period=payload.get("notice_period"),
+                gender=structured.get("gender"),
+                languages=[str(x).strip() for x in languages if str(x).strip()][:20],
+                email=contact.get("email"),
+                phone=contact.get("phone"),
+                is_job_application=is_job_application,
+                applied_job_id=applied_job_id or None,
+                applied_job_title=(job_title_by_id.get(applied_job_id) if applied_job_id else None),
+                match_score=applied_score,
+            ))
+
+        return CVAdvancedSearchResponse(results=results, next_cursor=next_cursor, count=len(results))
+    except Exception as e:
+        logger.error(f"❌ Advanced CV search failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Advanced CV search failed: {e}")
 
 
 @router.get("/{cv_id}")
@@ -1045,7 +1207,7 @@ async def get_cv_details(cv_id: str, _: User = Depends(require_core_app)) -> JSO
             "document_type": "cv",
             "is_job_application": is_job_application,
             "candidate": {
-                "full_name": structured.get("contact_info", {}).get("name") or structured.get("full_name", "Not specified"),
+                "full_name": resolve_candidate_full_name(structured_payload, structured),
                 "job_title": structured.get("job_title", "Not specified"),
                 "years_of_experience": structured.get("years_of_experience", structured.get("experience_years", "Not specified")),
                 "skills": skills,
@@ -1053,7 +1215,14 @@ async def get_cv_details(cv_id: str, _: User = Depends(require_core_app)) -> JSO
                 "skills_count": len(skills),
                 "responsibilities_count": len(responsibilities),
                 "contact_info": structured.get("contact_info", {}),
-                "expected_salary": structured_payload.get("expected_salary") or structured.get("expected_salary")
+                "expected_salary": structured_payload.get("expected_salary") or structured.get("expected_salary"),
+                "gender": structured.get("gender"),
+                "languages": [
+                    str(x).strip() for x in (structured.get("languages") or [])
+                    if str(x).strip()
+                ][:20] if isinstance(structured.get("languages"), list) else [],
+                "location": structured_payload.get("location") or structured.get("location"),
+                "nationality": structured_payload.get("nationality") or structured.get("nationality"),
             },
             "job_application": {
                 "expected_salary": structured_payload.get("expected_salary"),
@@ -1089,7 +1258,10 @@ async def get_cv_details(cv_id: str, _: User = Depends(require_core_app)) -> JSO
                 "cover_letter": structured_payload.get("cover_letter"),
                 "cv_filename": structured_payload.get("cv_filename"),
                 "expected_salary": structured_payload.get("expected_salary"),
-                "years_of_experience": structured_payload.get("years_of_experience")
+                "years_of_experience": structured_payload.get("years_of_experience"),
+                "location": structured_payload.get("location"),
+                "notice_period": structured_payload.get("notice_period"),
+                "nationality": structured_payload.get("nationality")
             }
 
         return JSONResponse({"status": "success", "cv": response})
@@ -1749,7 +1921,7 @@ async def get_all_cvs_with_notes(_: User = Depends(require_core_app)) -> JSONRes
                         "cv_id": str(point.id),
                         "filename": filename,
                         "upload_date": doc_meta.get("upload_date", "Unknown"),
-                        "full_name": structured_info.get("contact_info", {}).get("name") or structured_info.get("full_name", "Not specified"),
+                        "full_name": resolve_candidate_full_name(payload, structured_info),
                         "job_title": structured_info.get("job_title", "Not specified"),
                         "years_of_experience": structured_info.get("years_of_experience", structured_info.get("experience_years", "Not specified")),
                         "notes": notes,

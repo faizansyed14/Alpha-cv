@@ -20,7 +20,7 @@ function LoginPageInner() {
   useEffect(() => {
     if (user && !loading) {
       const from = safeRedirectPath(searchParams.get('from'));
-      router.replace(from ?? '/');
+      router.replace(from ?? '/dashboard');
     }
   }, [user, loading, router, searchParams]);
 

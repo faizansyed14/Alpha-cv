@@ -30,7 +30,7 @@ export default function Protected({
     }
 
     if (requireRole && user.role !== requireRole) {
-      router.push('/');
+      router.push('/dashboard');
     }
   }, [user, loading, authHydrated, requireRole, router, fallbackPath, pathname]);
 

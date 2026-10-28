@@ -28,7 +28,7 @@ export default function JobApplicantsPage() {
     jobPostings,
     loadJobApplications,
   } = useCareersStore();
-  const { setCurrentTab, setMatchingProgress, setLoading: setAppLoading } = useAppStore();
+  const { setMatchingProgress, setLoading: setAppLoading } = useAppStore();
   const [error, setError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [isMatching, setIsMatching] = useState(false);
@@ -109,8 +109,7 @@ export default function JobApplicantsPage() {
         estimatedTimeRemaining: Math.max(30, applications.length * 3),
       });
       setAppLoading('careersMatching', true);
-      setCurrentTab('match');
-      router.push('/');
+      router.push('/match');
       await new Promise((r) => setTimeout(r, 500));
       await matchJobCandidates(selectedJob.job_id);
     } catch (e) {
@@ -152,7 +151,7 @@ export default function JobApplicantsPage() {
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
           </Alert>
-          <Button variant="secondary" className="mt-4" icon={<ArrowLeft className="h-4 w-4" />} onClick={() => router.push('/')}>
+          <Button variant="secondary" className="mt-4" icon={<ArrowLeft className="h-4 w-4" />} onClick={() => router.push('/dashboard')}>
             Back to app
           </Button>
         </div>
@@ -162,14 +161,14 @@ export default function JobApplicantsPage() {
 
   return (
     <Protected>
-      <div className="min-h-screen bg-[#F7F8FA]">
+      <div className="min-h-screen bg-[var(--app-bg)]">
         <div className="max-w-6xl mx-auto p-4 sm:p-6">
           <div className="mb-4 sm:mb-6">
             <Button
               variant="ghost"
               size="sm"
               icon={<ArrowLeft className="h-4 w-4" />}
-              onClick={() => router.push('/')}
+              onClick={() => router.push('/dashboard')}
             >
               Back to Careers
             </Button>

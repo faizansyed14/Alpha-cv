@@ -91,8 +91,7 @@ function normSkill(s: string) {
     .trim();
 }
 
-const selectClass =
-  'h-9 rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30';
+const selectClass = 'field-input text-slate-900';
 
 export default function PublicJobOpeningsPage() {
   const [jobs, setJobs] = useState<JobPostingListItem[]>([]);
@@ -185,24 +184,24 @@ export default function PublicJobOpeningsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F7F8FA]">
+    <div className="min-h-screen bg-[var(--app-bg)]">
       {/* Header */}
-      <header className="border-b border-gray-200 bg-white">
+      <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center gap-2.5 px-4 py-3 sm:px-6">
-          <div className="flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 bg-white p-1.5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white p-1.5">
             <img src="/alphadatalogo.svg" alt="Alpha Data" className="h-full w-full object-contain" />
           </div>
           <div>
-            <p className="text-[13px] font-semibold leading-tight text-gray-900">AlphaData</p>
-            <p className="text-[11px] uppercase tracking-wide text-gray-500">Recruitment</p>
+            <p className="text-[13px] font-semibold leading-tight text-slate-900">AlphaData</p>
+            <p className="text-[11px] uppercase tracking-wide text-slate-500">Recruitment</p>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <div className="mb-6">
-          <h1 className="text-xl font-semibold tracking-tight text-gray-900 sm:text-2xl">Open positions</h1>
-          <p className="mt-1 text-[13px] text-gray-500">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Open positions</h1>
+          <p className="mt-1 text-[13px] text-slate-500">
             Explore current opportunities and apply in a few minutes.
           </p>
         </div>
@@ -215,9 +214,9 @@ export default function PublicJobOpeningsPage() {
         ) : null}
 
         {/* Filters */}
-        <div className="mb-5 space-y-3 rounded-lg border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="surface-panel mb-5 space-y-3 p-4">
           <div className="relative w-full sm:max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               value={keyword}
               onChange={(e) => {
@@ -225,13 +224,13 @@ export default function PublicJobOpeningsPage() {
                 setPageIndex(0);
               }}
               placeholder="Search by title or location…"
-              className="h-9 w-full rounded-md border border-gray-200 bg-white pl-9 pr-9 text-[13px] text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+              className="field-input w-full pl-9 pr-9"
             />
             {keyword ? (
               <button
                 type="button"
                 onClick={() => { setKeyword(''); setPageIndex(0); }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors duration-200 hover:text-slate-600"
                 aria-label="Clear search"
               >
                 ×
@@ -245,7 +244,7 @@ export default function PublicJobOpeningsPage() {
               {skills.map((s) => (
                 <span
                   key={s}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[12px] font-medium text-brand-700"
+                  className="chip chip-brand inline-flex items-center gap-1.5"
                 >
                   {s}
                   <button
@@ -271,7 +270,7 @@ export default function PublicJobOpeningsPage() {
                   setPageIndex(0);
                 }}
                 placeholder="Add a skill, press Enter…"
-                className="h-9 min-w-[180px] flex-1 rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                className="field-input min-w-[180px] flex-1"
               />
               {skills.length > 0 ? (
                 <Button
@@ -317,7 +316,7 @@ export default function PublicJobOpeningsPage() {
                   <label
                     key={em}
                     className={`inline-flex cursor-pointer select-none items-center gap-2 rounded-md border px-2.5 py-1.5 text-[13px] ${
-                      checked ? 'border-brand-300 bg-brand-50 text-gray-900' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      checked ? 'border-brand-300 bg-brand-50 text-slate-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                     }`}
                   >
                     <input
@@ -346,14 +345,14 @@ export default function PublicJobOpeningsPage() {
             <div className="flex flex-wrap items-center gap-2">
               <span className="section-label">Cities</span>
               {availableKsaCities.length === 0 ? (
-                <span className="text-[13px] text-gray-500">No KSA cities found in jobs</span>
+                <span className="text-[13px] text-slate-500">No KSA cities found in jobs</span>
               ) : availableKsaCities.map((city) => {
                 const checked = ksaCities.includes(city);
                 return (
                   <label
                     key={city}
                     className={`inline-flex cursor-pointer select-none items-center gap-2 rounded-md border px-2.5 py-1.5 text-[13px] ${
-                      checked ? 'border-brand-300 bg-brand-50 text-gray-900' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      checked ? 'border-brand-300 bg-brand-50 text-slate-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                     }`}
                   >
                     <input
@@ -379,9 +378,9 @@ export default function PublicJobOpeningsPage() {
           ) : null}
 
           {!loading ? (
-            <div className="text-[13px] text-gray-500">
-              Showing <span className="font-medium text-gray-700">{pageJobs.length}</span> of{' '}
-              <span className="font-medium text-gray-700">{filtered.length}</span>
+            <div className="text-[13px] text-slate-500">
+              Showing <span className="font-medium text-slate-700">{pageJobs.length}</span> of{' '}
+              <span className="font-medium text-slate-700">{filtered.length}</span>
             </div>
           ) : null}
         </div>
@@ -390,16 +389,16 @@ export default function PublicJobOpeningsPage() {
         {loading ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-[140px] animate-pulse rounded-lg border border-gray-200 bg-white" />
+              <div key={i} className="surface-panel h-[140px] animate-pulse" />
             ))}
           </div>
         ) : pageJobs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-gray-200 bg-white px-6 py-12 text-center">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-gray-100">
-              <Briefcase className="h-5 w-5 text-gray-400" />
+          <div className="surface-panel flex flex-col items-center justify-center border-dashed px-6 py-12 text-center">
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-slate-100">
+              <Briefcase className="h-5 w-5 text-slate-400" />
             </div>
-            <div className="text-sm font-medium text-gray-900">No jobs found</div>
-            <div className="mt-1 text-[13px] text-gray-500">Try a different keyword or filter.</div>
+            <div className="text-sm font-medium text-slate-900">No jobs found</div>
+            <div className="mt-1 text-[13px] text-slate-500">Try a different keyword or filter.</div>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -408,7 +407,7 @@ export default function PublicJobOpeningsPage() {
               return (
                 <div
                   key={job.job_id}
-                  className="group flex cursor-pointer flex-col rounded-lg border border-gray-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-colors hover:border-brand-300"
+                  className="surface-panel-hover group flex cursor-pointer flex-col p-5 transition-colors duration-200 hover:border-brand-300"
                   onClick={() => tokenOk && openJob(job)}
                   role="button"
                   tabIndex={0}
@@ -417,11 +416,11 @@ export default function PublicJobOpeningsPage() {
                     if (e.key === 'Enter' || e.key === ' ') openJob(job);
                   }}
                 >
-                  <h3 className="text-[15px] font-semibold text-gray-900 group-hover:text-brand-700">
+                  <h3 className="text-[15px] font-semibold text-slate-900 group-hover:text-brand-700">
                     {job.job_title || 'Open position'}
                   </h3>
-                  <div className="mt-2 inline-flex items-center gap-1.5 text-[13px] text-gray-500">
-                    <MapPin className="h-4 w-4 text-gray-400" />
+                  <div className="mt-2 inline-flex items-center gap-1.5 text-[13px] text-slate-500">
+                    <MapPin className="h-4 w-4 text-slate-400" />
                     <span className="truncate">{job.job_location || '—'}</span>
                   </div>
                   <div className="mt-4 pt-4">
@@ -434,7 +433,7 @@ export default function PublicJobOpeningsPage() {
                       className={
                         tokenOk
                           ? 'inline-flex items-center gap-1.5 text-[13px] font-medium text-brand-600 hover:text-brand-700'
-                          : 'inline-flex cursor-not-allowed items-center gap-1.5 text-[13px] font-medium text-gray-400'
+                          : 'inline-flex cursor-not-allowed items-center gap-1.5 text-[13px] font-medium text-slate-400'
                       }
                     >
                       <span>View &amp; apply</span>
@@ -459,7 +458,7 @@ export default function PublicJobOpeningsPage() {
             >
               Previous
             </Button>
-            <span className="px-2 text-[13px] text-gray-500">
+            <span className="px-2 text-[13px] text-slate-500">
               Page {pageIndex + 1} of {maxPageIndex + 1}
             </span>
             <Button

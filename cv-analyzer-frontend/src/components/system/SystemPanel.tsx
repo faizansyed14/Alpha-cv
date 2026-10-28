@@ -198,7 +198,7 @@ export default function SystemPanel() {
   const environment = systemHealth?.environment;
 
   return (
-    <div>
+    <div className="animate-page-enter">
       <PageHeader
         title="System Status"
         description="Monitor system health and performance"
@@ -218,7 +218,7 @@ export default function SystemPanel() {
       />
 
       {/* Overall system status */}
-      <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-[var(--shadow-sm)]">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-success-50 text-success-600">
@@ -297,7 +297,7 @@ export default function SystemPanel() {
 
       {/* Service details */}
       {selectedService && serviceDetails && (
-        <div className="mt-4 rounded-lg border border-gray-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="mt-4 rounded-lg border border-slate-200 bg-white p-5 shadow-[var(--shadow-sm)]">
           <div className="mb-4 flex items-center gap-2">
             <Settings className="h-4 w-4 text-gray-500" />
             <h3 className="text-[13px] font-semibold text-gray-900">{selectedService} details</h3>
@@ -310,7 +310,7 @@ export default function SystemPanel() {
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {Object.entries(serviceDetails).map(([key, value]) => (
-                <div key={key} className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                <div key={key} className="rounded-md border border-slate-200 bg-[var(--app-bg-soft)] p-3">
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide capitalize text-gray-500">
                     {key.replace(/_/g, ' ')}
                   </div>
@@ -384,7 +384,7 @@ export default function SystemPanel() {
       {isAdmin && (
         <>
           <p className="section-label mb-2 mt-8">Danger zone</p>
-          <div className="rounded-lg border border-red-200 bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+          <div className="rounded-lg border border-red-200 bg-white p-5 shadow-[var(--shadow-sm)]">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-3">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-red-50 text-red-600">

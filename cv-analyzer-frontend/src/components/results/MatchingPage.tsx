@@ -1,5 +1,6 @@
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import dynamic from 'next/dynamic';
 import {
   Target,
@@ -26,6 +27,8 @@ import {
   FileCheck
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
+import { useRouter } from 'next/navigation';
+import { workspacePath } from '@/lib/navigation';
 import MatchingFullPageAnimation from '@/components/results/MatchingFullPageAnimation';
 const FilePreviewModal = dynamic(() => import('@/components/ui/file-preview-modal').then(mod => mod.FilePreviewModal), {
   ssr: false,
@@ -218,7 +221,8 @@ function resolveExpectedSalary(candidate: any, applications: any[]): number | nu
 }
 
 // --- Component -----------------------------------------------------------
-export default function MatchingPageNew() {
+export default function MatchingPage() {
+  const router = useRouter();
   const {
     matchResult,
     matchWeights,
@@ -233,10 +237,43 @@ export default function MatchingPageNew() {
     matchingQueue,
     setMatchingQueue,
     matchingProgress,
-  } = useAppStore();
+  } = useAppStore(
+    useShallow((s) => ({
+      matchResult: s.matchResult,
+      matchWeights: s.matchWeights,
+      setMatchWeights: s.setMatchWeights,
+      cvs: s.cvs,
+      jds: s.jds,
+      loadJDs: s.loadJDs,
+      selectedJD: s.selectedJD,
+      selectedCVs: s.selectedCVs,
+      runMatch: s.runMatch,
+      loadingStates: s.loadingStates,
+      matchingQueue: s.matchingQueue,
+      setMatchingQueue: s.setMatchingQueue,
+      matchingProgress: s.matchingProgress,
+    }))
+  );
 
-  const { applications } = useCareersStore();
+  const { applications } = useCareersStore(
+    useShallow((s) => ({ applications: s.applications }))
+  );
   const { user } = useAuthStore();
+
+  // While a match is running (queued, scoring, AI verification, or finalizing) this
+  // page shows the full immersive animation instead of the results UI below. It's
+  // driven entirely by the global store, so switching tabs and coming back here
+  // just re-reads the same live state — the match itself keeps running in the
+  // background regardless. Computed early so the (expensive, list-heavy) launcher
+  // JSX further down is skipped entirely while it isn't even rendered — the fake
+  // progress ticker and the backend poll both update the store every 0.5-2s, and
+  // rebuilding those dropdowns on every one of those ticks was the main source of
+  // jank/stutter during matching.
+  const isMatchingActive =
+    matchingProgress.isVisible ||
+    loadingStates.matching.isLoading ||
+    loadingStates.careersMatching.isLoading ||
+    !!matchingQueue?.isQueued;
 
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortKey>('score');
@@ -323,11 +360,13 @@ export default function MatchingPageNew() {
     }
   };
 
-  const matchLauncher = (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+  // Not shown at all while a match is in flight (see the isMatchingActive early
+  // return below), so skip rebuilding this dropdown-heavy JSX on every progress tick.
+  const matchLauncher = isMatchingActive ? null : (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-[var(--shadow-sm)]">
       <div className="mb-3 flex items-center gap-2">
         <Target className="h-4 w-4 text-brand-600" />
-        <h3 className="text-[14px] font-semibold text-gray-900">Run a match</h3>
+        <h3 className="text-[14px] font-semibold text-slate-900">Run a match</h3>
       </div>
 
       {/* Jobs search */}
@@ -337,18 +376,18 @@ export default function MatchingPageNew() {
           placeholder="Search jobs…"
           value={jobSearch}
           onChange={(e) => setJobSearch(e.target.value)}
-          className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+          className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-[13px] text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
         />
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
         {/* JD dropdown */}
         <div className="flex min-w-[220px] flex-1 flex-col gap-1">
-          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Job description</label>
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Job description</label>
           <select
             value={launchJdId}
             onChange={(e) => setLaunchJdId(e.target.value)}
-            className="h-9 rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            className="h-9 rounded-md border border-slate-300 bg-white px-3 text-[13px] text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
           >
             <option value="">Select a job description…</option>
             {filteredJobOptions.map((j: any) => (
@@ -361,11 +400,11 @@ export default function MatchingPageNew() {
 
         {/* Category dropdown */}
         <div className="flex min-w-[180px] flex-col gap-1">
-          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Category</label>
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Category</label>
           <select
             value={launchCategory}
             onChange={(e) => setLaunchCategory(e.target.value)}
-            className="h-9 rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            className="h-9 rounded-md border border-slate-300 bg-white px-3 text-[13px] text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
           >
             <option value="all">All CVs</option>
             {Object.entries(launchCategories)
@@ -378,11 +417,11 @@ export default function MatchingPageNew() {
 
         {/* Count dropdown */}
         <div className="flex min-w-[150px] flex-col gap-1">
-          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400"># of CVs</label>
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-400"># of CVs</label>
           <select
             value={launchCount}
             onChange={(e) => setLaunchCount(Number(e.target.value))}
-            className="h-9 rounded-md border border-gray-300 bg-white px-3 text-[13px] text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            className="h-9 rounded-md border border-slate-300 bg-white px-3 text-[13px] text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
           >
             {MATCH_COUNT_OPTIONS.map((n) => (
               <option key={n} value={n}>{n}</option>
@@ -395,7 +434,7 @@ export default function MatchingPageNew() {
         </Button>
       </div>
 
-      <p className="mt-2 text-[12px] text-gray-500">
+      <p className="mt-2 text-[12px] text-slate-500">
         Matches the selected job description against the most recent {launchCount} CVs
         {launchCategory === 'all' ? ' across all categories' : ` in “${launchCategory}”`}.
       </p>
@@ -756,16 +795,6 @@ export default function MatchingPageNew() {
     }
   };
 
-  // While a match is running (queued, scoring, AI verification, or finalizing) this
-  // page shows the full immersive animation. It's driven entirely by the global
-  // store, so switching tabs and coming back here just re-reads the same live
-  // state — the match itself keeps running in the background regardless.
-  const isMatchingActive =
-    matchingProgress.isVisible ||
-    loadingStates.matching.isLoading ||
-    loadingStates.careersMatching.isLoading ||
-    !!matchingQueue?.isQueued;
-
   if (isMatchingActive && !loadingStates.matching.error && !loadingStates.careersMatching.error) {
     return (
       <div className="space-y-5">
@@ -804,7 +833,7 @@ export default function MatchingPageNew() {
             <div className="flex flex-col items-center gap-2 sm:flex-row">
               <Button
                 variant="secondary"
-                onClick={() => useAppStore.getState().setCurrentTab?.('database')}
+                onClick={() => router.push(workspacePath('candidates'))}
               >
                 Go to database
               </Button>
@@ -838,7 +867,7 @@ export default function MatchingPageNew() {
           action={
             <Button
               variant="secondary"
-              onClick={() => useAppStore.getState().setCurrentTab?.('database')}
+              onClick={() => router.push(workspacePath('candidates'))}
             >
               Go to database
             </Button>
@@ -849,13 +878,13 @@ export default function MatchingPageNew() {
   }
 
   return (
-    <div className="space-y-8 bg-white min-h-full p-1">
+    <div className="min-h-full space-y-6">
       {matchLauncher}
 
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Match Results</h1>
-          <p className="text-sm sm:text-base text-gray-600 mt-0.5">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Match Results</h1>
+          <p className="text-sm sm:text-base text-slate-600 mt-0.5">
             {totalMatches} candidate{totalMatches !== 1 ? 's' : ''} evaluated. Sort, filter, and export.
           </p>
         </div>
@@ -865,7 +894,7 @@ export default function MatchingPageNew() {
             size="sm"
             onClick={handleExportResults}
             disabled={isExporting}
-            className="border-gray-300 text-gray-700"
+            className="border-slate-300 text-slate-700"
           >
             {isExporting ? (
               <>
@@ -882,7 +911,7 @@ export default function MatchingPageNew() {
           <Button
             variant="outline"
             size="sm"
-            className="border-gray-300 text-gray-700"
+            className="border-slate-300 text-slate-700"
           >
             <BarChart3 className="w-4 h-4 mr-2" />
             Generate report
@@ -897,7 +926,7 @@ export default function MatchingPageNew() {
             <>
               {visibleMatches}
               {resultsLimit !== 'all' && totalMatches > visibleMatches && (
-                <span className="ml-1 text-sm text-gray-500">/{totalMatches}</span>
+                <span className="ml-1 text-sm text-slate-500">/{totalMatches}</span>
               )}
             </>
           }
@@ -908,14 +937,14 @@ export default function MatchingPageNew() {
         <StatCard label="Excellent (≥80%)" value={visibleExcellent} icon={Star} />
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-6">
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-[var(--shadow-sm)] sm:p-6">
         <div className="mb-4 flex items-center gap-3 sm:mb-6">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-brand-50">
             <TrendingUp className="h-4 w-4 text-brand-600" />
           </div>
           <div className="min-w-0">
-            <h3 className="text-[15px] font-semibold text-gray-900">Quality distribution</h3>
-            <p className="text-[13px] text-gray-500">Breakdown by overall match</p>
+            <h3 className="text-[15px] font-semibold text-slate-900">Quality distribution</h3>
+            <p className="text-[13px] text-slate-500">Breakdown by overall match</p>
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
@@ -927,7 +956,7 @@ export default function MatchingPageNew() {
               />
             </div>
             <div className="font-medium text-emerald-700">{excellentMatches} Excellent</div>
-            <p className="text-sm text-gray-500">80–100% match</p>
+            <p className="text-sm text-slate-500">80–100% match</p>
           </div>
           <div className="text-center">
             <div className="w-full bg-amber-100 rounded-full h-2 mb-2 overflow-hidden">
@@ -937,7 +966,7 @@ export default function MatchingPageNew() {
               />
             </div>
             <div className="font-medium text-amber-700">{goodMatches} Good</div>
-            <p className="text-sm text-gray-500">60–79% match</p>
+            <p className="text-sm text-slate-500">60–79% match</p>
           </div>
           <div className="text-center">
             <div className="w-full bg-rose-100 rounded-full h-2 mb-2 overflow-hidden">
@@ -949,18 +978,18 @@ export default function MatchingPageNew() {
             <div className="font-medium text-rose-700">
               {totalMatches - excellentMatches - goodMatches} Needs Review
             </div>
-            <p className="text-sm text-gray-500">&lt;60% match</p>
+            <p className="text-sm text-slate-500">&lt;60% match</p>
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-5">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-5">
         <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-stretch sm:items-center justify-between">
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortKey)}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[neutral-900] focus:border-[neutral-900]"
+            className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[neutral-900] focus:border-[neutral-900]"
           >
             <option value="score">Sort by Overall Score</option>
             <option value="skills">Sort by Skills Match</option>
@@ -968,11 +997,11 @@ export default function MatchingPageNew() {
           </select>
 
           <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-gray-500" />
+            <Filter className="w-4 h-4 text-slate-500" />
             <select
               value={resultsLimit}
               onChange={(e) => setResultsLimit(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[neutral-900] focus:border-[neutral-900]"
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[neutral-900] focus:border-[neutral-900]"
             >
               <option value={3}>Show Top 3</option>
               <option value={5}>Show Top 5</option>
@@ -980,22 +1009,22 @@ export default function MatchingPageNew() {
             </select>
           </div>
           </div>
-          <div className="text-xs text-gray-500 flex items-center gap-2">
-            <Info className="w-4 h-4 text-gray-400" />
+          <div className="text-xs text-slate-500 flex items-center gap-2">
+            <Info className="w-4 h-4 text-slate-400" />
             Tip: start with Top 3 and raise threshold for faster review.
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200">
         <div className="p-4 sm:p-6">
           <div className="flex items-center gap-3 mb-4 sm:mb-6">
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center bg-emerald-50 shrink-0">
               <Target className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-base sm:text-lg font-semibold text-gray-900">Ranked Candidates</h3>
-              <p className="text-sm text-gray-600">
+              <h3 className="text-base sm:text-lg font-semibold text-slate-900">Ranked Candidates</h3>
+              <p className="text-sm text-slate-600">
                 {sortedCandidates.length} shown{resultsLimit !== 'all' ? ` (top ${resultsLimit})` : ''} of {totalFiltered} total.
                 Sorted by {sortBy === 'score' ? 'overall match' : sortBy}.
               </p>
@@ -1016,7 +1045,7 @@ export default function MatchingPageNew() {
               return (
                 <div
                   key={candidate.cv_id}
-                  className={`relative overflow-hidden rounded-xl border bg-white ${isOpen ? 'ring-2 ring-[neutral-900]/30 border-[neutral-900]' : 'border-gray-200'}`}
+                  className={`relative overflow-hidden rounded-xl border bg-white ${isOpen ? 'ring-2 ring-[neutral-900]/30 border-[neutral-900]' : 'border-slate-200'}`}
                 >
                     {/* OUTER WRAPPER FIXED: now a <div> with role="button" */}
                     <div
@@ -1025,7 +1054,7 @@ export default function MatchingPageNew() {
                       }
                       role="button"
                       tabIndex={0}
-                      className="w-full text-left p-5 hover:bg-gray-50 transition-colors cursor-pointer"
+                      className="w-full text-left p-5 hover:bg-slate-50 transition-colors cursor-pointer"
                     >
                       {/* Header row */}
                       <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
@@ -1037,7 +1066,7 @@ export default function MatchingPageNew() {
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <h4 className="font-semibold text-gray-900">{displayName}</h4>
+                              <h4 className="font-semibold text-slate-900">{displayName}</h4>
                               {(notesSummary[candidate.cv_id]?.notes_count || (candidateNotes[candidate.cv_id]?.length || 0)) > 0 && (
                                 <div className="flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
                                   <MessageSquare className="w-3 h-3" />
@@ -1045,16 +1074,17 @@ export default function MatchingPageNew() {
                                 </div>
                               )}
                             </div>
-                            <p className="text-sm text-gray-600">
+                            <p className="text-sm text-slate-600">
                               {title} • {yearsText}
                               {expectedSalary != null && (
-                                <span className="text-gray-700 font-medium"> • Expected: AED {expectedSalary.toLocaleString()}</span>
+                                <span className="text-slate-700 font-medium"> • Expected: AED {expectedSalary.toLocaleString()}</span>
                               )}
                             </p>
                             {(candidate.cv_email || candidate.cv_phone) && (
                               <ContactActions
                                 email={candidate.cv_email}
                                 phone={candidate.cv_phone}
+                                privacy
                                 className="mt-1.5"
                               />
                             )}
@@ -1092,7 +1122,7 @@ export default function MatchingPageNew() {
                                   />
                                 </svg>
                                 <div className="absolute inset-0 flex items-center justify-center">
-                                  <span className="text-sm font-semibold text-gray-900">
+                                  <span className="text-sm font-semibold text-slate-900">
                                     {Math.round(overall * 100)}%
                                   </span>
                                 </div>
@@ -1102,7 +1132,7 @@ export default function MatchingPageNew() {
                                   className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${candidate.llm_analysis.match_level === 'Strong' ? 'bg-emerald-100 text-emerald-700' :
                                     candidate.llm_analysis.match_level === 'Good' ? 'bg-blue-100 text-blue-700' :
                                       candidate.llm_analysis.match_level === 'Average' ? 'bg-amber-100 text-amber-700' :
-                                        'bg-gray-100 text-gray-700'
+                                        'bg-slate-100 text-slate-700'
                                     }`}
                                 >
                                   {candidate.llm_analysis.match_level}
@@ -1130,19 +1160,19 @@ export default function MatchingPageNew() {
                           return (
                             <>
                               <div className="col-span-2 md:col-span-4 -mt-1 mb-0.5">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide uppercase bg-gray-100 text-gray-700">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide uppercase bg-slate-100 text-slate-700">
                                   Breakdown: {b.sourceLabel}
                                 </span>
                                 {candidate?.has_llm_analysis && typeof candidate?.semantic_score === 'number' && (
-                                  <span className="ml-2 text-[11px] text-gray-500">
+                                  <span className="ml-2 text-[11px] text-slate-500">
                                     Overall: {Math.round((candidate?.computed_overall ?? candidate?.overall_score ?? 0) * 100)}% • Similarity: {Math.round((candidate.semantic_score ?? 0) * 100)}%
                                   </span>
                                 )}
                               </div>
                               {/* Skills */}
-                              <div className="p-3 rounded-lg border border-gray-200 bg-white">
+                              <div className="p-3 rounded-lg border border-slate-200 bg-white">
                                 <div className="flex items-center justify-between mb-2">
-                                  <span className="text-xs font-medium text-gray-600">Skills</span>
+                                  <span className="text-xs font-medium text-slate-600">Skills</span>
                                   <span className={`text-xs font-semibold ${metricTextColor(scores.skills)}`}>
                                     {Math.round(scores.skills * 100)}%
                                   </span>
@@ -1156,9 +1186,9 @@ export default function MatchingPageNew() {
                               </div>
 
                               {/* Responsibilities */}
-                              <div className="p-3 rounded-lg border border-gray-200 bg-white">
+                              <div className="p-3 rounded-lg border border-slate-200 bg-white">
                                 <div className="flex items-center justify-between mb-2">
-                                  <span className="text-xs font-medium text-gray-600">Responsibilities</span>
+                                  <span className="text-xs font-medium text-slate-600">Responsibilities</span>
                                   <span className={`text-xs font-semibold ${metricTextColor(scores.responsibilities)}`}>
                                     {Math.round(scores.responsibilities * 100)}%
                                   </span>
@@ -1172,9 +1202,9 @@ export default function MatchingPageNew() {
                               </div>
 
                               {/* Title */}
-                              <div className="p-3 rounded-lg border border-gray-200 bg-white">
+                              <div className="p-3 rounded-lg border border-slate-200 bg-white">
                                 <div className="flex items-center justify-between mb-2">
-                                  <span className="text-xs font-medium text-gray-600">Title</span>
+                                  <span className="text-xs font-medium text-slate-600">Title</span>
                                   <span className={`text-xs font-semibold ${metricTextColor(scores.title)}`}>
                                     {Math.round(scores.title * 100)}%
                                   </span>
@@ -1188,9 +1218,9 @@ export default function MatchingPageNew() {
                               </div>
 
                               {/* Years */}
-                              <div className="p-3 rounded-lg border border-gray-200 bg-white">
+                              <div className="p-3 rounded-lg border border-slate-200 bg-white">
                                 <div className="flex items-center justify-between mb-2">
-                                  <span className="text-xs font-medium text-gray-600">Years</span>
+                                  <span className="text-xs font-medium text-slate-600">Years</span>
                                   <span className={`text-xs font-semibold ${metricTextColor(scores.years)}`}>
                                     {Math.round(scores.years * 100)}%
                                   </span>
@@ -1217,7 +1247,7 @@ export default function MatchingPageNew() {
                                 value={noteText}
                                 onChange={(e) => setNoteText(e.target.value)}
                                 placeholder="Add a note about this candidate..."
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[neutral-900] resize-none"
+                                className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[neutral-900] resize-none"
                                 rows={2}
                                 cols={30}
                                 onClick={(e) => e.stopPropagation()}
@@ -1348,8 +1378,8 @@ export default function MatchingPageNew() {
                           <div className="mt-2 space-y-6">
                             {/* AI Analysis Section (Redesigned) */}
                             {candidate.has_llm_analysis && candidate.llm_analysis && (
-                              <div className="p-4 sm:p-5 rounded-xl bg-white border border-gray-200 shadow-sm space-y-4">
-                                <div className="flex items-start justify-between gap-4 pb-3 border-b border-gray-100">
+                              <div className="p-4 sm:p-5 rounded-xl bg-white border border-slate-200 shadow-sm space-y-4">
+                                <div className="flex items-start justify-between gap-4 pb-3 border-b border-slate-100">
                                   <div className="flex items-center gap-3">
                                     <div className={`p-2 rounded-lg ${candidate.llm_analysis.match_level === 'Strong' ? 'bg-emerald-100 text-emerald-600' :
                                       candidate.llm_analysis.match_level === 'Good' ? 'bg-blue-100 text-blue-600' :
@@ -1358,8 +1388,8 @@ export default function MatchingPageNew() {
                                       <Sparkles className="w-5 h-5" />
                                     </div>
                                     <div>
-                                      <h4 className="text-base font-semibold text-gray-900 leading-tight">AI Match Analysis</h4>
-                                      <p className="text-xs font-medium text-gray-500 mt-0.5">
+                                      <h4 className="text-base font-semibold text-slate-900 leading-tight">AI Match Analysis</h4>
+                                      <p className="text-xs font-medium text-slate-500 mt-0.5">
                                         Match Level:{' '}
                                         <span className={`font-semibold ${
                                           candidate.llm_analysis.match_level === 'Strong' ? 'text-emerald-600' :
@@ -1372,8 +1402,8 @@ export default function MatchingPageNew() {
                                     </div>
                                   </div>
                                   <div className="text-right">
-                                    <p className="text-xl font-bold text-gray-900 leading-none">{Math.round(overall * 100)}</p>
-                                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mt-1">Score</p>
+                                    <p className="text-xl font-bold text-slate-900 leading-none">{Math.round(overall * 100)}</p>
+                                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mt-1">Score</p>
                                   </div>
                                 </div>
 
@@ -1392,7 +1422,7 @@ export default function MatchingPageNew() {
                                         </span>
                                       ))}
                                       {(!candidate.llm_analysis.key_matches || candidate.llm_analysis.key_matches.length === 0) && (
-                                        <span className="text-sm text-gray-500">No key matches identified.</span>
+                                        <span className="text-sm text-slate-500">No key matches identified.</span>
                                       )}
                                     </div>
                                   </div>
@@ -1411,15 +1441,15 @@ export default function MatchingPageNew() {
                                         </span>
                                       ))}
                                       {(!candidate.llm_analysis.gaps || candidate.llm_analysis.gaps.length === 0) && (
-                                        <span className="text-sm text-gray-500">No major gaps identified.</span>
+                                        <span className="text-sm text-slate-500">No major gaps identified.</span>
                                       )}
                                     </div>
                                   </div>
                                 </div>
 
-                                <div className="pt-3 border-t border-gray-100">
-                                  <h5 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Fit Summary</h5>
-                                  <p className="text-sm text-gray-900 leading-relaxed">
+                                <div className="pt-3 border-t border-slate-100">
+                                  <h5 className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">Fit Summary</h5>
+                                  <p className="text-sm text-slate-900 leading-relaxed">
                                     {candidate.llm_analysis.summary || 'Detailed summary unavailable.'}
                                   </p>
                                 </div>
@@ -1427,29 +1457,29 @@ export default function MatchingPageNew() {
                             )}
 
                             {/* Position Details */}
-                            <div className="p-4 rounded-lg bg-gray-50 border border-gray-200">
-                              <h4 className="font-semibold text-gray-900 mb-3">Position Details</h4>
+                            <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
+                              <h4 className="font-semibold text-slate-900 mb-3">Position Details</h4>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                  <h5 className="text-sm font-medium text-gray-700">Job Description</h5>
+                                  <h5 className="text-sm font-medium text-slate-700">Job Description</h5>
                                   <div className="flex items-center mt-1">
-                                    <Briefcase className="w-4 h-4 text-gray-500 mr-2" />
-                                    <p className="text-sm text-gray-900">{matchResult?.jd_job_title || 'N/A'}</p>
+                                    <Briefcase className="w-4 h-4 text-slate-500 mr-2" />
+                                    <p className="text-sm text-slate-900">{matchResult?.jd_job_title || 'N/A'}</p>
                                   </div>
                                   <div className="flex items-center mt-1">
-                                    <Calendar className="w-4 h-4 text-gray-500 mr-2" />
-                                    <p className="text-sm text-gray-900">{matchResult?.jd_years || 'N/A'} years required</p>
+                                    <Calendar className="w-4 h-4 text-slate-500 mr-2" />
+                                    <p className="text-sm text-slate-900">{matchResult?.jd_years || 'N/A'} years required</p>
                                   </div>
                                 </div>
                                 <div>
-                                  <h5 className="text-sm font-medium text-gray-700">Candidate</h5>
+                                  <h5 className="text-sm font-medium text-slate-700">Candidate</h5>
                                   <div className="flex items-center mt-1">
-                                    <Briefcase className="w-4 h-4 text-gray-500 mr-2" />
-                                    <p className="text-sm text-gray-900">{candidate.cv_job_title || 'N/A'}</p>
+                                    <Briefcase className="w-4 h-4 text-slate-500 mr-2" />
+                                    <p className="text-sm text-slate-900">{candidate.cv_job_title || 'N/A'}</p>
                                   </div>
                                   <div className="flex items-center mt-1">
-                                    <Calendar className="w-4 h-4 text-gray-500 mr-2" />
-                                    <p className="text-sm text-gray-900">{candidate.cv_years || 'N/A'} years experience</p>
+                                    <Calendar className="w-4 h-4 text-slate-500 mr-2" />
+                                    <p className="text-sm text-slate-900">{candidate.cv_years || 'N/A'} years experience</p>
                                   </div>
                                 </div>
                               </div>
@@ -1463,7 +1493,7 @@ export default function MatchingPageNew() {
                                   <div>
                                     <div className="flex items-center gap-2 mb-3">
                                       <Brain className="w-4 h-4 text-[neutral-900]" />
-                                      <h4 className="font-semibold text-gray-900">
+                                      <h4 className="font-semibold text-slate-900">
                                         Matched Skills ({candidate.skills_assignments.length})
                                       </h4>
                                     </div>
@@ -1471,11 +1501,11 @@ export default function MatchingPageNew() {
                                       {candidate.skills_assignments.map((a: any, idx: number) => {
                                         const s = Number(a.score ?? 0);
                                         return (
-                                          <div key={idx} className="p-3 rounded-lg border border-gray-200 bg-white">
-                                            <div className="text-sm text-gray-900">
+                                          <div key={idx} className="p-3 rounded-lg border border-slate-200 bg-white">
+                                            <div className="text-sm text-slate-900">
                                               JD Required: <span className="font-medium">{a.jd_item}</span>
                                             </div>
-                                            <div className="text-sm text-gray-700">CV has: {a.cv_item}</div>
+                                            <div className="text-sm text-slate-700">CV has: {a.cv_item}</div>
                                             <div className="flex items-center gap-2 mt-2">
                                               <div className="flex-1 bg-gray-200 rounded-full h-2">
                                                 <div className={`h-2 rounded-full ${barColor(s)}`} style={{ width: `${s * 100}%` }} />
@@ -1494,7 +1524,7 @@ export default function MatchingPageNew() {
                                   <div>
                                     <div className="flex items-center gap-2 mb-3">
                                       <Eye className="w-4 h-4 text-rose-600" />
-                                      <h4 className="font-semibold text-gray-900">
+                                      <h4 className="font-semibold text-slate-900">
                                         Unmatched Skills ({candidate.unmatched_jd_skills.length})
                                       </h4>
                                     </div>
@@ -1516,7 +1546,7 @@ export default function MatchingPageNew() {
                                   <div>
                                     <div className="flex items-center gap-2 mb-3">
                                       <Target className="w-4 h-4 text-emerald-600" />
-                                      <h4 className="font-semibold text-gray-900">
+                                      <h4 className="font-semibold text-slate-900">
                                         Matched Responsibilities ({candidate.responsibilities_assignments.length})
                                       </h4>
                                     </div>
@@ -1524,11 +1554,11 @@ export default function MatchingPageNew() {
                                       {candidate.responsibilities_assignments.map((a: any, idx: number) => {
                                         const s = Number(a.score ?? 0);
                                         return (
-                                          <div key={idx} className="p-3 rounded-lg border border-gray-200 bg-white">
-                                            <div className="text-sm text-gray-900">
+                                          <div key={idx} className="p-3 rounded-lg border border-slate-200 bg-white">
+                                            <div className="text-sm text-slate-900">
                                               JD Required: <span className="font-medium">{a.jd_item}</span>
                                             </div>
-                                            <div className="text-sm text-gray-700">CV has: {a.cv_item}</div>
+                                            <div className="text-sm text-slate-700">CV has: {a.cv_item}</div>
                                             <div className="flex items-center gap-2 mt-2">
                                               <div className="flex-1 bg-gray-200 rounded-full h-2">
                                                 <div className={`h-2 rounded-full ${barColor(s)}`} style={{ width: `${s * 100}%` }} />
@@ -1547,7 +1577,7 @@ export default function MatchingPageNew() {
                                   <div>
                                     <div className="flex items-center gap-2 mb-3">
                                       <Eye className="w-4 h-4 text-rose-600" />
-                                      <h4 className="font-semibold text-gray-900">
+                                      <h4 className="font-semibold text-slate-900">
                                         Unmatched Responsibilities ({candidate.unmatched_jd_responsibilities.length})
                                       </h4>
                                     </div>
@@ -1565,7 +1595,7 @@ export default function MatchingPageNew() {
                                 )}
 
                                 {/* Summary */}
-                                <div className="p-4 rounded-lg bg-gray-50 border border-gray-200">
+                                <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
                                   <div className="grid grid-cols-2 gap-4 text-center">
                                     <div>
                                       <div className="text-lg font-semibold text-[neutral-900]">
@@ -1575,7 +1605,7 @@ export default function MatchingPageNew() {
                                         /
                                         {candidate.skills_assignments ? candidate.skills_assignments.length : 0}
                                       </div>
-                                      <div className="text-xs text-gray-600">Strong Skills Matches (≥70%)</div>
+                                      <div className="text-xs text-slate-600">Strong Skills Matches (≥70%)</div>
                                     </div>
                                     <div>
                                       <div className="text-lg font-semibold text-emerald-600">
@@ -1587,7 +1617,7 @@ export default function MatchingPageNew() {
                                           ? candidate.responsibilities_assignments.length
                                           : 0}
                                       </div>
-                                      <div className="text-xs text-gray-600">Strong Responsibility Matches (≥70%)</div>
+                                      <div className="text-xs text-slate-600">Strong Responsibility Matches (≥70%)</div>
                                     </div>
                                   </div>
                                 </div>
@@ -1629,9 +1659,9 @@ export default function MatchingPageNew() {
 
           {sortedCandidates.length === 0 && (
             <div className="text-center py-12">
-              <Filter className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-              <h3 className="text-base font-semibold text-gray-800 mb-1">No matches found</h3>
-              <p className="text-sm text-gray-500">Adjust your filters to view more candidates.</p>
+              <Filter className="w-12 h-12 mx-auto mb-3 text-slate-400" />
+              <h3 className="text-base font-semibold text-slate-800 mb-1">No matches found</h3>
+              <p className="text-sm text-slate-500">Adjust your filters to view more candidates.</p>
             </div>
           )}
         </div>

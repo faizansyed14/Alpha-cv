@@ -15,12 +15,17 @@ RUN npm ci
 FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
 
 # Build arguments (must be set at build time for Next.js)
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_API_BASE
 ARG BACKEND_INTERNAL_URL
+# Fingerprint from start.sh — changes when frontend source changes so COPY/build
+# are not served from a stale Docker layer cache (common on Windows Desktop).
+ARG FRONTEND_CACHEBUST=0
+RUN echo "FRONTEND_CACHEBUST=$FRONTEND_CACHEBUST"
+
+COPY . .
 
 # Environment variables for build
 ENV NEXT_TELEMETRY_DISABLED=1

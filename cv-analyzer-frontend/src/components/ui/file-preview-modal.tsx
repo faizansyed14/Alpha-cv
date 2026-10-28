@@ -208,13 +208,13 @@ export function FilePreviewModal({ isOpen, onClose, fileUrl, fileName, fileId, f
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className="max-w-5xl w-[90vw] h-[90vh] flex flex-col p-0 overflow-hidden bg-white border-gray-200">
+            <DialogContent className="max-w-5xl w-[90vw] h-[90vh] flex flex-col p-0 overflow-hidden bg-white border-slate-200">
                 <DialogTitle className="sr-only">Preview: {fileName}</DialogTitle>
                 {/* Header chrome */}
-                <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-3">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
                     <div className="flex min-w-0 items-center gap-2">
-                        <FileText className="h-4 w-4 shrink-0 text-gray-400" />
-                        <span className="truncate text-[13px] font-medium text-gray-900">{fileName}</span>
+                        <FileText className="h-4 w-4 shrink-0 text-slate-400" />
+                        <span className="truncate text-[13px] font-medium text-slate-900">{fileName}</span>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                         <Button variant="secondary" size="sm" onClick={handleDownload} icon={<Download />}>
@@ -231,13 +231,13 @@ export function FilePreviewModal({ isOpen, onClose, fileUrl, fileName, fileId, f
                     </div>
                 </div>
 
-                <div className="flex-1 flex flex-col min-h-0 relative bg-gray-50">
+                <div className="flex-1 flex flex-col min-h-0 relative bg-slate-50">
                     {usePdfIframe ? (
                         <>
                             {!iframeLoaded && (
-                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-gray-50">
+                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-50">
                                     <div className="mb-3 h-10 w-10 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
-                                    <p className="text-[13px] text-gray-600">Loading document…</p>
+                                    <p className="text-[13px] text-slate-600">Loading document…</p>
                                 </div>
                             )}
                             <iframe
@@ -250,13 +250,13 @@ export function FilePreviewModal({ isOpen, onClose, fileUrl, fileName, fileId, f
                     ) : isDocx ? (
                         <>
                             {!docxReady && !docxError && (
-                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-gray-50">
+                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-50">
                                     <div className="mb-3 h-10 w-10 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
-                                    <p className="text-[13px] text-gray-600">Loading document…</p>
+                                    <p className="text-[13px] text-slate-600">Loading document…</p>
                                 </div>
                             )}
                             {docxError && (
-                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-gray-50 p-6">
+                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-slate-50 p-6">
                                     <p className="text-[13px] text-red-600">Could not preview this document.</p>
                                     <Button variant="primary" onClick={handleDownload} icon={<Download />}>
                                         Download
@@ -277,28 +277,28 @@ export function FilePreviewModal({ isOpen, onClose, fileUrl, fileName, fileId, f
                             {textLoading ? (
                                 <div className="flex h-full flex-col items-center justify-center">
                                     <div className="mb-3 h-10 w-10 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
-                                    <p className="text-[13px] text-gray-600">Loading document…</p>
+                                    <p className="text-[13px] text-slate-600">Loading document…</p>
                                 </div>
                             ) : (textContent && textContent.trim().length > 0) ? (
-                                <div className="overflow-auto rounded-lg border border-gray-200 bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+                                <div className="overflow-auto rounded-lg border border-slate-200 bg-white p-6 shadow-[var(--shadow-sm)]">
                                     <div className="mb-4 flex items-center justify-between">
                                         <h3 className="section-label flex items-center gap-2">
                                             <FileText className="h-4 w-4" /> Raw document content
                                         </h3>
                                         <Badge variant="secondary">{textContent.length} characters</Badge>
                                     </div>
-                                    <pre className="whitespace-pre-wrap font-mono text-[13px] leading-relaxed text-gray-700" style={{ fontFamily: 'ui-monospace, monospace' }}>
+                                    <pre className="whitespace-pre-wrap font-mono text-[13px] leading-relaxed text-slate-700" style={{ fontFamily: 'ui-monospace, monospace' }}>
                                         {textContent}
                                     </pre>
                                 </div>
                             ) : (
                                 <div className="flex h-full flex-col items-center justify-center p-8">
-                                    <div className="flex max-w-md flex-col items-center rounded-lg border border-gray-200 bg-white p-10 text-center shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-                                        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100">
-                                            <Maximize2 className="h-6 w-6 text-gray-400" />
+                                    <div className="flex max-w-md flex-col items-center rounded-lg border border-slate-200 bg-white p-10 text-center shadow-[var(--shadow-sm)]">
+                                        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100">
+                                            <Maximize2 className="h-6 w-6 text-slate-400" />
                                         </div>
-                                        <h3 className="text-sm font-semibold text-gray-900">Preview not available</h3>
-                                        <p className="mb-6 mt-1 text-[13px] text-gray-500">
+                                        <h3 className="text-sm font-semibold text-slate-900">Preview not available</h3>
+                                        <p className="mb-6 mt-1 text-[13px] text-slate-500">
                                             {isBinaryUnknown
                                                 ? "This is a legacy .doc file — browsers can't render the old Word binary format in-page. Download it to view in Word."
                                                 : 'This document could not be displayed. You can download the original file.'}
