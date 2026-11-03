@@ -77,5 +77,5 @@ SQL
 echo "→ Flushing Redis..."
 compose exec -T "$REDIS_SVC" redis-cli FLUSHALL >/dev/null
 
-echo "✅ Application data reset complete. Volumes untouched; backend will recreate"
+echo "Application data reset complete. Volumes untouched; backend will recreate"
 echo "   empty Qdrant collections on next request (or run: python3 db/init_qdrant.py)."

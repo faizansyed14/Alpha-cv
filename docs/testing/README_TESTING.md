@@ -1,8 +1,8 @@
-# 🧪 Testing Guide
+# Testing Guide
 
 This document explains how to run tests and achieve code coverage for the Alpha CV Analyzer backend.
 
-## 📋 Prerequisites
+## Prerequisites
 
 1. Install testing dependencies:
 ```bash
@@ -16,7 +16,7 @@ This will install:
 - `pytest-mock` - Mocking utilities
 - `httpx` - HTTP client for testing
 
-## 🚀 Running Tests
+## Running Tests
 
 ### Run All Tests
 ```bash
@@ -70,7 +70,7 @@ pytest -v
 pytest -s
 ```
 
-## 📊 Coverage Reports
+## Coverage Reports
 
 ### View HTML Coverage Report
 After running tests with coverage, open:
@@ -92,7 +92,7 @@ pytest --cov=app --cov-report=term-missing
 
 The `--cov-fail-under=70` flag in `pytest.ini` will fail the test run if coverage is below 70%.
 
-## 🧩 Test Structure
+## Test Structure
 
 ```
 tests/
@@ -103,7 +103,7 @@ tests/
 └── test_matching_service.py  # Matching service tests (existing)
 ```
 
-## 📝 Writing New Tests
+## Writing New Tests
 
 ### Test File Template
 ```python
@@ -142,7 +142,7 @@ Use markers to categorize tests:
 - `@pytest.mark.auth` - Authentication tests
 - `@pytest.mark.slow` - Slow-running tests
 
-## 🔧 Configuration
+## Configuration
 
 Test configuration is in `pytest.ini`:
 - Test paths: `tests/`
@@ -150,7 +150,7 @@ Test configuration is in `pytest.ini`:
 - Async mode: auto
 - Reports: terminal, HTML, XML
 
-## 🐛 Debugging Tests
+## Debugging Tests
 
 ### Run Single Test
 ```bash
@@ -167,7 +167,7 @@ pytest -s tests/test_security.py
 pytest --pdb tests/test_security.py
 ```
 
-## ✅ Test Checklist
+## Test Checklist
 
 Before committing, ensure:
 - [ ] All tests pass: `pytest`
@@ -176,7 +176,7 @@ Before committing, ensure:
 - [ ] New code has corresponding tests
 - [ ] Tests are well-documented
 
-## 📈 Current Test Coverage
+## Current Test Coverage
 
 Run tests to see current coverage:
 ```bash
@@ -184,23 +184,23 @@ pytest --cov=app --cov-report=term-missing
 ```
 
 ### Modules with Tests
-- ✅ `app/utils/security.py` - Comprehensive tests
-- ✅ `app/routes/auth_routes.py` - API endpoint tests
-- ✅ `app/db/auth_db.py` - Database operation tests
-- ✅ `app/services/matching_service.py` - Existing tests
+- `app/utils/security.py` - Comprehensive tests
+- `app/routes/auth_routes.py` - API endpoint tests
+- `app/db/auth_db.py` - Database operation tests
+- `app/services/matching_service.py` - Existing tests
 
 ### Modules Needing Tests
-- ⏳ `app/utils/qdrant_utils.py`
-- ⏳ `app/routes/cv_routes.py`
-- ⏳ `app/routes/jd_routes.py`
-- ⏳ Other service modules
+- `app/utils/qdrant_utils.py`
+- `app/routes/cv_routes.py`
+- `app/routes/jd_routes.py`
+- Other service modules
 
-## 🚨 Common Issues
+## Common Issues
 
 ### Issue: Import Errors
-**Solution**: Ensure you're running tests from the `alpha-backend` directory:
+**Solution**: Ensure you're running tests from the `backend` directory:
 ```bash
-cd alpha-backend
+cd backend
 pytest
 ```
 
@@ -213,7 +213,7 @@ pytest
 ### Issue: Mock Not Working
 **Solution**: Ensure you're patching the correct import path (where it's used, not where it's defined).
 
-## 📚 Resources
+## Resources
 
 - [Pytest Documentation](https://docs.pytest.org/)
 - [Pytest-Cov Documentation](https://pytest-cov.readthedocs.io/)

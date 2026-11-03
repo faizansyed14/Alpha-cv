@@ -1,4 +1,4 @@
-# 📧 Email CV Extraction System Documentation
+# Email CV Extraction System Documentation
 
 ## Table of Contents
 1. [Overview](#overview)
@@ -17,13 +17,13 @@
 The system automatically extracts CVs from emails sent to `cv@alphadatarecruitment.ae` every 5 minutes using Microsoft Graph API (Azure). It processes CVs, links them to job postings using unique subject IDs, and stores all data in Qdrant vector database.
 
 ### Key Features:
-- ✅ Automated email checking every 5 minutes
-- ✅ Smart email subject parsing
-- ✅ Duplicate prevention at multiple levels
-- ✅ Support for PDF, DOCX, DOC, and TXT attachments
-- ✅ Automatic job matching via subject ID
-- ✅ No manual matching - HR does matching from UI
-- ✅ Complete audit trail with tracking
+- Automated email checking every 5 minutes
+- Smart email subject parsing
+- Duplicate prevention at multiple levels
+- Support for PDF, DOCX, DOC, and TXT attachments
+- Automatic job matching via subject ID
+- No manual matching - HR does matching from UI
+- Complete audit trail with tracking
 
 ---
 
@@ -81,10 +81,10 @@ Job Title | ID-YYYY-NNN
 ```
 
 **Examples:**
-- ✅ `Software Engineer | SE-2025-001`
-- ✅ `Data Reporting Analyst Consultancy | DRA-2025-001`
-- ✅ `Senior Mobile Developer | SMD-2024-042`
-- ✅ `Re: Fleet Controller / Fleet Coordinator | FCC-2025-003` (Re:/Fwd: are automatically removed)
+- `Software Engineer | SE-2025-001`
+- `Data Reporting Analyst Consultancy | DRA-2025-001`
+- `Senior Mobile Developer | SMD-2024-042`
+- `Re: Fleet Controller / Fleet Coordinator | FCC-2025-003` (Re:/Fwd: are automatically removed)
 
 **Subject ID Pattern:**
 - 2-4 uppercase letters (job abbreviation)
@@ -118,10 +118,10 @@ email_subject_template = generate_email_subject_template(job_title, email_subjec
 ### **What Happens if Subject Doesn't Match?**
 
 If email subject does NOT match the pattern:
-- ⚠️ Warning logged: `"Could not parse email subject"`
-- ❌ CV is NOT processed
-- ❌ Email is marked as processed (won't retry)
-- 📝 Status: `processing_status = "invalid_subject"`
+- Warning logged: `"Could not parse email subject"`
+- CV is NOT processed
+- Email is marked as processed (won't retry)
+- Status: `processing_status = "invalid_subject"`
 
 ---
 
@@ -403,7 +403,7 @@ Load processed_emails.json → Set of processed email IDs
     ↓
 Start Background Task → asyncio.create_task(start_scheduler)
     ↓
-Log: "📧 Email scheduler started (checking every 5 minutes)"
+Log: "Email scheduler started (checking every 5 minutes)"
 ```
 
 **Files Involved:**
@@ -470,7 +470,7 @@ Add to Processed List → processed_emails.json
     ↓
 Save File → Persist to disk
     ↓
-Log Success → "✅ Processed 1 CV from email"
+Log Success → "Processed 1 CV from email"
 ```
 
 **Files Involved:**
@@ -512,21 +512,21 @@ View Match Results → See 93.5% match score, etc.
 
 ### **Emails That WILL Be Processed:**
 
-✅ **Unread emails** with attachments
-✅ **Subject matches pattern:** `Job Title | ID-YYYY-NNN`
-✅ **Attachments:** `.pdf`, `.docx`, `.doc`, `.txt`
-✅ **Not in processed list:** Email ID not in `processed_emails.json`
-✅ **Job posting exists:** Subject ID matches active job
-✅ **Sent to:** `cv@alphadatarecruitment.ae`
+**Unread emails** with attachments
+**Subject matches pattern:** `Job Title | ID-YYYY-NNN`
+**Attachments:** `.pdf`, `.docx`, `.doc`, `.txt`
+**Not in processed list:** Email ID not in `processed_emails.json`
+**Job posting exists:** Subject ID matches active job
+**Sent to:** `cv@alphadatarecruitment.ae`
 
 ### **Emails That WILL NOT Be Processed:**
 
-❌ **Already processed** (email ID in tracking file)
-❌ **No attachments**
-❌ **Invalid subject format** (missing "|" or ID pattern)
-❌ **Wrong file types** (e.g., .jpg, .png, .zip)
-❌ **Job posting not found** (subject ID doesn't match any job)
-❌ **Read emails** (if marked as read in Azure)
+**Already processed** (email ID in tracking file)
+**No attachments**
+**Invalid subject format** (missing "|" or ID pattern)
+**Wrong file types** (e.g., .jpg, .png, .zip)
+**Job posting not found** (subject ID doesn't match any job)
+**Read emails** (if marked as read in Azure)
 
 ### **What Happens to Invalid Emails:**
 
@@ -584,11 +584,11 @@ volumes:
 ### **Monitoring & Logs**
 
 **Log Messages:**
-- `📧 Starting scheduled email processing batch`
-- `✅ Processed 1 emails successfully`
-- `📧 No emails to process`
-- `⚠️ Could not parse email subject: 'invalid subject'`
-- `❌ Failed to process email {email_id}: {error}`
+- `Starting scheduled email processing batch`
+- `Processed 1 emails successfully`
+- `No emails to process`
+- `Could not parse email subject: 'invalid subject'`
+- `Failed to process email {email_id}: {error}`
 
 **API Endpoints for Monitoring:**
 ```

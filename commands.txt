@@ -1,9 +1,64 @@
-AlphaCV — common commands
+AlphaCV, common commands
 ==========================
 Run these from the project root (the folder this file is in).
-Every start command rebuilds all images (frontend, backend, workers) and
-recreates containers, so code changes are always picked up. Stop commands
-never delete volumes (Postgres/Qdrant/Redis/uploads data is safe).
+Every start command rebuilds all images (frontend, backend, model server, workers)
+and recreates containers, so code changes are always picked up. Stop commands
+never delete volumes (Postgres/Qdrant/Redis/uploads data is safe). Only
+./scripts/clean.sh deletes data, and it asks first.
+
+Three stacks (same code, different homes for the data):
+  local : everything on this machine, in Docker volumes (Postgres + raw files + Qdrant + Redis)
+  dev   : raw files in S3, Postgres on RDS (whatever .env.dev points at)
+  prod  : the deployment (docker-compose.prod.yml)
+dev and local use the same ports, so run one of them at a time.
+
+LOCAL (all data in Docker volumes - no S3, no RDS)
+--------------------------------------------------
+Start local (first run creates .env.local from .env.dev, or the example, and
+forces storage + databases to the local volumes; add your OPENAI_API_KEY to it):
+  ./scripts/start.sh local
+
+Stop local (keeps the volumes):
+  ./scripts/stop.sh local
+
+Start local with a from-scratch build (ignores Docker's layer cache):
+  ./scripts/start.sh local clean
+
+Rebuild ONLY the frontend after a UI change (about a minute; backend, workers and data are not touched):
+  ./scripts/frontend.sh                 (local, the default)
+  ./scripts/frontend.sh dev|prod        (other stacks)
+  ./scripts/frontend.sh local clean     (from-scratch frontend build)
+Then hard-refresh the browser (Ctrl+Shift+R).
+
+Delete this stack's containers, volumes and images (asks you to type 'delete'),
+then rebuild from nothing:
+  ./scripts/clean.sh local
+  ./scripts/start.sh local clean
+
+Logs / status:
+  docker compose -f docker-compose.local.yml --env-file .env.local logs -f
+  docker compose -f docker-compose.local.yml --env-file .env.local ps
+
+Local URLs (same as dev):
+  Frontend : http://localhost:3000
+  API      : http://localhost:8000
+  Nginx    : http://localhost
+  Monitor  : http://localhost/monitor   (admin login)
+
+Resource limits (docker-compose.local.yml; like prod but smaller, ~6.4 GB of limits in total so it fits in 8 GB):
+  match worker 2 CPU / 1.5 GB    backend 1.5 CPU / 1.25 GB    model server 1.5 CPU / 1.25 GB
+  qdrant 1 CPU / 768 MB          postgres 1 CPU / 384 MB      background worker 0.75 CPU / 512 MB
+  frontend 0.5 CPU / 384 MB      redis 0.5 CPU / 320 MB       nginx 0.25 CPU / 64 MB
+Live usage:  docker stats --no-stream
+More concurrent matches:  docker compose -f docker-compose.local.yml --env-file .env.local up -d --scale match-worker-local=2
+  (each extra match worker adds up to 2 CPU / 1.5 GB; only do it if the Docker VM has the memory)
+
+Where the data lives (docker volume ls):
+  alpha-cv-local_postgres-local-data   Postgres (users, tracker)
+  alpha-cv-local_qdrant-local-data     CV / JD index and embeddings
+  alpha-cv-local_uploads-local-data    raw CV and JD files
+  alpha-cv-local_redis-local-data      queues + caches
+  alpha-cv-local_llm-cache-local       LLM response cache
 
 DEVELOPMENT
 -----------
@@ -15,6 +70,9 @@ Stop dev:
 
 Start dev with a from-scratch build (ignores Docker's layer cache):
   ./scripts/start.sh dev clean
+
+Delete the dev stack's containers, volumes and images (asks first):
+  ./scripts/clean.sh dev
 
 First-time setup (only once):
   cp .env.development.example .env.dev
@@ -62,13 +120,13 @@ Wipe application data only (keeps auth users + all volumes, asks to confirm):
   ./db/reset_data.sh prod
 
 Run backend tests:
-  cd alpha-backend
+  cd backend
   python3 -m pytest tests/ --no-cov
 
 Run backend offline end-to-end smoke test:
-  cd alpha-backend
+  cd backend
   PYTHONPATH=. python3 tests/e2e_smoke.py
 
 Build frontend locally (without Docker):
-  cd cv-analyzer-frontend
+  cd frontend
   npm run build

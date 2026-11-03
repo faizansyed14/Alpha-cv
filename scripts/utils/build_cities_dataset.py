@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Rebuild alpha-backend/app/data/cities.json — the city/country autocomplete
+"""Rebuild backend/app/data/cities.json, the city/country autocomplete
 dataset behind the careers apply form's "current location" field and the
 resulting Location filter on the applicants/database pages.
 
 Source: GeoNames' cities15000 dump (public domain / CC-BY 4.0,
-https://www.geonames.org/ — credit: GeoNames). Free, no API key, no rate
+https://www.geonames.org/, credit: GeoNames). Free, no API key, no rate
 limit; downloaded once here at build time, not called at runtime.
 
 Curated down from "every populated place with population >= 15,000" to
@@ -45,10 +45,10 @@ from pathlib import Path
 
 CITIES_URL = "https://download.geonames.org/export/dump/cities15000.zip"
 COUNTRY_INFO_URL = "https://download.geonames.org/export/dump/countryInfo.txt"
-OUTPUT_PATH = Path(__file__).resolve().parents[2] / "alpha-backend" / "app" / "data" / "cities.json"
+OUTPUT_PATH = Path(__file__).resolve().parents[2] / "backend" / "app" / "data" / "cities.json"
 
 # See the module docstring above for why PPL (generic populated place) needs
-# a much higher bar than PPLA/PPLC — this is the one knob you're likely to
+# a much higher bar than PPLA/PPLC, this is the one knob you're likely to
 # want to tune (raise it to trim the list further, lower it to include more
 # mid-size towns).
 PPL_MIN_POPULATION = 100_000

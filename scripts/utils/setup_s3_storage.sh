@@ -5,7 +5,7 @@
 
 set -e
 
-echo "🚀 Setting up S3 Storage for AlphaCV..."
+echo "Setting up S3 Storage for AlphaCV..."
 echo "========================================"
 
 # Configuration
@@ -16,35 +16,35 @@ REGION="us-east-1"
 # Load from environment or configure AWS CLI before running this script
 export AWS_DEFAULT_REGION="$REGION"
 
-echo "✅ AWS credentials configured"
+echo "AWS credentials configured"
 
 # 1. Verify bucket exists and is accessible
 echo ""
-echo "📦 Checking S3 bucket: $BUCKET_NAME..."
+echo "Checking S3 bucket: $BUCKET_NAME..."
 if aws s3 ls "s3://$BUCKET_NAME" &> /dev/null; then
-    echo "✅ Bucket exists and is accessible"
+    echo "Bucket exists and is accessible"
 else
-    echo "❌ Error: Cannot access bucket $BUCKET_NAME"
+    echo "Error: Cannot access bucket $BUCKET_NAME"
     exit 1
 fi
 
 # 2. Check versioning status
 echo ""
-echo "🔄 Checking bucket versioning..."
+echo "Checking bucket versioning..."
 VERSIONING=$(aws s3api get-bucket-versioning --bucket $BUCKET_NAME --query 'Status' --output text 2>/dev/null || echo "None")
 if [ "$VERSIONING" == "Enabled" ]; then
-    echo "✅ Versioning already enabled"
+    echo "Versioning already enabled"
 else
-    echo "⚙️  Enabling versioning for data protection..."
+    echo " Enabling versioning for data protection..."
     aws s3api put-bucket-versioning \
         --bucket $BUCKET_NAME \
         --versioning-configuration Status=Enabled
-    echo "✅ Versioning enabled"
+    echo "Versioning enabled"
 fi
 
 # 3. Set up lifecycle policy for cost optimization
 echo ""
-echo "💰 Configuring lifecycle policy for cost optimization..."
+echo "Configuring lifecycle policy for cost optimization..."
 
 cat > /tmp/s3-lifecycle-policy.json <<'EOF'
 {
@@ -110,14 +110,14 @@ aws s3api put-bucket-lifecycle-configuration \
     --bucket $BUCKET_NAME \
     --lifecycle-configuration file:///tmp/s3-lifecycle-policy.json
 
-echo "✅ Lifecycle policy configured:"
+echo "Lifecycle policy configured:"
 echo "   - CVs/JDs transition to cheaper storage after 90 days"
 echo "   - Old backups deleted after 30 days"
 echo "   - Old versions cleaned up automatically"
 
 # 4. Set up CORS for frontend access
 echo ""
-echo "🌐 Configuring CORS for frontend access..."
+echo "Configuring CORS for frontend access..."
 
 cat > /tmp/s3-cors-policy.json <<'EOF'
 {
@@ -140,18 +140,18 @@ aws s3api put-bucket-cors \
     --bucket $BUCKET_NAME \
     --cors-configuration file:///tmp/s3-cors-policy.json
 
-echo "✅ CORS configured"
+echo "CORS configured"
 
 # 5. Create folder structure
 echo ""
-echo "📁 Creating folder structure..."
+echo "Creating folder structure..."
 aws s3api put-object --bucket $BUCKET_NAME --key cvs/ --content-length 0
 aws s3api put-object --bucket $BUCKET_NAME --key jds/ --content-length 0
-echo "✅ Folders created: cvs/, jds/"
+echo "Folders created: cvs/, jds/"
 
 # 6. Update .env file
 echo ""
-echo "📝 Updating environment variables..."
+echo "Updating environment variables..."
 
 ENV_FILE="/home/ubuntu/.env"
 
@@ -174,52 +174,52 @@ AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 EOL
 
-echo "✅ Environment variables updated in $ENV_FILE"
+echo "Environment variables updated in $ENV_FILE"
 
 # 7. Test S3 connectivity
 echo ""
-echo "🧪 Testing S3 connectivity..."
+echo "Testing S3 connectivity..."
 TEST_FILE="/tmp/test_s3_upload_$(date +%s).txt"
 echo "AlphaCV S3 Test $(date)" > $TEST_FILE
 
 if aws s3 cp $TEST_FILE s3://$BUCKET_NAME/test_s3_connection.txt; then
-    echo "✅ Upload test successful"
+    echo "Upload test successful"
     rm $TEST_FILE
     
     # Download test
     if aws s3 cp s3://$BUCKET_NAME/test_s3_connection.txt /tmp/test_download.txt; then
-        echo "✅ Download test successful"
+        echo "Download test successful"
         rm /tmp/test_download.txt
     else
-        echo "⚠️  Download test failed"
+        echo " Download test failed"
     fi
 else
-    echo "❌ Upload test failed"
+    echo "Upload test failed"
     exit 1
 fi
 
 # 8. Show bucket stats
 echo ""
-echo "📊 Current Bucket Contents:"
+echo "Current Bucket Contents:"
 echo "=========================="
 aws s3 ls s3://$BUCKET_NAME/ --recursive --summarize --human-readable | tail -5
 
 echo ""
-echo "✅ S3 Storage Setup Complete!"
+echo "S3 Storage Setup Complete!"
 echo "=============================="
 echo ""
-echo "📋 Summary:"
+echo "Summary:"
 echo "  - Bucket: $BUCKET_NAME"
 echo "  - Region: $REGION"
 echo "  - Versioning: Enabled"
 echo "  - Lifecycle: Configured for cost optimization"
 echo "  - CORS: Configured for frontend access"
 echo ""
-echo "💰 Cost Savings:"
+echo "Cost Savings:"
 echo "  - Files auto-transition to cheaper storage after 90 days"
 echo "  - Estimated savings: 60-80% compared to EBS"
 echo ""
-echo "🔄 Next Steps:"
+echo "Next Steps:"
 echo "  1. Rebuild backend: docker-compose build backend"
 echo "  2. Restart services: docker-compose up -d"
 echo "  3. Test CV upload through frontend"

@@ -82,9 +82,9 @@ def main() -> int:
             )
             cleaned += len(batch)
         except Exception as e:  # noqa: BLE001
-            print(f"⚠️  Failed to clean batch starting at {i}: {e}", file=sys.stderr)
+            print(f" Failed to clean batch starting at {i}: {e}", file=sys.stderr)
 
-    print(f"✅ Removed stale fields from {cleaned}/{to_clean} CVs.")
+    print(f"Removed stale fields from {cleaned}/{to_clean} CVs.")
     return 0
 
 

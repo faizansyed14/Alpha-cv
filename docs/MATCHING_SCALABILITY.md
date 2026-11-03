@@ -42,7 +42,7 @@ same business‑rule bonuses/penalties, same top‑50 LLM enhancement.
 * **`app/services/queue/match_queue.py`** — Redis list queue, JSON status
   records, request‑hash de‑duplication, a global concurrency counter, stale‑job
   requeue.
-* **`app/worker/match_worker.py`** — `python -m app.worker.match_worker`, one
+* **`app/worker/match_worker.py`** — `python -m app.jobs.match_worker`, one
   job at a time (see `MATCH_QUEUE_MAX_CONCURRENT_JOBS`), scoring parallelised
   across `MATCH_THREAD_POOL_WORKERS` threads.
 * **`app/services/ai/match_runner.py`** — the exact pipeline that used to live
@@ -50,8 +50,8 @@ same business‑rule bonuses/penalties, same top‑50 LLM enhancement.
   score → sort → LLM top‑50 → persist), now callable from the worker.
 * **`special_routes.py`** — `POST /api/match` only enqueues; a new
   `GET /api/match/jobs/{job_id}` exposes status/progress/result. If the queue is
-  disabled or Redis is down it falls back to running inline (bounded by
-  `MAX_CONCURRENT_MATCHES`).
+  switched off in configuration (local dev) it runs inline; if it is on but Redis is
+  down the API answers 503 instead of running CPU-heavy work in the API process.
 
 **Frontend contract is unchanged.** The existing "re‑POST the same request to
 poll" behaviour still works because identical requests re‑attach to the running

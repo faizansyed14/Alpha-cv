@@ -1,14 +1,14 @@
-# 🚀 Quick Start Guide - Dev/Prod Workflow
+# Quick Start Guide - Dev/Prod Workflow
 
 ## The Problem You Had
 - Editing production files directly
-- Every test requires container restart = downtime for users ❌
+- Every test requires container restart = downtime for users 
 - Can't test safely
 
 ## The Solution
 **Two separate environments on same server:**
-- **Production** (ports 3000, 8000) - For your users ✅
-- **Development** (ports 3001, 8001) - For your testing ✅
+- **Production** (ports 3000, 8000) - For your users 
+- **Development** (ports 3001, 8001) - For your testing 
 
 ---
 
@@ -66,13 +66,13 @@ docker-compose logs -f
 
 ---
 
-## 🎯 Key Benefits
+## Key Benefits
 
-✅ **Production stays up** - Users never interrupted  
-✅ **Test safely** - Break things in dev, not prod  
-✅ **Fast iteration** - Restart dev as many times as needed  
-✅ **Zero downtime deploys** - Smart deployment script  
-✅ **Easy workflow** - Simple commands  
+**Production stays up** - Users never interrupted  
+**Test safely** - Break things in dev, not prod  
+**Fast iteration** - Restart dev as many times as needed  
+**Zero downtime deploys** - Smart deployment script  
+**Easy workflow** - Simple commands  
 
 ---
 
@@ -80,4 +80,4 @@ docker-compose logs -f
 
 Read the full guide: `cat DEV_WORKFLOW_GUIDE.md`
 
-Or just ask me! 😊
+Or just ask me! 

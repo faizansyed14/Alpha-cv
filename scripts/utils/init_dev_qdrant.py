@@ -17,7 +17,7 @@ collections = {
     "jd_embeddings": 768,    # all-mpnet-base-v2 dimension
 }
 
-print("🚀 Initializing Qdrant collections for development...")
+print("Initializing Qdrant collections for development...")
 print()
 
 for collection_name, vector_size in collections.items():
@@ -27,17 +27,17 @@ for collection_name, vector_size in collections.items():
         exists = any(c.name == collection_name for c in existing)
         
         if exists:
-            print(f"✅ Collection '{collection_name}' already exists")
+            print(f"Collection '{collection_name}' already exists")
         else:
             # Create collection
             client.create_collection(
                 collection_name=collection_name,
                 vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
             )
-            print(f"✨ Created collection '{collection_name}' with vector size {vector_size}")
+            print(f"Created collection '{collection_name}' with vector size {vector_size}")
     except Exception as e:
-        print(f"❌ Error with collection '{collection_name}': {e}")
+        print(f"Error with collection '{collection_name}': {e}")
 
 print()
-print("🎉 Development Qdrant initialized!")
+print("Development Qdrant initialized!")
 print("You can now upload CVs and JDs in your dev environment.")

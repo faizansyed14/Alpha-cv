@@ -160,7 +160,7 @@ init_certificates() {
         # Test HTTPS
         if curl -I "https://$DOMAIN" &> /dev/null; then
             log_success "HTTPS is working correctly!"
-            log_success "✅ SSL setup completed successfully!"
+            log_success "SSL setup completed successfully!"
             log_info "Your site is now available at: https://$DOMAIN"
         else
             log_warning "HTTPS setup completed but site may not be immediately accessible"
@@ -191,7 +191,7 @@ renew_certificates() {
         log_info "Reloading nginx configuration..."
         $COMPOSE_CMD exec nginx nginx -s reload
         
-        log_success "✅ Certificate renewal completed!"
+        log_success "Certificate renewal completed!"
     else
         log_error "Failed to renew certificates"
         exit 1

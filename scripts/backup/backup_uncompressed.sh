@@ -47,10 +47,10 @@ log "ALPHA CV SYSTEM - UNCOMPRESSED BACKUP"
 log "=========================================="
 log ""
 log "SAFETY CONFIRMATION:"
-log "✅ This script ONLY performs COPY operations"
-log "✅ NO volumes will be deleted or removed"
-log "✅ NO data will be deleted or modified"
-log "✅ All original data will remain intact"
+log "This script ONLY performs COPY operations"
+log "NO volumes will be deleted or removed"
+log "NO data will be deleted or modified"
+log "All original data will remain intact"
 log ""
 
 # Check if running as correct user
@@ -119,22 +119,22 @@ sudo cp -a /var/lib/docker/volumes/ubuntu_qdrant_data "$QDRANT_BACKUP_DIR/"
 sudo chown -R ubuntu:ubuntu "$QDRANT_BACKUP_DIR"
 
 QDRANT_SIZE=$(du -sh "$QDRANT_BACKUP_DIR" | awk '{print $1}')
-log "✅ Qdrant backup complete: $QDRANT_SIZE (uncompressed, exact copy)"
+log "Qdrant backup complete: $QDRANT_SIZE (uncompressed, exact copy)"
 
 # Get collection stats
 log "Saving Qdrant collection statistics..."
 docker exec ubuntu_qdrant_1 curl -s 'http://localhost:6333/collections' > "$BACKUP_DIR/qdrant_collections.json" 2>/dev/null || log "Collection stats skipped (container may be busy)"
-log "✅ Collection stats saved"
+log "Collection stats saved"
 
 ###############################################################################
-# 2. PostgreSQL (Email Processing & Auth Database) — now on AWS RDS
+# 2. PostgreSQL (Email Processing & Auth Database), now on AWS RDS
 ###############################################################################
 
 log "=========================================="
 log "2. POSTGRESQL DATABASE (RDS)"
 log "=========================================="
 
-log "Postgres runs on AWS RDS in this environment — there is no local"
+log "Postgres runs on AWS RDS in this environment, there is no local"
 log "'postgres' container or docker volume to copy any more. RDS's own"
 log "automated backups / snapshots are the primary backup for this data."
 log "Enable/verify them in the RDS console (Maintenance & backups tab)."
@@ -155,7 +155,7 @@ if [ -n "${POSTGRES_HOST:-}" ] && command -v pg_dump > /dev/null 2>&1; then
         -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-cv_user}" \
         auth_db > "$POSTGRES_BACKUP_DIR/auth_db_dump.sql" \
         2>/dev/null || log "RDS auth_db dump skipped (check POSTGRES_* / network access to RDS)"
-    log "✅ RDS logical dump attempt complete (see $POSTGRES_BACKUP_DIR)"
+    log "RDS logical dump attempt complete (see $POSTGRES_BACKUP_DIR)"
 else
     log "Skipping RDS logical dump (POSTGRES_HOST not set or pg_dump not installed on this host)"
 fi
@@ -185,7 +185,7 @@ sudo cp -a /var/lib/docker/volumes/ubuntu_redis_data "$REDIS_BACKUP_DIR/"
 sudo chown -R ubuntu:ubuntu "$REDIS_BACKUP_DIR"
 
 REDIS_SIZE=$(du -sh "$REDIS_BACKUP_DIR" | awk '{print $1}')
-log "✅ Redis backup complete: $REDIS_SIZE (uncompressed, exact copy)"
+log "Redis backup complete: $REDIS_SIZE (uncompressed, exact copy)"
 
 ###############################################################################
 # 4. Backup Configuration Files
@@ -206,14 +206,13 @@ mkdir -p "$CONFIGS_BACKUP_DIR"
 # Copy all config files (preserve structure)
 cp -a .env "$CONFIGS_BACKUP_DIR/" 2>/dev/null || log "No .env file"
 cp -a docker-compose.yml "$CONFIGS_BACKUP_DIR/" 2>/dev/null || log "No docker-compose.yml"
-cp -a qdrant-optimized.yaml "$CONFIGS_BACKUP_DIR/" 2>/dev/null || log "No qdrant-optimized.yaml"
 cp -a nginx.conf "$CONFIGS_BACKUP_DIR/" 2>/dev/null || log "No nginx.conf"
 cp -a prometheus.yml "$CONFIGS_BACKUP_DIR/" 2>/dev/null || log "No prometheus.yml"
 
 # Copy any other config files
 cp -a .env* "$CONFIGS_BACKUP_DIR/" 2>/dev/null || true
 
-log "✅ Configuration files backed up"
+log "Configuration files backed up"
 
 ###############################################################################
 # 5. Create Backup Manifest
@@ -239,7 +238,7 @@ CONTENTS:
    - Format: Exact copy of Docker volume
 
 2. PostgreSQL Database:
-   - Location: AWS RDS (not on this host) — RDS automated backups/snapshots
+   - Location: AWS RDS (not on this host), RDS automated backups/snapshots
      are the primary backup; verify they're enabled in the RDS console.
    - Optional supplementary dump: $BACKUP_DIR/postgres_dump/ (if pg_dump ran)
 
@@ -263,14 +262,14 @@ Total Size: $(du -sh "$BACKUP_DIR" | awk '{print $1}')
 
 WHAT'S PRESERVED:
 -----------------
-✅ All 1000+ CVs with unique IDs
-✅ All 23 JDs with unique IDs
-✅ All 15 job postings with unique IDs and public tokens
-✅ All CV-to-job links and applications
-✅ All embeddings (32 vectors per document)
-✅ All S3 references (for CV downloads)
-✅ All unique IDs and tokens
-✅ All relationships and links
+All 1000+ CVs with unique IDs
+All 23 JDs with unique IDs
+All 15 job postings with unique IDs and public tokens
+All CV-to-job links and applications
+All embeddings (32 vectors per document)
+All S3 references (for CV downloads)
+All unique IDs and tokens
+All relationships and links
 
 RESTORE INSTRUCTIONS (MANUAL - NOT EXECUTED BY THIS SCRIPT):
 -------------------------------------------------------------
@@ -307,12 +306,12 @@ To restore from this backup (run these commands manually when needed):
    docker exec ubuntu_qdrant_1 curl -s 'http://localhost:6333/collections'
    psql -h <rds-endpoint> -U cv_user -d cv_database -c "\dt"
 
-⚠️  KEEP THIS BACKUP SAFE - It contains all your production data!
-⚠️  Store a copy OFF-SERVER (S3, external drive, etc.)
+ KEEP THIS BACKUP SAFE - It contains all your production data!
+ Store a copy OFF-SERVER (S3, external drive, etc.)
 
 EOF
 
-log "✅ Backup manifest created"
+log "Backup manifest created"
 
 ###############################################################################
 # 6. Final Summary
@@ -333,11 +332,11 @@ echo "Total Size: $TOTAL_BACKUP_SIZE (uncompressed)"
 echo "Log File: $LOG_FILE"
 echo ""
 echo "CRITICAL DATA BACKED UP:"
-echo "✅ Qdrant ($QDRANT_SIZE) - ALL CVs, JDs, job postings, embeddings"
-echo "ℹ️  PostgreSQL - lives on RDS; rely on RDS automated backups/snapshots"
+echo "Qdrant ($QDRANT_SIZE) - ALL CVs, JDs, job postings, embeddings"
+echo "ℹ PostgreSQL - lives on RDS; rely on RDS automated backups/snapshots"
 echo "   (optional logical dump attempted in $POSTGRES_BACKUP_DIR)"
-echo "✅ Redis ($REDIS_SIZE) - Cache data"
-echo "✅ Configuration files"
+echo "Redis ($REDIS_SIZE) - Cache data"
+echo "Configuration files"
 echo ""
 echo "BACKUP TYPE: UNCOMPRESSED (exact copy)"
 echo "  - All files preserved exactly as stored"
@@ -346,30 +345,30 @@ echo "  - All timestamps preserved"
 echo "  - All metadata preserved"
 echo ""
 echo "WHAT'S PRESERVED:"
-echo "✅ All 1000+ CVs with unique IDs"
-echo "✅ All 23 JDs with unique IDs"
-echo "✅ All 15 job postings with unique IDs and public tokens"
-echo "✅ All CV-to-job links and applications"
-echo "✅ All embeddings (32 vectors per document)"
-echo "✅ All S3 references (for CV downloads)"
-echo "✅ Everything exactly as stored"
+echo "All 1000+ CVs with unique IDs"
+echo "All 23 JDs with unique IDs"
+echo "All 15 job postings with unique IDs and public tokens"
+echo "All CV-to-job links and applications"
+echo "All embeddings (32 vectors per document)"
+echo "All S3 references (for CV downloads)"
+echo "Everything exactly as stored"
 echo ""
 echo "NEXT STEPS:"
-echo "1. ✅ Backup is complete and safe"
-echo "2. ✅ ALL ORIGINAL DATA IS PRESERVED - Nothing was deleted"
-echo "3. ✅ All volumes and data on root volume are UNTOUCHED"
-echo "4. 📤 COPY this backup to S3 or external storage (recommended):"
+echo "1. Backup is complete and safe"
+echo "2. ALL ORIGINAL DATA IS PRESERVED - Nothing was deleted"
+echo "3. All volumes and data on root volume are UNTOUCHED"
+echo "4. COPY this backup to S3 or external storage (recommended):"
 echo "   aws s3 cp $BACKUP_DIR s3://your-bucket/backups/ --recursive"
-echo "5. 📋 Review the backup manifest: cat $BACKUP_DIR/BACKUP_MANIFEST.txt"
+echo "5. Review the backup manifest: cat $BACKUP_DIR/BACKUP_MANIFEST.txt"
 echo ""
 echo "SAFETY CONFIRMATION:"
-echo "✅ This script ONLY performed COPY operations"
-echo "✅ NO volumes were deleted or removed"
-echo "✅ NO data was deleted or modified"
-echo "✅ All original data remains intact on root volume"
+echo "This script ONLY performed COPY operations"
+echo "NO volumes were deleted or removed"
+echo "NO data was deleted or modified"
+echo "All original data remains intact on root volume"
 echo ""
-echo "⚠️  DO NOT DELETE THIS BACKUP until restore is 100% verified!"
-echo "⚠️  This backup contains ALL your production data!"
+echo " DO NOT DELETE THIS BACKUP until restore is 100% verified!"
+echo " This backup contains ALL your production data!"
 echo "=========================================="
 
 # Save summary to file

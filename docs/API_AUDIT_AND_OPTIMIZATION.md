@@ -10,21 +10,21 @@ This document summarizes the audit of frontend/backend APIs for unnecessary data
 
 | Area | Finding | Status |
 |------|--------|--------|
-| **List CVs** (`GET /api/cv/cvs`) | Returned full list; no pagination; 60s cache already present | ✅ Fixed |
-| **List JDs** (`GET /api/jd/jds`) | Returned full list; no pagination; **no cache** | ✅ Fixed |
-| **Get CV details** (`GET /api/cv/{id}`) | Returns only needed fields; embeddings as counts, not vectors | ✅ OK |
-| **Get JD details** | Same pattern as CV | ✅ OK |
-| **Notes summary** | Batch by `cv_ids` (POST) | ✅ OK |
-| **Job applications** | Returns all for a job (up to 1000); no pagination | ⚠️ Optional later |
-| **Match endpoint** | Uses limits (e.g. 300 CVs); no over-fetch | ✅ OK |
+| **List CVs** (`GET /api/cv/cvs`) | Returned full list; no pagination; 60s cache already present | Fixed |
+| **List JDs** (`GET /api/jd/jds`) | Returned full list; no pagination; **no cache** | Fixed |
+| **Get CV details** (`GET /api/cv/{id}`) | Returns only needed fields; embeddings as counts, not vectors | OK |
+| **Get JD details** | Same pattern as CV | OK |
+| **Notes summary** | Batch by `cv_ids` (POST) | OK |
+| **Job applications** | Returns all for a job (up to 1000); no pagination | Optional later |
+| **Match endpoint** | Uses limits (e.g. 300 CVs); no over-fetch | OK |
 
 ### Frontend
 
 | Area | Finding | Status |
 |------|--------|--------|
-| **Database CV/JD load** | Fetched full list then client-side pagination | ✅ Fixed |
-| **API client** | `listCVs` / `listJDs` had no pagination params | ✅ Fixed |
-| **App store** | No “load more”; single full load | ✅ Fixed |
+| **Database CV/JD load** | Fetched full list then client-side pagination | Fixed |
+| **API client** | `listCVs` / `listJDs` had no pagination params | Fixed |
+| **App store** | No “load more”; single full load | Fixed |
 
 ---
 

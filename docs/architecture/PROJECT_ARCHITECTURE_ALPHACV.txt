@@ -125,7 +125,7 @@ System Components (What runs where)
 --------------------------------------------------------------------------------
 
 1) Frontend (Next.js + TypeScript)
-  - Location: cv-analyzer-frontend/
+  - Location: frontend/
   - Built as standalone (Dockerfile multi-stage). Served by Node (server.js)
     inside container. Default PORT=3000; nginx upstream may use 8000 if
     overridden in deployment.
@@ -154,7 +154,7 @@ System Components (What runs where)
     and frontend (1200s).
 
 3) Backend API (FastAPI + Uvicorn)
-  - Location: alpha-backend/app/
+  - Location: backend/app/
   - Port: 8000 inside container (not exposed to host in production).
   - Major API groups (prefix /api):
     - /api/auth     : login, verify-password, send-otp, verify-otp, me (JWT + OTP).
@@ -163,7 +163,7 @@ System Components (What runs where)
                       standardize-cv, notes, download.
     - /api/jd       : upload-jd, jds, get/delete/reprocess/embeddings, standardize-jd.
     - /api          : match, match-text, matching-progress, metrics, health,
-                      clear-database, system-stats, database/status, database/view,
+                      system-stats, database/status, database/view,
                       match/category-based.
     - /api/performance : system, gpu, docker, summary, health.
     - /api/careers  : jobs/recent, jobs/{public_token}, jobs/{token}/apply;
@@ -179,7 +179,7 @@ System Components (What runs where)
       CV/JD; PostgreSQL in production holds cv_database and auth_db.
   - Embeddings: sentence-transformers (all-mpnet-base-v2, 768d). GPU when
     available (CUDA), else CPU. Production uses connection pool to Qdrant.
-  - File storage: Local or S3 (e.g. alpha-backend/app/services/s3_storage.py)
+  - File storage: Local or S3 (e.g. backend/app/services/s3_storage.py)
     when configured.
   - Startup: Qdrant collections init, embedding service warmup, cache/Redis
     init, auth DB init, enterprise job queue. Email scheduler disabled to
@@ -223,7 +223,7 @@ Primary Data Flows (End-to-end)
 Flow 1: Authentication (JWT + OTP)
   1. Browser -> Frontend.
   2. Optional: POST /api/auth/verify-password -> backend validates user/password,
-     returns whether OTP is required (admins may skip OTP).
+     returns the second factor to use: email OTP, or an image CAPTCHA (always for admins).
   3. If OTP required: POST /api/auth/send-otp -> backend sends OTP (e.g. email).
   4. POST /api/auth/verify-otp (or POST /api/auth/login for admin) -> backend
      issues JWT (create_access_token). Token returned to client.
@@ -273,7 +273,6 @@ Flow 6: Email processing (optional, Azure integration)
 Flow 7: Admin and system
   - GET /api/admin/users, POST/PATCH/DELETE users.
   - GET /api/health, /api/system-stats, /api/database/status, /api/database/view.
-  - POST /api/clear-database (destructive, guarded).
   - GET /api/performance/system, gpu, docker, summary, health.
   - GET /api/storage/files/{doc_type}/{doc_id} for stored files.
 
@@ -393,25 +392,25 @@ Compose / deployment:
   - prometheus.yml (Prometheus scrape config)
 
 Backend:
-  - alpha-backend/app/main.py (FastAPI app, lifespan, CORS, middleware, routes)
-  - alpha-backend/app/routes/*.py (auth, admin, cv, jd, special_routes,
+  - backend/app/main.py (FastAPI app, lifespan, CORS, middleware, routes)
+  - backend/app/routes/*.py (auth, admin, cv, jd, special_routes,
     careers, email, storage, performance)
-  - alpha-backend/app/services/* (embedding, matching, llm, parsing, email,
+  - backend/app/services/* (embedding, matching, llm, parsing, email,
     careers, s3_storage, job queue, etc.)
-  - alpha-backend/app/utils/qdrant_utils.py, qdrant_pool.py, redis_cache.py,
+  - backend/app/utils/qdrant_utils.py, qdrant_pool.py, redis_cache.py,
     cache.py, security.py
-  - alpha-backend/app/db/auth_db.py (auth DB init and session)
-  - alpha-backend/app/core/config.py (auth and app settings)
-  - alpha-backend/app/middleware/rate_limiter.py
-  - alpha-backend/app/deps/auth.py (JWT dependency)
-  - alpha-backend/ARCHITECTURE.md, STRUCTURE.md (high-level backend layout)
+  - backend/app/db/auth_db.py (auth DB init and session)
+  - backend/app/core/config.py (auth and app settings)
+  - backend/app/middleware/rate_limiter.py
+  - backend/app/deps/auth.py (JWT dependency)
+  - backend/ARCHITECTURE.md, STRUCTURE.md (high-level backend layout)
 
 Frontend:
-  - cv-analyzer-frontend/src/lib/api.ts (API client and /api/* calls)
-  - cv-analyzer-frontend/src/lib/auth.ts, config.ts (auth and API base URL)
-  - cv-analyzer-frontend/src/components/* (UI for CV/JD, matching, careers,
+  - frontend/src/lib/api.ts (API client and /api/* calls)
+  - frontend/src/lib/auth.ts, config.ts (auth and API base URL)
+  - frontend/src/components/* (UI for CV/JD, matching, careers,
     auth, email, etc.)
-  - cv-analyzer-frontend/Dockerfile (multi-stage Next.js standalone build)
+  - frontend/Dockerfile (multi-stage Next.js standalone build)
 
 Scripts / docs:
   - scripts/backup/ (backup scripts)

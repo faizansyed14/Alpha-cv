@@ -45,8 +45,8 @@ Access your development environment:
 ### 2. Make Changes
 
 Edit files in your workspace as normal:
-- `/home/ubuntu/alpha-backend/` - Backend code
-- `/home/ubuntu/cv-analyzer-frontend/` - Frontend code
+- `/home/ubuntu/backend/` - Backend code
+- `/home/ubuntu/frontend/` - Frontend code
 
 ### 3. Test in Development
 
@@ -163,7 +163,7 @@ docker-compose down && docker-compose -f docker-compose.dev.yml down
 
 ## Best Practices
 
-### ✅ DO:
+### DO:
 - Always test in development first
 - Keep development running while you work
 - Only deploy to production when features are complete
@@ -171,7 +171,7 @@ docker-compose down && docker-compose -f docker-compose.dev.yml down
 - Use descriptive commit messages
 - Test with real user scenarios in dev
 
-### ❌ DON'T:
+### DON'T:
 - Don't edit production code directly without testing in dev first
 - Don't restart production containers during peak hours
 - Don't skip testing in development
@@ -254,4 +254,4 @@ docker stats
 4. Evening: Deploy when ready with `./deploy-to-production.sh`
 5. `./dev-stop.sh` when done
 
-**No more downtime! No more user interruptions!** 🎉
+**No more downtime! No more user interruptions!** 

@@ -1,0 +1,298 @@
+# =============================================================================
+# AlphaCV, Local (everything on this machine, data in Docker volumes)
+#
+# The same services and settings as docker-compose.dev.yml, but nothing leaves the machine:
+#   dev    : raw CV files in S3, Postgres on RDS (whatever .env.dev points at)
+#   local  : raw CV files in the `uploads-local-data` volume, Postgres in the `postgres-local` container
+# The `environment:` blocks below override .env.local, so a copy of the dev settings can never reach S3 or RDS.
+#
+# Configuration comes from ./.env.local (scripts/start.sh creates it from .env.dev, or the example, on first run).
+# Start:  ./scripts/start.sh local          Stop: ./scripts/stop.sh local
+# Reset:  ./scripts/clean.sh local          (removes this stack's containers, volumes and images)
+# Resources: sized like docker-compose.prod.yml but smaller so the whole stack fits in 8 GB of Docker memory.
+#   memory limits add up to ~6.3 GB (a ceiling per service, not a reservation); idle use is about 1.5 GB.
+#   Raise them (and the match worker's MATCH_THREAD_POOL_WORKERS) if your Docker VM has more memory.
+# Ports (same as dev, so run one of the two at a time):
+#   3000 frontend, 8000 backend, 80 nginx, 5434 postgres, 6335 qdrant, 6380 redis
+# =============================================================================
+
+name: alpha-cv-local
+
+# Pins storage and databases to this stack, whatever the env file says.
+x-local-storage: &local-storage
+  STORAGE_BACKEND: local
+  LOCAL_STORAGE_DIR: /data/uploads
+  CV_UPLOAD_DIR: /data/uploads/cv
+  S3_BUCKET: ""
+  S3_REGION: ""
+  S3_PREFIX: ""
+  POSTGRES_HOST: postgres-local
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+  POSTGRES_DB: ${POSTGRES_DB:-cv_analyzer_dev}
+  POSTGRES_SSLMODE: disable
+  AUTH_DB_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-local:5432/auth_db
+  TRACKER_DB_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-local:5432/${POSTGRES_DB:-cv_analyzer_dev}
+  QDRANT_HOST: qdrant-local
+  QDRANT_PORT: "6333"
+  REDIS_HOST: redis-local
+  REDIS_PORT: "6379"
+  EMBEDDING_SERVICE_URL: http://model-server-local:8080
+
+services:
+  frontend-local:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost
+        BACKEND_INTERNAL_URL: http://backend-local:8000
+        # Set by scripts/start.sh so source edits invalidate the Next.js build layer
+        FRONTEND_CACHEBUST: ${FRONTEND_CACHEBUST:-0}
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://localhost
+      - BACKEND_INTERNAL_URL=http://backend-local:8000
+    depends_on:
+      - backend-local
+    networks:
+      local-network:
+        aliases: [frontend-dev]   # nginx/nginx-dev.conf routes to frontend-dev / backend-dev
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+    restart: unless-stopped
+
+  backend-local:
+    image: alpha-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.local
+    environment:
+      <<: *local-storage
+    volumes:
+      - ./backend:/app
+      - uploads-local-data:/data/uploads
+      - llm-cache-local:/data/llm_cache
+    networks:
+      local-network:
+        aliases: [backend-dev]
+    depends_on:
+      postgres-local:
+        condition: service_healthy
+      qdrant-local:
+        condition: service_started
+      redis-local:
+        condition: service_started
+      model-server-local:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 1280M
+          cpus: '1.5'
+        reservations:
+          memory: 384M
+    restart: unless-stopped
+
+  # Email scheduler + public-CV queue consumer
+  background-worker-local:
+    image: alpha-backend:local
+    pull_policy: never
+    command: ["python", "-m", "app.jobs.background_worker"]
+    env_file:
+      - .env.local
+    environment:
+      <<: *local-storage
+      ENABLE_EMAIL_SCHEDULER: "true"
+      ENABLE_PUBLIC_CV_QUEUE: "true"
+    depends_on:
+      - backend-local
+      - postgres-local
+      - qdrant-local
+      - redis-local
+      - model-server-local
+    volumes:
+      - ./backend:/app
+      - uploads-local-data:/data/uploads
+      - llm-cache-local:/data/llm_cache
+    networks:
+      - local-network
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: '0.75'
+        reservations:
+          memory: 192M
+    restart: unless-stopped
+
+  # Dedicated matching worker (consumes the Redis match-job queue)
+  match-worker-local:
+    image: alpha-backend:local
+    pull_policy: never
+    command: ["python", "-m", "app.jobs.match_worker"]
+    init: true
+    stop_grace_period: 120s
+    env_file:
+      - .env.local
+    environment:
+      <<: *local-storage
+      ENABLE_MATCH_QUEUE: "true"
+      TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
+      # Sizing measured under load (3 users x 15,000 CVs): one match is CPU-bound in a single Python process, so
+      # concurrency comes from worker PROCESSES (MATCH_WORKER_REPLICAS). Each process runs up to 2 jobs; the second
+      # is only taken when no idle process took it. 4 scoring threads are enough (2-16 measured the same).
+      MATCH_THREAD_POOL_WORKERS: ${MATCH_THREAD_POOL_WORKERS:-4}
+      MATCH_QUEUE_MAX_CONCURRENT_JOBS: ${MATCH_QUEUE_MAX_CONCURRENT_JOBS:-0}
+      MATCH_WORKER_CONCURRENCY: ${MATCH_WORKER_CONCURRENCY:-2}
+      OPENBLAS_NUM_THREADS: "1"
+      MALLOC_ARENA_MAX: "2"
+    depends_on:
+      - backend-local
+      - postgres-local
+      - qdrant-local
+      - redis-local
+      - model-server-local
+    volumes:
+      - ./backend:/app
+      - uploads-local-data:/data/uploads
+      - llm-cache-local:/data/llm_cache
+    networks:
+      - local-network
+    deploy:
+      replicas: ${MATCH_WORKER_REPLICAS:-3}
+      resources:
+        limits:
+          memory: 1024M
+          cpus: '1.5'
+        reservations:
+          memory: 256M
+    restart: unless-stopped
+
+  # Embedding model server: the only process with torch + the sentence-transformer (internal, no host port)
+  model-server-local:
+    image: alpha-model-server:local
+    build:
+      context: ./backend/model_server
+    environment:
+      - MODEL_THREADS=${MODEL_THREADS:-2}
+      - MODEL_SERVER_TOKEN=${MODEL_SERVER_TOKEN:-}
+    init: true
+    networks:
+      - local-network
+    deploy:
+      resources:
+        limits:
+          memory: 1280M
+          cpus: '1.5'
+        reservations:
+          memory: 384M
+    restart: unless-stopped
+
+  postgres-local:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-cv_analyzer_dev}
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres-local-data:/var/lib/postgresql/data
+      # only the local-Postgres bootstrap: db/init/rds-bootstrap.sql is a manual one-time script for RDS and
+      # aborts first-run initialisation here
+      - ./db/init/01-create-databases.sh:/docker-entrypoint-initdb.d/01-create-databases.sh:ro
+    networks:
+      - local-network
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: '1.0'
+        reservations:
+          memory: 128M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  qdrant-local:
+    image: qdrant/qdrant:v1.12.4
+    ports:
+      - "6335:6333"
+    volumes:
+      - qdrant-local-data:/qdrant/storage
+    networks:
+      - local-network
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+    restart: unless-stopped
+
+  # Redis keeps its data in a volume (append-only), so queued matches and caches survive a restart
+  redis-local:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy volatile-lru
+    volumes:
+      - redis-local-data:/data
+    networks:
+      - local-network
+    deploy:
+      resources:
+        limits:
+          memory: 320M
+          cpus: '0.5'
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+
+  nginx-local:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx-dev.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend-local
+      - frontend-local
+    networks:
+      - local-network
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+        reservations:
+          memory: 16M
+    restart: unless-stopped
+
+networks:
+  local-network:
+    driver: bridge
+
+volumes:
+  postgres-local-data:
+  qdrant-local-data:
+  redis-local-data:
+  uploads-local-data:
+  llm-cache-local:

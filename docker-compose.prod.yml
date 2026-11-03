@@ -1,5 +1,5 @@
 # =============================================================================
-# AlphaCV — Production (CPU-only)
+# AlphaCV, Production (CPU-only)
 # Configuration comes exclusively from ./.env (copy .env.example and fill in).
 # Start:  ./scripts/start.sh prod        Stop: ./scripts/stop.sh prod
 # Volumes are named and are NEVER deleted by the start/stop scripts.
@@ -12,11 +12,11 @@
 #     (PostgreSQL) endpoint. Enable "Multi-AZ" + automated backups on the RDS
 #     instance itself; see db/init/rds-bootstrap.sql for the one-time setup.
 #   - STORAGE_BACKEND=s3, S3_BUCKET / S3_REGION -> CV/JD files go straight to
-#     S3 (credentials via the EC2 instance's IAM role — no static keys on the
+#     S3 (credentials via the EC2 instance's IAM role, no static keys on the
 #     box). Enable bucket versioning + default SSE-S3/KMS encryption on the
 #     bucket itself.
 # Qdrant (vector store) and Redis (cache/queue) still run as local containers
-# with named volumes — they are not in scope for this migration, but note
+# with named volumes, they are not in scope for this migration, but note
 # they remain single points of failure on this one EC2 host (see the ops
 # notes at the bottom of this file for how to harden them later).
 # =============================================================================
@@ -28,19 +28,23 @@ services:
   backend:
     image: alpha-backend:prod
     build:
-      context: ./alpha-backend
+      context: ./backend
     env_file:
       - ./.env
     environment:
       # 4 vCPU host: keep the API to 2 workers so the match-worker has cores to run.
       UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
       TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
+      EMBEDDING_SERVICE_URL: http://model-server:8080
+      EMBEDDING_SERVICE_TOKEN: ${MODEL_SERVER_TOKEN:-}
       ENABLE_MATCH_QUEUE: "true"
     depends_on:
       qdrant:
         condition: service_started
       redis:
         condition: service_started
+      model-server:
+        condition: service_healthy
     restart: unless-stopped
     volumes:
       # No uploads_data here: STORAGE_BACKEND=s3 means CV/JD files never touch
@@ -71,54 +75,74 @@ services:
   match-worker:
     image: alpha-backend:prod
     pull_policy: never
-    command: ["python", "-m", "app.worker.match_worker"]
+    command: ["python", "-m", "app.jobs.match_worker"]
+    init: true
+    # Longer than MATCH_SHUTDOWN_GRACE_SECONDS (100) so running jobs finish or are handed back before Docker kills it.
+    stop_grace_period: 120s
     env_file:
       - ./.env
     environment:
       ENABLE_MATCH_QUEUE: "true"
       TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
+      EMBEDDING_SERVICE_URL: http://model-server:8080
+      EMBEDDING_SERVICE_TOKEN: ${MODEL_SERVER_TOKEN:-}
+      # Sizing measured under load (3 users x 15,000 CVs): one match is CPU-bound in a single Python process, so
+      # concurrency comes from worker PROCESSES (MATCH_WORKER_REPLICAS). Each process runs up to 2 jobs; the second
+      # is only taken when no idle process took it. 4 scoring threads are enough (2-16 measured the same).
       MATCH_THREAD_POOL_WORKERS: ${MATCH_THREAD_POOL_WORKERS:-4}
-      MATCH_QUEUE_MAX_CONCURRENT_JOBS: ${MATCH_QUEUE_MAX_CONCURRENT_JOBS:-1}
+      MATCH_QUEUE_MAX_CONCURRENT_JOBS: ${MATCH_QUEUE_MAX_CONCURRENT_JOBS:-0}
+      MATCH_WORKER_CONCURRENCY: ${MATCH_WORKER_CONCURRENCY:-2}
+      OPENBLAS_NUM_THREADS: "1"
+      MALLOC_ARENA_MAX: "2"
     depends_on:
       qdrant:
         condition: service_started
       redis:
         condition: service_started
+      model-server:
+        condition: service_healthy
     volumes:
       - llm_cache:/data/llm_cache
     networks:
       - cv-network
     restart: unless-stopped
     deploy:
+      replicas: ${MATCH_WORKER_REPLICAS:-3}
       resources:
+        # per process; a 15,000-CV job peaked at ~250 MiB with the settings above (two jobs ~500 MiB)
         limits:
-          memory: 3G
-          cpus: '2.0'
+          memory: 1536M
+          cpus: '1.5'
         reservations:
-          memory: 1G
-          cpus: '0.5'
+          memory: 384M
+          cpus: '0.25'
 
   # Combined background worker: email scheduler + public-CV queue consumer
   # (for /careers public apply). Merged into one container because neither
-  # task is CPU-heavy — running them separately just meant two independent
+  # task is CPU-heavy, running them separately just meant two independent
   # copies of the embedding model in RAM for no isolation benefit. Matching
   # (the one genuinely CPU-hungry job) still gets its own dedicated
   # match-worker container above.
   background-worker:
     image: alpha-backend:prod
     pull_policy: never
-    command: ["python", "-m", "app.worker.background_worker"]
+    command: ["python", "-m", "app.jobs.background_worker"]
+    init: true
     env_file:
       - ./.env
     environment:
       ENABLE_EMAIL_SCHEDULER: "true"
       ENABLE_PUBLIC_CV_QUEUE: "true"
       TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
+      EMBEDDING_SERVICE_URL: http://model-server:8080
+      EMBEDDING_SERVICE_TOKEN: ${MODEL_SERVER_TOKEN:-}
     depends_on:
       qdrant:
         condition: service_started
       redis:
         condition: service_started
+      model-server:
+        condition: service_healthy
     volumes:
       - llm_cache:/data/llm_cache
     networks:
@@ -134,11 +158,35 @@ services:
           cpus: '0.25'
 
   # ---------------------------------------------------------------------------
+  # Embedding model server: the ONE process that holds torch + the sentence-transformer. The API and the workers call
+  # it over the internal network, so the backend image has no ML runtime and the model sits in RAM once.
+  # ---------------------------------------------------------------------------
+  model-server:
+    image: alpha-model-server:prod
+    build:
+      context: ./backend/model_server
+    environment:
+      MODEL_THREADS: ${MODEL_THREADS:-2}
+      MODEL_SERVER_TOKEN: ${MODEL_SERVER_TOKEN:-}
+    init: true
+    restart: unless-stopped
+    networks:
+      - cv-network
+    deploy:
+      resources:
+        limits:
+          memory: 2560M
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # ---------------------------------------------------------------------------
   # Frontend (Next.js)
   # ---------------------------------------------------------------------------
   frontend:
     build:
-      context: ./cv-analyzer-frontend
+      context: ./frontend
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
@@ -182,7 +230,6 @@ services:
     image: qdrant/qdrant:v1.12.4
     volumes:
       - qdrant_data:/qdrant/storage
-      - ./qdrant-optimized.yaml:/qdrant/config/production.yaml:ro
     restart: unless-stopped
     networks:
       - cv-network
@@ -215,7 +262,7 @@ services:
       redis-server
       --appendonly yes
       --maxmemory ${REDIS_MAXMEMORY:-2gb}
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy volatile-lru
       --tcp-keepalive 60
       --timeout 300
       --maxclients ${REDIS_MAXCLIENTS:-800}
@@ -279,7 +326,7 @@ networks:
     driver: bridge
 
 # =============================================================================
-# Ops notes — remaining single points of failure on this one-EC2-host layout
+# Ops notes, remaining single points of failure on this one-EC2-host layout
 # (left as-is here; each is a separate infra decision, not part of this
 # RDS/S3 migration):
 #   - qdrant_data / redis_data are still local named volumes. If this EC2
@@ -289,7 +336,7 @@ networks:
 #     EBS snapshot of the volumes; longer-term, Qdrant Cloud or a replicated
 #     Qdrant cluster + Amazon ElastiCache remove this host as a SPOF entirely.
 #   - Scaling `match-worker` beyond this host (or moving to ECS/Fargate) needs
-#     Qdrant/Redis reachable from wherever the new containers land — i.e. they
+#     Qdrant/Redis reachable from wherever the new containers land, i.e. they
 #     stop being "local containers on the same docker network" and become
 #     real network services (managed or on their own host) at that point.
 # =============================================================================

@@ -1,7 +1,7 @@
 # AlphaCV — Codebase Audit & Refactor Report
 
 Date: 2026-06-12
-Scope: full repository (FastAPI backend `alpha-backend/`, Next.js frontend `cv-analyzer-frontend/`, Docker/nginx infrastructure).
+Scope: full repository (FastAPI backend `backend/`, Next.js frontend `frontend/`, Docker/nginx infrastructure).
 
 This document is the Phase 1 deliverable: every feature mapped, every issue
 classified (Critical / Improvement / Dead code), and the action taken during
@@ -94,7 +94,7 @@ Infra/repo root:
 ## 7. Verification performed
 
 - `pytest` suite: **131 passed / 24 failed** vs **128 / 27 on the original code** — zero new failures; the 24 remaining failures pre-date this refactor (they require live Qdrant/network or assert drifted rate-limiter internals).
-- End-to-end smoke test with dummy data (`alpha-backend/tests/e2e_smoke.py`): real app + real CPU embeddings + in-memory Qdrant + stubbed OpenAI; covers login → CV upload → JD upload → list → details → `/api/match` (by id, repeated/cached, and by text) → path-traversal guard → delete.
+- End-to-end smoke test with dummy data (`backend/tests/e2e_smoke.py`): real app + real CPU embeddings + in-memory Qdrant + stubbed OpenAI; covers login → CV upload → JD upload → list → details → `/api/match` (by id, repeated/cached, and by text) → path-traversal guard → delete.
 - `npm run build`: succeeds with all routes; no new TypeScript errors in touched files.
 - `docker compose config` validates both compose files; `bash -n` validates all scripts.
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 ###############################################################################
-# AlphaCV — stop script
+# AlphaCV, stop script
 #
-# Usage: ./scripts/stop.sh dev|prod
+# Usage: ./scripts/stop.sh dev|local|prod
 #
 # SAFETY: uses `docker compose down` WITHOUT -v. Volumes (postgres, qdrant,
 # redis, uploads, llm cache) are NEVER deleted by this script.
@@ -14,9 +14,10 @@ cd "$SCRIPT_DIR/.."
 
 MODE="${1:-}"
 case "$MODE" in
-  dev)  COMPOSE_FILE="docker-compose.dev.yml"; ENV_FILE=".env.dev" ;;
-  prod) COMPOSE_FILE="docker-compose.prod.yml"; ENV_FILE=".env" ;;
-  *) echo "Usage: $0 dev|prod" >&2; exit 1 ;;
+  dev)   COMPOSE_FILE="docker-compose.dev.yml"; ENV_FILE=".env.dev" ;;
+  local) COMPOSE_FILE="docker-compose.local.yml"; ENV_FILE=".env.local" ;;
+  prod)  COMPOSE_FILE="docker-compose.prod.yml"; ENV_FILE=".env" ;;
+  *) echo "Usage: $0 dev|local|prod" >&2; exit 1 ;;
 esac
 
 if docker compose version >/dev/null 2>&1; then
@@ -30,4 +31,4 @@ ENV_ARGS=()
 
 echo "Stopping AlphaCV ($MODE)... (volumes are preserved)"
 $COMPOSE -f "$COMPOSE_FILE" "${ENV_ARGS[@]}" down
-echo "✅ Stopped. Data volumes were NOT removed."
+echo "Stopped. Data volumes were NOT removed."

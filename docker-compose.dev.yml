@@ -1,5 +1,5 @@
 # =============================================================================
-# AlphaCV — Development (CPU-only)
+# AlphaCV, Development (CPU-only)
 # Configuration comes from ./.env.dev (copy .env.development.example).
 # Start:  ./scripts/start.sh dev         Stop: ./scripts/stop.sh dev
 # Exposed dev ports: 3000 frontend, 8000 backend, 80 nginx,
@@ -11,7 +11,7 @@ services:
   # runtime, so NEXT_PUBLIC_API_URL only matters for the SSR fallback.
   frontend-dev:
     build:
-      context: ./cv-analyzer-frontend
+      context: ./frontend
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost
@@ -35,14 +35,16 @@ services:
   backend-dev:
     image: alpha-backend:dev
     build:
-      context: ./alpha-backend
+      context: ./backend
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
     env_file:
       - .env.dev
+    environment:
+      - EMBEDDING_SERVICE_URL=http://model-server-dev:8080
     volumes:
-      - ./alpha-backend:/app
+      - ./backend:/app
       - uploads-dev-data:/data/uploads
       - llm-cache-dev:/data/llm_cache
     networks:
@@ -51,18 +53,20 @@ services:
       - postgres-dev
       - qdrant-dev
       - redis-dev
+      - model-server-dev
     restart: unless-stopped
 
   # Combined background worker: email scheduler + public-CV queue consumer.
-  # Merged (see docker-compose.prod.yml for why) — match-worker-dev below
+  # Merged (see docker-compose.prod.yml for why), match-worker-dev below
   # stays separate since it's the only genuinely CPU-heavy one.
   background-worker-dev:
     image: alpha-backend:dev
     pull_policy: never
-    command: ["python", "-m", "app.worker.background_worker"]
+    command: ["python", "-m", "app.jobs.background_worker"]
     env_file:
       - .env.dev
     environment:
+      - EMBEDDING_SERVICE_URL=http://model-server-dev:8080
       - ENABLE_EMAIL_SCHEDULER=true
       - ENABLE_PUBLIC_CV_QUEUE=true
     depends_on:
@@ -70,8 +74,9 @@ services:
       - postgres-dev
       - qdrant-dev
       - redis-dev
+      - model-server-dev
     volumes:
-      - ./alpha-backend:/app
+      - ./backend:/app
       - uploads-dev-data:/data/uploads
       - llm-cache-dev:/data/llm_cache
     networks:
@@ -82,21 +87,44 @@ services:
   match-worker-dev:
     image: alpha-backend:dev
     pull_policy: never
-    command: ["python", "-m", "app.worker.match_worker"]
+    command: ["python", "-m", "app.jobs.match_worker"]
+    init: true
+    stop_grace_period: 120s
     env_file:
       - .env.dev
     environment:
+      - EMBEDDING_SERVICE_URL=http://model-server-dev:8080
       - ENABLE_MATCH_QUEUE=true
-      - TORCH_NUM_THREADS=1
+      - TORCH_NUM_THREADS=${TORCH_NUM_THREADS:-1}
+      - MATCH_THREAD_POOL_WORKERS=${MATCH_THREAD_POOL_WORKERS:-4}
+      - MATCH_QUEUE_MAX_CONCURRENT_JOBS=${MATCH_QUEUE_MAX_CONCURRENT_JOBS:-0}
+      - MATCH_WORKER_CONCURRENCY=${MATCH_WORKER_CONCURRENCY:-2}
+      - OPENBLAS_NUM_THREADS=1
+      - MALLOC_ARENA_MAX=2
     depends_on:
       - backend-dev
       - postgres-dev
       - qdrant-dev
       - redis-dev
+      - model-server-dev
     volumes:
-      - ./alpha-backend:/app
+      - ./backend:/app
       - uploads-dev-data:/data/uploads
       - llm-cache-dev:/data/llm_cache
+    networks:
+      - dev-network
+    deploy:
+      replicas: ${MATCH_WORKER_REPLICAS:-2}
+    restart: unless-stopped
+
+  # Embedding model server (torch + sentence-transformer live ONLY here; internal, no host port)
+  model-server-dev:
+    image: alpha-model-server:dev
+    build:
+      context: ./backend/model_server
+    environment:
+      - MODEL_THREADS=${MODEL_THREADS:-2}
+    init: true
     networks:
       - dev-network
     restart: unless-stopped
@@ -112,7 +140,9 @@ services:
       - "5434:5432"
     volumes:
       - postgres-dev-data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
+      # only the local-Postgres bootstrap: db/init/rds-bootstrap.sql is a manual one-time script for RDS and
+      # aborts first-run initialisation here
+      - ./db/init/01-create-databases.sh:/docker-entrypoint-initdb.d/01-create-databases.sh:ro
     networks:
       - dev-network
     restart: unless-stopped
@@ -138,7 +168,7 @@ services:
     image: redis:7-alpine
     ports:
       - "6380:6379"
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 256mb --maxmemory-policy volatile-lru
     networks:
       - dev-network
     restart: unless-stopped
