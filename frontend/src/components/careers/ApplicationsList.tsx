@@ -2,14 +2,13 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import {
   User,
   Users,
   FileText,
-  X,
-  Loader2,
   Eye,
-  DollarSign,
+  Loader2,
   MapPin,
   Globe,
   Clock,
@@ -35,43 +34,10 @@ function MatchScorePill({ score }: { score: number }) {
 }
 
 export default function ApplicationsList() {
-  const { applications, isLoading, viewingCVData, setViewingCVData } = useCareersStore();
+  const router = useRouter();
+  const { applications, isLoading } = useCareersStore();
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString();
-  };
-
-  const [loadingCVData, setLoadingCVData] = useState(false);
-
-  const handleViewDetails = async (cvId: string, filename: string) => {
-    setLoadingCVData(true);
-    try {
-      const cvData = await api.getCVDetails(cvId);
-      const jobApplicationFromList = applications.find((app) => app.application_id === cvId);
-      const jobApplication = (cvData as any).job_application || jobApplicationFromList;
-      const content = {
-        candidate: cvData.candidate,
-        structured_info: cvData.structured_info,
-        text_info: cvData.text_info,
-        upload_date: (cvData as any).upload_date,
-        job_application: jobApplication
-          ? {
-              applicant_name: jobApplicationFromList?.applicant_name,
-              applicant_email: jobApplicationFromList?.applicant_email,
-              applicant_phone: jobApplicationFromList?.applicant_phone,
-              application_date: jobApplicationFromList?.application_date,
-              expected_salary: jobApplicationFromList?.expected_salary ?? (jobApplication as any).expected_salary,
-              application_status: (jobApplication as any).application_status,
-              years_of_experience: (jobApplication as any).years_of_experience,
-            }
-          : null,
-      };
-      setViewingCVData({ cvId, filename, content: JSON.stringify(content) });
-    } catch (error) {
-      console.error('Failed to load CV data:', error);
-      setViewingCVData({ cvId, filename, content: 'Failed to load CV content' });
-    } finally {
-      setLoadingCVData(false);
-    }
   };
 
   const [pdfPreview, setPdfPreview] = useState<{ cvId: string; fileName: string } | null>(null);
@@ -216,9 +182,6 @@ export default function ApplicationsList() {
                     <Avatar name={application.applicant_name} />
                     <div className="min-w-0">
                       <div className="break-words font-semibold leading-tight text-slate-900">{application.applicant_name}</div>
-                      {application.source === 'email_application' && (
-                        <span className="mt-1 inline-block rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">Naukri</span>
-                      )}
                       {application.cv_filename && (
                         <div className="mt-0.5 line-clamp-2 break-all text-[11px] leading-tight text-slate-400" title={application.cv_filename}>{application.cv_filename}</div>
                       )}
@@ -230,7 +193,7 @@ export default function ApplicationsList() {
                     {application.applicant_email}
                   </a>
                   {application.applicant_phone && <div className="mt-0.5 text-[12px] text-slate-500">{application.applicant_phone}</div>}
-                  <ContactActions email={application.applicant_email} phone={application.applicant_phone} variant="icons" className="mt-1.5" />
+                  <ContactActions email={application.applicant_email} phone={application.applicant_phone} linkedin={application.linkedin_url} github={application.github_url} variant="icons" className="mt-1.5" />
                 </td>
                 <td className="px-3 py-3.5 text-slate-600">{formatDate(application.application_date)}</td>
                 <td className="px-3 py-3.5">
@@ -265,8 +228,8 @@ export default function ApplicationsList() {
                   <div className="flex flex-col items-stretch gap-1.5">
                     <button
                       type="button"
-                      onClick={() => handleViewDetails(application.application_id, application.cv_filename)}
-                      className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-colors bg-navy-600 font-semibold text-white hover:bg-navy-700"
+                      onClick={() => router.push(`/candidates/${application.application_id}`)}
+                      className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-colors bg-navy-900 font-semibold text-white hover:bg-navy-800"
                     >
                       <Eye className="h-3.5 w-3.5" /> Details
                     </button>
@@ -276,9 +239,9 @@ export default function ApplicationsList() {
                         const name = application.applicant_name || 'document';
                         setPdfPreview({ cvId: application.application_id, fileName: previewFileName(application.cv_filename, name) });
                       }}
-                      className="inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border border-surface-border bg-white px-3 text-[12px] font-medium text-slate-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                      className="inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border border-surface-border bg-white px-3 text-[12px] font-medium text-slate-700 transition-colors hover:border-navy-200 hover:bg-navy-50 hover:text-navy-700"
                     >
-                      <FileText className="h-3.5 w-3.5" /> PDF
+                      <FileText className="h-3.5 w-3.5" /> Full CV
                     </button>
                   </div>
                 </td>
@@ -287,109 +250,6 @@ export default function ApplicationsList() {
           </tbody>
         </table>
       </div>
-
-      {/* Right-side panel: Candidate details */}
-      {viewingCVData && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-slate-950/30"
-            onClick={() => {
-              setViewingCVData(null);
-            }}
-            aria-hidden
-          />
-          <div className="animate-page-enter fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-slate-200 bg-white shadow-[var(--shadow-md)] sm:max-w-lg">
-            <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3.5">
-              <h2 className="truncate pr-2 text-[15px] font-semibold text-slate-900">Candidate details</h2>
-              <button
-                type="button"
-                onClick={() => {
-                  setViewingCVData(null);
-                }}
-                className="rounded p-1 text-slate-400 transition-colors duration-200 hover:bg-slate-100 hover:text-slate-600"
-                aria-label="Close"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="flex-1 space-y-4 overflow-y-auto p-4">
-              {loadingCVData ? (
-                <div className="flex flex-col items-center justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-brand-600" />
-                  <p className="mt-2 text-[13px] text-slate-500">Loading details…</p>
-                </div>
-              ) : (
-                (() => {
-                  try {
-                    const data = JSON.parse(viewingCVData.content);
-                    const candidate = data.candidate;
-                    const structured = data.structured_info;
-                    const jobApplication = data.job_application;
-                    const skills = candidate?.skills || structured?.skills_sentences || [];
-                    const responsibilities = candidate?.responsibilities || structured?.responsibility_sentences || [];
-                    const displayName = jobApplication?.applicant_name || candidate?.full_name || 'Unknown';
-                    const fileName = previewFileName(viewingCVData.filename, displayName);
-                    return (
-                      <>
-                        <div className="surface-panel p-4">
-                          <h3 className="text-[15px] font-semibold text-slate-900">
-                            {displayName}
-                          </h3>
-                          <p className="mt-1 text-[13px] text-slate-600">
-                            {candidate?.job_title || '-'}
-                          </p>
-                          <p className="mt-1 text-[12px] text-slate-500">
-                            {candidate?.years_of_experience ?? '-'} years · {skills.length} skills
-                          </p>
-                          {structured?.category && (
-                            <p className="mt-1 text-[12px] text-slate-500">Category: {structured.category}</p>
-                          )}
-                          {jobApplication?.expected_salary != null && (
-                            <p className="mt-2 flex items-center gap-1 text-[13px] font-medium text-slate-800">
-                              <DollarSign className="h-4 w-4 text-slate-400" />
-                              Salary asked: AED {Number(jobApplication.expected_salary).toLocaleString()}
-                            </p>
-                          )}
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            className="mt-3 w-full"
-                            icon={<Eye className="h-4 w-4" />}
-                            onClick={() => setPdfPreview({ cvId: viewingCVData.cvId, fileName })}
-                          >
-                            View full PDF
-                          </Button>
-                        </div>
-                        <div className="surface-panel p-4">
-                          <h4 className="section-label mb-2">Skills</h4>
-                          <div className="flex flex-wrap gap-1.5">
-                            {skills.slice(0, 30).map((s: string, i: number) => (
-                              <span key={i} className="chip chip-brand">{s}</span>
-                            ))}
-                            {skills.length > 30 && <span className="text-[12px] text-slate-500">+{skills.length - 30} more</span>}
-                          </div>
-                        </div>
-                        <div className="surface-panel p-4">
-                          <h4 className="section-label mb-2">Responsibilities</h4>
-                          <ul className="list-inside list-disc space-y-1 text-[13px] text-slate-600">
-                            {responsibilities.slice(0, 15).map((r: string, i: number) => (
-                              <li key={i} className="line-clamp-2">{r}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      </>
-                    );
-                  } catch {
-                    return (
-                      <p className="text-[13px] text-slate-500">Failed to load details.</p>
-                    );
-                  }
-                })()
-              )}
-            </div>
-          </div>
-        </>
-      )}
 
       {pdfPreview && (
         pdfLoading ? (

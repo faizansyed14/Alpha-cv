@@ -27,8 +27,18 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
   const { publicJob, isLoading, error, loadPublicJob, clearError } = useCareersStore();
   const [showApplicationForm, setShowApplicationForm] = useState(false);
 
+  // Until the first load for THIS link has finished we do not know whether the job exists, so show the skeleton,
+  // never "not found" (the store starts with no job and isLoading=false, which used to flash the error first).
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   useEffect(() => {
-    if (token) loadPublicJob(token);
+    if (!token) return;
+    let alive = true;
+    Promise.resolve(loadPublicJob(token)).finally(() => {
+      if (alive) setLoadedFor(token);
+    });
+    return () => {
+      alive = false;
+    };
   }, [token, loadPublicJob]);
 
   const formatDate = (dateString: string) =>
@@ -38,11 +48,13 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
       day: 'numeric',
     });
 
-  if (isLoading) {
+  if (token && (isLoading || loadedFor !== token)) {
     return <JobDetailSkeleton />;
   }
 
-  if (!token || error || !publicJob) {
+  // Only treat missing job / bad token as a dead page. Application submit errors
+  // (e.g. already applied) stay on the form via careersStore.error.
+  if (!token || !publicJob) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4">
         <div className="surface-panel w-full max-w-md p-6 text-center">

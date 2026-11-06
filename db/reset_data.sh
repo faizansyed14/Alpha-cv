@@ -55,7 +55,7 @@ compose exec -T "$QDRANT_SVC" sh -c '
   done
 '
 
-echo "→ Truncating tracker/email tables in Postgres (auth users kept)..."
+echo "→ Truncating tracker/email tables in Postgres (users and migration history kept)..."
 compose exec -T "$POSTGRES_SVC" sh -c '
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=0 <<SQL
 DO \$\$
@@ -64,7 +64,7 @@ BEGIN
   FOR r IN
     SELECT tablename FROM pg_tables
     WHERE schemaname = current_schema()
-      AND tablename NOT IN ('users')
+      AND tablename NOT IN ('user', 'alembic_version')
   LOOP
     EXECUTE format('TRUNCATE TABLE %I CASCADE', r.tablename);
     RAISE NOTICE 'truncated %', r.tablename;

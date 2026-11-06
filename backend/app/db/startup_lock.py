@@ -23,13 +23,13 @@ WAIT_SECONDS = 120
 @contextmanager
 def schema_init_lock() -> Iterator[None]:
     """Hold the schema-setup lock for the block. A no-op for SQLite and when the lock cannot be taken."""
-    if not settings.AUTH_DB_URL.startswith("postgres"):
+    if not settings.DATABASE_URL.startswith("postgres"):
         yield
         return
 
     from sqlalchemy import text
 
-    from app.db.auth_db import engine
+    from app.db.database import engine
 
     conn = None
     try:

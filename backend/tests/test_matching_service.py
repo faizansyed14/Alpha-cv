@@ -8,6 +8,7 @@ from contextlib import nullcontext
 import pytest
 import numpy as np
 from unittest.mock import Mock, patch
+from app.config.settings import settings
 from app.matching.engine import (
     years_score, 
     hungarian_mean, 
@@ -478,11 +479,11 @@ class TestMatchingServiceMatchStructuredData:
             responsibilities = data.get("responsibility_sentences", data.get("responsibilities", []))
             return {
                 "skills": skills,
-                "skill_vectors": [[0.1] * 768 for _ in skills],
+                "skill_vectors": [[0.1] * settings.EMBEDDING_DIM for _ in skills],
                 "responsibilities": responsibilities,
-                "responsibility_vectors": [[0.1] * 768 for _ in responsibilities],
-                "job_title_vector": [[0.1] * 768],
-                "experience_vector": [[0.1] * 768]
+                "responsibility_vectors": [[0.1] * settings.EMBEDDING_DIM for _ in responsibilities],
+                "job_title_vector": [[0.1] * settings.EMBEDDING_DIM],
+                "experience_vector": [[0.1] * settings.EMBEDDING_DIM]
             }
         
         self.mock_embedding_service.generate_document_embeddings.side_effect = mock_generate_doc_emb
@@ -532,11 +533,11 @@ class TestMatchingServiceMatchStructuredData:
             responsibilities = data.get("responsibility_sentences", data.get("responsibilities", []))
             return {
                 "skills": skills,
-                "skill_vectors": [[0.1] * 768 for _ in skills],
+                "skill_vectors": [[0.1] * settings.EMBEDDING_DIM for _ in skills],
                 "responsibilities": responsibilities,
-                "responsibility_vectors": [[0.1] * 768 for _ in responsibilities],
-                "job_title_vector": [[0.1] * 768],
-                "experience_vector": [[0.1] * 768]
+                "responsibility_vectors": [[0.1] * settings.EMBEDDING_DIM for _ in responsibilities],
+                "job_title_vector": [[0.1] * settings.EMBEDDING_DIM],
+                "experience_vector": [[0.1] * settings.EMBEDDING_DIM]
             }
         
         self.mock_embedding_service.generate_document_embeddings.side_effect = mock_generate_doc_emb
@@ -578,11 +579,11 @@ class TestMatchingServiceMatchStructuredData:
             responsibilities = data.get("responsibility_sentences", data.get("responsibilities", []))
             return {
                 "skills": skills,
-                "skill_vectors": [[0.1] * 768 for _ in skills],
+                "skill_vectors": [[0.1] * settings.EMBEDDING_DIM for _ in skills],
                 "responsibilities": responsibilities,
-                "responsibility_vectors": [[0.1] * 768 for _ in responsibilities],
-                "job_title_vector": [[0.1] * 768],
-                "experience_vector": [[0.1] * 768]
+                "responsibility_vectors": [[0.1] * settings.EMBEDDING_DIM for _ in responsibilities],
+                "job_title_vector": [[0.1] * settings.EMBEDDING_DIM],
+                "experience_vector": [[0.1] * settings.EMBEDDING_DIM]
             }
         
         self.mock_embedding_service.generate_document_embeddings.side_effect = mock_generate_doc_emb
@@ -678,8 +679,8 @@ class TestMatchingServiceCosineSimilarity:
     
     def test_cos_sim_list(self):
         """Test cosine similarity between two vectors."""
-        v1 = [0.1] * 768
-        v2 = [0.2] * 768
+        v1 = [0.1] * settings.EMBEDDING_DIM
+        v2 = [0.2] * settings.EMBEDDING_DIM
         
         result = self.service._cos_sim_list(v1, v2)
         
@@ -689,8 +690,8 @@ class TestMatchingServiceCosineSimilarity:
     
     def test_cos_sim_list_identical_vectors(self):
         """Test cosine similarity with identical vectors."""
-        v1 = [0.5] * 768
-        v2 = [0.5] * 768
+        v1 = [0.5] * settings.EMBEDDING_DIM
+        v2 = [0.5] * settings.EMBEDDING_DIM
         
         # Mock perfect similarity
         self.mock_embedding_service.calculate_cosine_similarity.return_value = 1.0
@@ -722,17 +723,17 @@ class TestMatchingServiceMatchExact:
         """Test exact matching with valid vectors."""
         # Mock vector retrieval
         cv_vectors = {
-            "skill_vectors": [[0.1] * 768 for _ in range(5)],
-            "responsibility_vectors": [[0.1] * 768 for _ in range(3)],
-            "experience_vector": [[0.1] * 768],
-            "job_title_vector": [[0.1] * 768]
+            "skill_vectors": [[0.1] * settings.EMBEDDING_DIM for _ in range(5)],
+            "responsibility_vectors": [[0.1] * settings.EMBEDDING_DIM for _ in range(3)],
+            "experience_vector": [[0.1] * settings.EMBEDDING_DIM],
+            "job_title_vector": [[0.1] * settings.EMBEDDING_DIM]
         }
         
         jd_vectors = {
-            "skill_vectors": [[0.2] * 768 for _ in range(3)],
-            "responsibility_vectors": [[0.2] * 768 for _ in range(2)],
-            "experience_vector": [[0.2] * 768],
-            "job_title_vector": [[0.2] * 768]
+            "skill_vectors": [[0.2] * settings.EMBEDDING_DIM for _ in range(3)],
+            "responsibility_vectors": [[0.2] * settings.EMBEDDING_DIM for _ in range(2)],
+            "experience_vector": [[0.2] * settings.EMBEDDING_DIM],
+            "job_title_vector": [[0.2] * settings.EMBEDDING_DIM]
         }
         
         # Mock the _get_exact_vectors method

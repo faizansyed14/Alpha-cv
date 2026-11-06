@@ -139,25 +139,20 @@ log "'postgres' container or docker volume to copy any more. RDS's own"
 log "automated backups / snapshots are the primary backup for this data."
 log "Enable/verify them in the RDS console (Maintenance & backups tab)."
 
-# Optional supplementary logical dump, taken directly from RDS over the
-# network. Runs only if POSTGRES_HOST/USER/DB are present in .env (sourced
-# by the caller) and the 'psql' client is installed on this host; skipped
-# (not fatal) otherwise so a backup run never breaks on a missing client.
+# Optional supplementary logical dump of the single application database, taken directly from RDS over the
+# network. Runs only if DATABASE_URL is present in .env (sourced by the caller) and the 'pg_dump' client is
+# installed on this host; skipped (not fatal) otherwise so a backup run never breaks on a missing client.
 POSTGRES_BACKUP_DIR="$BACKUP_DIR/postgres_dump"
-if [ -n "${POSTGRES_HOST:-}" ] && command -v pg_dump > /dev/null 2>&1; then
+if [ -n "${DATABASE_URL:-}" ] && command -v pg_dump > /dev/null 2>&1; then
     mkdir -p "$POSTGRES_BACKUP_DIR"
-    log "Creating PostgreSQL SQL dump from RDS ($POSTGRES_HOST)..."
-    PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_dump \
-        -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-cv_user}" \
-        "${POSTGRES_DB:-cv_database}" > "$POSTGRES_BACKUP_DIR/cv_database_dump.sql" \
-        2>/dev/null || log "RDS SQL dump skipped (check POSTGRES_* / network access to RDS)"
-    PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_dump \
-        -h "$POSTGRES_HOST" -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-cv_user}" \
-        auth_db > "$POSTGRES_BACKUP_DIR/auth_db_dump.sql" \
-        2>/dev/null || log "RDS auth_db dump skipped (check POSTGRES_* / network access to RDS)"
+    log "Creating PostgreSQL SQL dump from RDS..."
+    # postgresql+psycopg2://user:pass@host:5432/db?sslmode=require  ->  a plain libpq URL
+    PG_URL="${DATABASE_URL/postgresql+psycopg2:/postgresql:}"
+    pg_dump "$PG_URL" > "$POSTGRES_BACKUP_DIR/database_dump.sql" \
+        2>/dev/null || log "RDS SQL dump skipped (check DATABASE_URL / network access to RDS)"
     log "RDS logical dump attempt complete (see $POSTGRES_BACKUP_DIR)"
 else
-    log "Skipping RDS logical dump (POSTGRES_HOST not set or pg_dump not installed on this host)"
+    log "Skipping RDS logical dump (DATABASE_URL not set or pg_dump not installed on this host)"
 fi
 
 ###############################################################################
@@ -292,8 +287,7 @@ To restore from this backup (run these commands manually when needed):
    - Point-in-time / snapshot restore: use the RDS console or
      "aws rds restore-db-instance-to-point-in-time" / "...-from-db-snapshot".
    - Or, from the optional logical dump in this backup:
-     psql -h <rds-endpoint> -U cv_user -d cv_database < $BACKUP_DIR/postgres_dump/cv_database_dump.sql
-     psql -h <rds-endpoint> -U cv_user -d auth_db      < $BACKUP_DIR/postgres_dump/auth_db_dump.sql
+     psql -h <rds-endpoint> -U cv_user -d cv_database < $BACKUP_DIR/postgres_dump/database_dump.sql
 
 5. Restore Redis:
    sudo cp -a $BACKUP_DIR/redis_data/ubuntu_redis_data /var/lib/docker/volumes/

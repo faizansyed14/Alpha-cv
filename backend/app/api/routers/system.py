@@ -11,6 +11,7 @@ from app.config.settings import settings
 from app.models.user import User
 from app.providers.cache.memory import get_cache_service
 from app.providers.embeddings.service import get_embedding_service
+from qdrant_client.models import Direction, OrderBy
 from app.providers.vectorstore.qdrant import CV_PAYLOAD, get_qdrant_utils
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,8 @@ async def health_check(request: Request) -> JSONResponse:
                 status["status"] = "degraded"
         import os
         status["environment"] = {
-            "openai_key_configured": bool(settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY")),
+            "openai_key_configured": bool(settings.OPENROUTER_API_KEY or os.getenv("OPENROUTER_API_KEY")),   # field name kept for the admin page
+            "llm_model": settings.LLM_MODEL,
             "qdrant_host": settings.QDRANT_HOST,
             "qdrant_port": str(settings.QDRANT_PORT),
         }
@@ -182,7 +184,7 @@ async def get_system_stats(_: User = Depends(require_admin)) -> JSONResponse:
             "system_info": {
                 "embedding_model": settings.EMBEDDING_MODEL_NAME,
                 "embedding_dimension": settings.EMBEDDING_DIM,
-                "llm_model": "gpt-4.1-mini-2025-04-14",
+                "llm_model": settings.LLM_MODEL,
                 "similarity_metric": "cosine",
             },
         }
@@ -227,14 +229,38 @@ async def get_database_status(_: User = Depends(require_admin)):
         raise HTTPException(status_code=500, detail=f"Database status error: {str(e)}")
 
 
+VIEW_SAMPLE = 50   # records per list in the database view
+
+
+def _recent_points(collection: str, n: int) -> List[Any]:
+    """The newest ``n`` records of a collection (CVs by their indexed uploaded_at; others as stored)."""
+    client = get_qdrant_utils().client
+    try:
+        if collection == "cv_structured":
+            points, _ = client.scroll(collection, limit=n, order_by=OrderBy(key="uploaded_at", direction=Direction.DESC),
+                                      with_payload=True, with_vectors=False)
+            if points:
+                return points
+        points, _ = client.scroll(collection, limit=n, with_payload=True, with_vectors=False)
+        return points
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"recent records of {collection} unavailable: {e}")
+        return []
+
+
 @router.get("/database/view")
 async def view_database(_: User = Depends(require_admin)) -> JSONResponse:
     """
     Formatted DB view using *_structured collections.
     """
     try:
-        cvs = _scroll_all("cv_structured")
-        jds = _scroll_all("jd_structured")
+        # A bounded view: exact totals from Qdrant's counters plus the newest few records. It used to read EVERY CV and
+        # JD in the database into one response, which does not survive a large database.
+        q_client = get_qdrant_utils().client
+        total_cv_count = int(q_client.count("cv_structured", exact=True).count)
+        total_jd_count = int(q_client.count("jd_structured", exact=True).count)
+        cvs = _recent_points("cv_structured", VIEW_SAMPLE)
+        jds = _recent_points("jd_structured", VIEW_SAMPLE)
         formatted_cvs = []
         for p in cvs:
             pl = p.payload or {}
@@ -271,12 +297,13 @@ async def view_database(_: User = Depends(require_admin)) -> JSONResponse:
         formatted_cvs.sort(key=lambda x: x["upload_date"], reverse=True)
         formatted_jds.sort(key=lambda x: x["upload_date"], reverse=True)
         summary = {
-            "total_documents": len(formatted_cvs) + len(formatted_jds),
-            "total_cvs": len(formatted_cvs),
-            "total_jds": len(formatted_jds),
+            "total_documents": total_cv_count + total_jd_count,
+            "total_cvs": total_cv_count,
+            "total_jds": total_jd_count,
+            "shown_per_list": VIEW_SAMPLE,
             "avg_cv_skills": (sum(c["skills_count"] for c in formatted_cvs) / len(formatted_cvs)) if formatted_cvs else 0,
             "avg_jd_skills": (sum(j["required_skills"] for j in formatted_jds) / len(formatted_jds)) if formatted_jds else 0,
-            "ready_for_matching": bool(formatted_cvs) and bool(formatted_jds),
+            "ready_for_matching": total_cv_count > 0 and total_jd_count > 0,
         }
         return JSONResponse({
             "success": True,

@@ -10,6 +10,7 @@ import { useWorkspaceNav } from '@/hooks/useWorkspaceNav';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { MATCH_MAX_CVS } from '@/lib/matchRun';
 
 /**
  * The match tray: a docked bar that follows the user across the workspace while they build a match. It shows the
@@ -56,7 +57,8 @@ export default function MatchTray() {
   const selectionKey = `${selectedCVs.length}|${selectedJD ?? ''}`;
   const visible =
     !onMatchPage && !matching && !progressVisible && (selectedCVs.length > 0 || !!selectedJD) && dismissedFor !== selectionKey;
-  const ready = selectedCVs.length > 0 && !!selectedJD;
+  const tooMany = selectedCVs.length > MATCH_MAX_CVS;
+  const ready = selectedCVs.length > 0 && !!selectedJD && !tooMany;
 
   const start = () => {
     if (!ready) return;
@@ -199,7 +201,7 @@ export default function MatchTray() {
                 {(ready || onJobs || onCandidates) && (
                   <Button variant="primary" size="lg" className="flex-1 sm:flex-none" onClick={start} disabled={!ready}>
                     <Target />
-                    {ready ? `Run match (${selectedCVs.length.toLocaleString()})` : 'Run match'}
+                    {ready ? `Run match (${selectedCVs.length.toLocaleString()})` : tooMany ? `Max ${MATCH_MAX_CVS.toLocaleString()} CVs` : 'Run match'}
                   </Button>
                 )}
                 <span className="hidden h-8 w-px bg-surface-border sm:block" />

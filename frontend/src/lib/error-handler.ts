@@ -49,6 +49,15 @@ export class ApiErrorHandler {
         message = 'Validation error';
         detail = data?.detail || 'Please check your input format.';
         break;
+      case 409: {
+        const conflict =
+          (typeof data?.detail === 'string' && data.detail) ||
+          (typeof data?.error === 'string' && data.error) ||
+          'This action conflicts with an existing record.';
+        message = conflict;
+        detail = conflict;
+        break;
+      }
       case 429:
         message = 'Too many requests';
         detail = data?.detail || 'You are submitting applications too quickly. Please wait a moment and try again.';
@@ -62,7 +71,10 @@ export class ApiErrorHandler {
         detail = 'The service is temporarily unavailable. Please try again later.';
         break;
       default:
-        message = `HTTP ${status} Error`;
+        message =
+          (typeof data?.detail === 'string' && data.detail) ||
+          (typeof data?.error === 'string' && data.error) ||
+          `HTTP ${status} Error`;
         detail = data?.detail || data?.error || error.message;
     }
 

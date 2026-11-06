@@ -109,7 +109,7 @@ export function SkeletonTable({
 
 export function SkeletonCandidateCard() {
   return (
-    <div className="flex gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-card">
+    <div className="flex gap-3 rounded-xl border border-surface-border bg-white p-4 shadow-card">
       <div className="flex shrink-0 flex-col items-center gap-2 pt-0.5">
         <Bone className="h-4 w-4 rounded" />
         <Bone className="h-6 w-6 rounded-full" />
@@ -139,7 +139,7 @@ export function SkeletonFilterRail() {
   return (
     <aside className="w-full shrink-0 sm:w-60">
       <div className="rounded-xl border border-surface-border bg-white">
-        <div className="border-b border-slate-200 px-4 py-3">
+        <div className="border-b border-surface-border px-4 py-3">
           <Bone className="h-4 w-16" />
         </div>
         {['Category', 'Location', 'Nationality'].map((group) => (

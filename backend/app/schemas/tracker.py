@@ -52,16 +52,12 @@ class TrackerCandidateCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=300)
     email: Optional[str] = Field(None, max_length=300)
     phone: Optional[str] = Field(None, max_length=50)
-    current_company: Optional[str] = Field(None, max_length=300)
-    experience_years: Optional[int] = Field(None, ge=0, le=80)
 
 
 class TrackerCandidateUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=300)
     email: Optional[str] = Field(None, max_length=300)
     phone: Optional[str] = Field(None, max_length=50)
-    current_company: Optional[str] = Field(None, max_length=300)
-    experience_years: Optional[int] = Field(None, ge=0, le=80)
 
 
 class TrackerCandidateRead(BaseModel):
@@ -69,8 +65,6 @@ class TrackerCandidateRead(BaseModel):
     name: str
     email: Optional[str]
     phone: Optional[str]
-    current_company: Optional[str]
-    experience_years: Optional[int]
     created_at: datetime
     updated_at: datetime
 

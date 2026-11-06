@@ -50,7 +50,7 @@ backend/
 
 ## Environment Variables
 
-See `.env.example` for required configuration.
+Configuration comes from `.env.local` / `.env.dev` / `.env.prod` (repo root).
 
 ## Testing
 

@@ -10,12 +10,12 @@
  */
 import * as React from 'react';
 import {
-  ArrowLeft as PhArrowLeft, ArrowRight as PhArrowRight, ArrowSquareOut, ArrowsClockwise, Briefcase as PhBriefcase,
+  ArrowLeft as PhArrowLeft, ArrowRight as PhArrowRight, ArrowUp as PhArrowUp, SidebarSimple, ArrowSquareOut, ArrowsClockwise, Briefcase as PhBriefcase,
   Brain as PhBrain, Buildings, CalendarBlank, CalendarDots, CaretDown, CaretLeft, CaretRight, CaretUp, CaretUpDown, ChartBar, ChatCircle,
   ChatText, Check as PhCheck, CheckCircle as PhCheckCircle, CircleNotch, ClipboardText, Clock as PhClock, Code as PhCode, CodeBlock,
   DotsThree, Copy as PhCopy, Cpu as PhCpu, CloudArrowUp, CurrencyDollar, Database as PhDatabase, DotsSixVertical, DownloadSimple, Envelope, Eye as PhEye,
   EyeSlash, FileArrowDown, FileMagnifyingGlass, FileText as PhFileText, FileX, FloppyDisk, Flag as PhFlag, Funnel, GearSix,
-  Globe as PhGlobe, GlobeHemisphereWest, HardDrives, Hourglass as PhHourglass, Info as PhInfo, Kanban, Key, List, Lock as PhLock,
+  Globe as PhGlobe, GlobeHemisphereWest, GithubLogo, LinkedinLogo, HardDrives, Hourglass as PhHourglass, Info as PhInfo, Kanban, Key, List, Lock as PhLock,
   MagicWand, MagnifyingGlass, MagnifyingGlassMinus, MagnifyingGlassPlus, MapPin as PhMapPin, Medal, Megaphone as PhMegaphone,
   PaperPlaneTilt, PencilSimple, PencilSimpleLine, Phone as PhPhone, Play as PhPlay, PlayCircle as PhPlayCircle, Plus as PhPlus,
   Power as PhPower, Pulse, Shield as PhShield, ShieldCheck as PhShieldCheck, ShareNetwork, SignOut, SlidersHorizontal as PhSliders,
@@ -36,14 +36,14 @@ const DULL = /^text-(slate|gray|neutral|zinc|stone)-\d{2,3}$|^text-ink(-muted)?$
 
 const ACCENT = /^text-(blue|indigo|violet|sky|cyan|amber|emerald|green|yellow|navy)-\d{2,3}$/;
 
-const BLUE = 'text-blue-600';
-const SKY = 'text-sky-600';
-const VIOLET = 'text-violet-600';
+const BLUE = 'text-navy-900';
+const SKY = 'text-navy-800';
+const VIOLET = 'text-navy-800';
 const GREEN = 'text-emerald-600';
 const AMBER = 'text-amber-500';
 const RED = 'text-rose-500';
-const CYAN = 'text-cyan-600';
-const INDIGO = 'text-indigo-600';
+const CYAN = 'text-navy-700';
+const INDIGO = 'text-navy-900';
 
 function make(Base: PhosphorIcon, tone: string | null, name: string, weight: 'duotone' | 'bold' | 'regular' = 'regular') {
   const Comp = React.forwardRef<SVGSVGElement, IconProps>(function Icon(
@@ -112,6 +112,8 @@ export const Phone = make(PhPhone, GREEN, 'Phone');
 export const MessageCircle = make(ChatCircle, GREEN, 'MessageCircle');
 export const MessageSquare = make(ChatText, CYAN, 'MessageSquare');
 export const Megaphone = make(PhMegaphone, AMBER, 'Megaphone');
+export const Linkedin = make(LinkedinLogo, BLUE, 'Linkedin');
+export const Github = make(GithubLogo, BLUE, 'Github');
 
 // ---- status & feedback
 export const Check = make(PhCheck, GREEN, 'Check', 'bold');
@@ -158,6 +160,7 @@ export const KanbanSquare = make(Kanban, VIOLET, 'KanbanSquare');
 // ---- navigation chrome (kept neutral so the interface does not look busy)
 export const ArrowLeft = make(PhArrowLeft, null, 'ArrowLeft', 'bold');
 export const ArrowRight = make(PhArrowRight, null, 'ArrowRight', 'bold');
+export const ArrowUp = make(PhArrowUp, BLUE, 'ArrowUp', 'bold');
 export const ChevronDown = make(CaretDown, null, 'ChevronDown', 'bold');
 export const ChevronUp = make(CaretUp, null, 'ChevronUp', 'bold');
 export const ChevronLeft = make(CaretLeft, null, 'ChevronLeft', 'bold');
@@ -168,3 +171,4 @@ export const GripVertical = make(DotsSixVertical, null, 'GripVertical', 'bold');
 export const Menu = make(List, null, 'Menu', 'bold');
 export const ZoomIn = make(MagnifyingGlassPlus, null, 'ZoomIn');
 export const ZoomOut = make(MagnifyingGlassMinus, null, 'ZoomOut');
+export const PanelLeft = make(SidebarSimple, null, 'PanelLeft');

@@ -7,9 +7,9 @@
 .env
 .env.*
 *.env
-!.env.example
-!*.env.example
-!.env.development.example
+!.env.local.example
+!.env.dev.example
+!.env.prod.example
 azure_email_config.env
 
 # Python
@@ -29,7 +29,8 @@ env/
 ENV/
 
 # LLM Cache
-.llm_cache/
+.ruff_cache/
+.pytest_cache/
 *.cache
 
 # Node

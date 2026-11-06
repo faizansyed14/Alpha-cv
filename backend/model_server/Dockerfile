@@ -1,25 +1,41 @@
 # syntax=docker/dockerfile:1.7
-# Embedding model server (torch CPU + sentence-transformers). Internal only: compose does not publish its port.
-# Built rarely (requirements and the model almost never change), so the backend image never pays for torch.
+# Embedding model server: multilingual-e5-small on ONNX Runtime (no torch). Internal only: compose does not publish its port.
+# Built rarely (requirements and the model almost never change), so the backend image never pays for an ML runtime.
 # Build from backend/model_server/:  docker build -t alpha-model-server .
 
+# Stage 1: download the ONNX model and its tokenizer once (the original publisher's export first, a community export of the
+# same weights as fallback). huggingface-hub is only needed here and is not copied to the runtime image.
+FROM python:3.12-slim AS model
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN --mount=type=cache,target=/root/.cache/pip pip install huggingface-hub==0.26.2
+WORKDIR /opt/model
+RUN python - <<'PY'
+import shutil
+from huggingface_hub import hf_hub_download
+
+for repo in ("intfloat/multilingual-e5-small", "Xenova/multilingual-e5-small"):
+    try:
+        onnx = hf_hub_download(repo, "onnx/model.onnx")
+        tokenizer = hf_hub_download(repo, "tokenizer.json")
+    except Exception as exc:  # try the next source
+        print(f"{repo} unavailable ({type(exc).__name__}); trying the next source")
+        continue
+    shutil.copyfile(onnx, "/opt/model/model.onnx")
+    shutil.copyfile(tokenizer, "/opt/model/tokenizer.json")
+    print(f"model downloaded from {repo}")
+    break
+else:
+    raise SystemExit("could not download multilingual-e5-small from any source")
+PY
+
+# Stage 2: the Python environment (versions match backend/requirements.txt where they overlap).
 FROM python:3.12-slim AS build
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /src
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-# CPU-only torch first (own cacheable layer), then the rest.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
-COPY requirements.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.txt \
-    && pip uninstall -y torchvision torchaudio 2>/dev/null || true
-# Bake the model into the image (must match EMBEDDING_MODEL_NAME). HF_HOME is outside any bind-mounted path.
-ENV HF_HOME=/opt/hf-cache
-ARG EMBEDDING_MODEL_NAME=all-mpnet-base-v2
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL_NAME}')" \
-    && chmod -R a+rX /opt/hf-cache
+    pip install fastapi==0.135.1 uvicorn==0.32.0 pydantic==2.8.2 numpy==1.26.4 onnxruntime==1.20.1 tokenizers==0.22.2
 
 FROM python:3.12-slim AS runtime
 RUN apt-get update \
@@ -28,12 +44,11 @@ RUN apt-get update \
     && groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --home-dir /app app
 COPY --from=build /opt/venv /opt/venv
-COPY --from=build /opt/hf-cache /opt/hf-cache
-ARG EMBEDDING_MODEL_NAME=all-mpnet-base-v2
+COPY --from=model /opt/model /opt/model
 ENV PATH="/opt/venv/bin:$PATH" \
-    HF_HOME=/opt/hf-cache HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
     PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
-    EMBEDDING_MODEL_NAME=${EMBEDDING_MODEL_NAME}
+    MODEL_DIR=/opt/model \
+    EMBEDDING_MODEL_NAME=intfloat/multilingual-e5-small
 WORKDIR /app
 COPY server.py .
 USER app

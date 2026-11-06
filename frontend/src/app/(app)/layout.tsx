@@ -1,22 +1,24 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
 import AppShell from '@/components/layout/AppShell';
 import Protected from '@/components/layout/Protected';
 import ErrorBanner from '@/components/common/ErrorBanner';
 import { TrackerSkeleton } from '@/components/skeletons';
+import { isFullBleedPath } from '@/lib/navigation';
 
 const TRACKER_ONLY_ROLES = ['account_manager'];
 
 export default function AuthenticatedAppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { user } = useAuthStore();
   const { systemHealth, loadSystemHealth, loadingStates } = useAppStore();
 
-  const trackerOnly = !!user && TRACKER_ONLY_ROLES.includes(user.role as string);
+  const trackerOnly = !!user && TRACKER_ONLY_ROLES.includes(user.role as string) && !pathname.startsWith('/agentic');
 
   useEffect(() => {
     if (trackerOnly) router.replace('/tracker');
@@ -30,6 +32,14 @@ export default function AuthenticatedAppLayout({ children }: { children: React.R
     return (
       <Protected>
         <TrackerSkeleton />
+      </Protected>
+    );
+  }
+
+  if (isFullBleedPath(pathname)) {
+    return (
+      <Protected>
+        <AppShell>{children}</AppShell>
       </Protected>
     );
   }

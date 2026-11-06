@@ -30,16 +30,6 @@ def _enabled(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes")
 
 
-async def _run_email_scheduler() -> None:
-    if not _enabled("ENABLE_EMAIL_SCHEDULER"):
-        logger.info("Email scheduler disabled (ENABLE_EMAIL_SCHEDULER!=true)")
-        return
-    from app.integrations.email.email_scheduler import get_email_scheduler
-
-    logger.info("Starting email scheduler task")
-    await get_email_scheduler().start_scheduler()
-
-
 async def _run_public_cv_consumer() -> None:
     """Consume the ingestion queue with several runners, so many CVs are processed at the same time."""
     from app.config.settings import settings
@@ -118,14 +108,13 @@ async def main() -> None:
     get_recorder().set_kind("background-worker")
     from app.db.startup_lock import schema_init_lock
 
-    with schema_init_lock():   # the API creates the same tables at the same moment
-        from app.integrations.email.email_database_service import email_db_service  # noqa: F401 (ensures tables)
+    with schema_init_lock():   # the API migrates at the same moment; this is a no-op once it has
+        from app.db.database import init_database
 
-    logger.info("Background worker started (email scheduler + public CV consumer)")
-    await asyncio.gather(
-        _run_email_scheduler(),
-        _run_public_cv_consumer(),
-    )
+        init_database()
+
+    logger.info("Background worker started (CV ingestion queue consumer)")
+    await _run_public_cv_consumer()
     logger.info("Background worker: all tasks exited")
 
 

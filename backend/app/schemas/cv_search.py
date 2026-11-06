@@ -17,10 +17,14 @@ class CVAdvancedSearchRequest(BaseModel):
     experience_max: Optional[float] = Field(None, ge=0, description="Maximum years of experience")
     locations: Optional[List[str]] = Field(None, max_length=50, description="Any of these locations (matched by words)")
     nationalities: Optional[List[str]] = Field(None, max_length=50, description="Any of these nationalities (matched by words)")
+    languages: Optional[List[str]] = Field(None, max_length=50, description="Any of these languages (exact match on CV languages)")
     boolean_query: Optional[str] = Field(
         None, max_length=4000,
         description='A pasted boolean string, e.g. ("Cloud Engineer") AND ("Azure" OR "AWS") NOT intern. Narrows with the other filters.'
     )
+    added_within_days: Optional[int] = Field(None, ge=1, le=3650, description="Freshness: only CVs added to the system in the last N days")
+    added_from: Optional[str] = Field(None, max_length=10, description="Freshness: added on or after this date (YYYY-MM-DD)")
+    added_to: Optional[str] = Field(None, max_length=10, description="Freshness: added on or before this date (YYYY-MM-DD)")
     limit: int = Field(50, ge=1, le=100, description="Page size (max 100)")
     cursor: Optional[str] = Field(None, description="Opaque pagination cursor from the previous response's next_cursor")
 
@@ -40,8 +44,11 @@ class CVSearchResultItem(BaseModel):
     notice_period: Optional[str] = None
     gender: Optional[str] = None
     languages: List[str] = []
+    certifications: List[str] = []
     email: Optional[str] = None
     phone: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
     is_job_application: bool = False
     applied_job_id: Optional[str] = None
     applied_job_title: Optional[str] = None

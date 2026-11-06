@@ -5,7 +5,7 @@ The backend auto-creates these collections at startup; this script is a
 standalone convenience/repair tool (e.g. after a manual Qdrant wipe).
 
 Env: QDRANT_HOST (default localhost), QDRANT_PORT (default 6333),
-     EMBEDDING_DIM (default 768).
+     EMBEDDING_DIM (default 384).
 """
 
 import os
@@ -15,7 +15,7 @@ from qdrant_client.http.models import Distance, VectorParams
 
 HOST = os.getenv("QDRANT_HOST", "localhost")
 PORT = int(os.getenv("QDRANT_PORT", "6333"))
-DIM = int(os.getenv("EMBEDDING_DIM", "768"))
+DIM = int(os.getenv("EMBEDDING_DIM", "384"))
 
 # Mirrors QdrantUtils._ensure_collections_exist in the backend.
 COLLECTIONS = [

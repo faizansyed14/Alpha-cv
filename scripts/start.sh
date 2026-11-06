@@ -3,10 +3,10 @@
 # AlphaCV, start script
 #
 # Usage: ./scripts/start.sh dev|local|prod [clean]
-#   dev     → docker-compose.dev.yml  (requires ./.env.dev)
+#   dev     → docker-compose.dev.yml  (.env.dev is created from .env.dev.example on first run)
 #   local   → docker-compose.local.yml (everything in Docker volumes: Postgres + raw files; no S3/RDS;
-#             .env.local is created from .env.dev, or the example, on first run)
-#   prod    → docker-compose.prod.yml (requires ./.env)
+#             .env.local is created from .env.local.example on first run)
+#   prod    → docker-compose.prod.yml (.env.prod is created from .env.prod.example on first run)
 #   clean   → optional: force a from-scratch rebuild (--no-cache --pull)
 #
 # Every run rebuilds ALL buildable images (backend, match-worker, background-worker,
@@ -32,17 +32,17 @@ case "$MODE" in
   dev)
     COMPOSE_FILE="docker-compose.dev.yml"
     ENV_FILE=".env.dev"
-    ENV_EXAMPLE=".env.development.example"
+    ENV_EXAMPLE=".env.dev.example"
     ;;
   local)
     COMPOSE_FILE="docker-compose.local.yml"
     ENV_FILE=".env.local"
-    ENV_EXAMPLE=".env.development.example"
+    ENV_EXAMPLE=".env.local.example"
     ;;
   prod)
     COMPOSE_FILE="docker-compose.prod.yml"
-    ENV_FILE=".env"
-    ENV_EXAMPLE=".env.example"
+    ENV_FILE=".env.prod"
+    ENV_EXAMPLE=".env.prod.example"
     ;;
   *)
     echo -e "${RED}Usage: $0 dev|local|prod [clean]${NC}" >&2
@@ -50,18 +50,18 @@ case "$MODE" in
     ;;
 esac
 
-# local: same settings as dev. Copy .env.dev (keeps your API keys) or the example; the local compose file overrides
-# storage and databases, so S3 / RDS values copied from dev are never used.
-if [ "$MODE" = "local" ] && [ ! -f "$ENV_FILE" ]; then
-  SRC=".env.dev"; [ -f "$SRC" ] || SRC="$ENV_EXAMPLE"
-  cp "$SRC" "$ENV_FILE"
-  echo -e "${YELLOW}Created $ENV_FILE from $SRC (storage and databases are forced to local volumes).${NC}"
-fi
-
+# First run: create the env file from its committed template, then stop so the CHANGE_ME values get filled in.
 if [ ! -f "$ENV_FILE" ]; then
-  echo -e "${RED}Missing $ENV_FILE.${NC} Copy $ENV_EXAMPLE to $ENV_FILE and fill it in:" >&2
-  echo "  cp $ENV_EXAMPLE $ENV_FILE" >&2
-  exit 1
+  if [ ! -f "$ENV_EXAMPLE" ]; then
+    echo -e "${RED}Missing $ENV_FILE and its template $ENV_EXAMPLE.${NC}" >&2
+    exit 1
+  fi
+  cp "$ENV_EXAMPLE" "$ENV_FILE"
+  echo -e "${YELLOW}Created $ENV_FILE from $ENV_EXAMPLE.${NC}"
+  if grep -q "CHANGE_ME" "$ENV_FILE"; then
+    echo -e "${YELLOW}Fill in the CHANGE_ME values in $ENV_FILE (at least OPENAI_API_KEY and the secrets), then run this again.${NC}" >&2
+    exit 1
+  fi
 fi
 
 if [ "$MODE" = "prod" ] && grep -q "CHANGE_ME" "$ENV_FILE"; then

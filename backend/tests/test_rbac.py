@@ -12,11 +12,9 @@ import sys
 
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("OPENAI_API_KEY", "stub")
-os.environ.setdefault("AUTH_DB_URL", "sqlite:///./rbac_auth.db")
+os.environ.setdefault("DATABASE_URL", "sqlite:///./rbac_auth.db")
 os.environ.setdefault("ENABLE_CANDIDATE_TRACKER", "true")
-os.environ.setdefault("TRACKER_DB_URL", "sqlite:///./rbac_tracker.db")
 os.environ.setdefault("ENABLE_APPLICATION_QUEUE", "false")
-os.environ.setdefault("LLM_CACHE_DIR", "/tmp/llm_cache_rbac")
 os.environ.setdefault("LOCAL_STORAGE_DIR", "/tmp/rbac_uploads")
 os.environ.setdefault("CV_UPLOAD_DIR", "/tmp/rbac_uploads/cv")
 os.environ.setdefault("OTP_DISABLE_EMAIL", "true")  # dev: OTP/CAPTCHA codes returned in responses
@@ -27,8 +25,11 @@ import numpy as _np
 from qdrant_client import QdrantClient
 
 
+from app.config.settings import settings
+
+
 class _FakeST:
-    DIM = 768
+    DIM = settings.EMBEDDING_DIM
 
     def encode(self, texts, convert_to_tensor=False, batch_size=32, show_progress_bar=False):
         def one(t):

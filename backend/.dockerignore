@@ -69,4 +69,3 @@ huggingface
 
 # --- Separate service with its own image (built from model_server/) ---------
 model_server
-requirements-dev.txt

@@ -1221,7 +1221,7 @@ class MatchingService:
                 skills_map[skill] = np.array(skill_vectors[i])
             else:
                 # Fallback for missing vectors
-                skills_map[skill] = np.zeros(768)  # Default embedding dimension for all-mpnet-base-v2
+                skills_map[skill] = np.zeros(settings.EMBEDDING_DIM)  # Default embedding dimension of the configured model
         
         # Build responsibilities map from stored vectors and structured data
         resp_map = {}
@@ -1237,7 +1237,7 @@ class MatchingService:
                 resp_map[resp] = np.array(resp_vectors[i])
             else:
                 # Fallback for missing vectors
-                resp_map[resp] = np.zeros(768)  # Default embedding dimension for all-mpnet-base-v2
+                resp_map[resp] = np.zeros(settings.EMBEDDING_DIM)  # Default embedding dimension of the configured model
         
         # Get title and experience vectors
         title_vec = None

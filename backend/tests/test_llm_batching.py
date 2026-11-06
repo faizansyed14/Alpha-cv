@@ -1,3 +1,4 @@
+import pytest
 """Top-N LLM re-scoring: batches of CVs per request, run concurrently, failures isolated and never cached."""
 
 import asyncio
@@ -84,3 +85,25 @@ def test_a_broken_progress_callback_never_breaks_the_analysis():
 
     out = asyncio.run(le._analyze_in_batches(llm, "jd", _cands(20), 10, on_batch=boom))
     assert len(out) == 20
+
+
+# ------------------------------------------------------------------------- an answer cut off at the output limit is still usable
+def test_a_json_answer_cut_off_mid_way_keeps_everything_that_was_written():
+    from app.providers.llm.service import LLMService
+
+    svc = LLMService.__new__(LLMService)
+    parse = svc._parse_json_response
+    assert parse('{"job_title": "IT Engineer", "skills": ["a", "b", "c"') == {"job_title": "IT Engineer", "skills": ["a", "b", "c"]}
+    assert parse('{"job_title": "IT Engineer", "skills": ["a", "b"], "years": 10, "cat') == {"job_title": "IT Engineer", "skills": ["a", "b"], "years": 10}
+    assert parse('{"job_title": "IT Eng') == {"job_title": "IT Eng"}
+    assert parse('```json\n{"a": 1, "b": [1, 2,') == {"a": 1, "b": [1, 2]}
+    assert parse('{"a": {"b": 1}, "c": "x"}') == {"a": {"b": 1}, "c": "x"}                      # a complete answer is untouched
+    assert parse('Here you go: {"a": 1} hope that helps') == {"a": 1}
+    with pytest.raises(Exception):
+        parse("I could not read that document.")
+
+
+def test_the_cv_and_jd_extraction_calls_ask_for_enough_output():
+    from app.providers.llm import service
+
+    assert service.EXTRACTION_MAX_TOKENS >= 4000

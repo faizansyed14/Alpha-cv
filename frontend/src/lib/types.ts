@@ -18,8 +18,14 @@ export interface CVAdvancedSearchParams {
   experience_max?: number;
   locations?: string[];
   nationalities?: string[];
+  /** Any of these languages (exact match on CV languages). */
+  languages?: string[];
   /** A pasted boolean string, e.g. ("Cloud Engineer") AND ("Azure" OR "AWS") NOT intern. */
   boolean_query?: string;
+  /** Freshness: only CVs added to the system in the last N days, or within a date range (YYYY-MM-DD). */
+  added_within_days?: number;
+  added_from?: string;
+  added_to?: string;
   limit?: number;
   cursor?: string | null;
 }
@@ -74,10 +80,15 @@ export interface CVListItem extends BaseDocument {
   /** Candidate contact (from CV PII / careers apply form) */
   email?: string | null;
   phone?: string | null;
+  /** Profile links read from the CV (clean https links) */
+  linkedin_url?: string | null;
+  github_url?: string | null;
   /** LLM-inferred gender when stated/clear from CV; otherwise null */
   gender?: string | null;
   /** Languages explicitly listed on the CV */
   languages?: string[];
+  /** Certifications and licences stated on the CV (full names) */
+  certifications?: string[];
   /** Keyword-search: which of the searched keywords this CV matched */
   matched_keywords?: string[];
   matched_count?: number;
@@ -105,6 +116,16 @@ export interface CVDataResponse {
     responsibilities: string[];
     skills_count: number;
     responsibilities_count: number;
+    contact_info?: Record<string, any>;
+    /** Profile links read from the CV (clean https links) */
+    linkedin_url?: string | null;
+    github_url?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    expected_salary?: number | string | null;
+    gender?: string | null;
+    languages?: string[];
+    certifications?: string[];
   };
   text_info: {
     extracted_text_length: number;
@@ -239,6 +260,10 @@ export interface CandidateBreakdown {
   /** Candidate contact details for recruiter outreach (email / call / WhatsApp) */
   cv_email?: string;
   cv_phone?: string;
+  cv_linkedin?: string | null;
+  cv_github?: string | null;
+  /** The job's mandatory / preferred languages and certifications vs this CV (status: met | missing | unknown) */
+  requirements?: { type: 'language' | 'certification'; name: string; mandatory: boolean; status: 'met' | 'missing' | 'unknown' }[];
   expected_salary?: number;
   skills_score: number;
   responsibilities_score: number;
@@ -456,8 +481,6 @@ export interface TrackerCandidate {
   name: string;
   email?: string | null;
   phone?: string | null;
-  current_company?: string | null;
-  experience_years?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -594,6 +617,8 @@ export interface JobApplicationListItem {
   applicant_name: string;
   applicant_email: string;
   applicant_phone?: string;
+  linkedin_url?: string | null;
+  github_url?: string | null;
   cv_filename: string;
   application_date: string;
   expected_salary?: number;
@@ -603,7 +628,7 @@ export interface JobApplicationListItem {
   nationality?: string;
   match_score?: number;
   status?: string;
-  source?: string; // 'email_application' for Naukri/email CVs, 'website' for direct applications
+  source?: string; // 'website' for applications made on the job page
   // Note fields added by backend
   notes?: any[];
   notes_count?: number;
@@ -629,3 +654,175 @@ export interface NotesSummaryResponse {
   summaries: NotesSummaryItem[];
   count: number;
 }
+
+// ---- AI agents (interview questions, LinkedIn posts) ----
+export interface AgentInfo {
+  id: string;
+  name: string;
+  tagline: string;
+  examples: string[];
+  default_request: string;
+  accepts_cv?: boolean;
+  max_jd_chars?: number;
+  max_message_chars: number;
+}
+
+export interface AgentConversationSummary {
+  id: string;
+  agent: string;
+  title: string;
+  jd_title: string | null;
+  jd_source: string;
+  cv_title?: string | null;
+  created_at: string;
+  last_message_at: string;
+  message_count: number;
+}
+
+export interface AgentInterviewQuestion {
+  category: string;
+  difficulty: string;
+  question: string;
+  listen_for: string;
+  follow_up: string;
+  based_on?: string;
+}
+
+export interface AgentMessageMeta {
+  type?: 'interview' | 'linkedin';
+  role?: string;
+  questions?: AgentInterviewQuestion[];
+  post?: string;
+  hashtags?: string[];
+  chars?: number;
+  warnings?: string[];
+  /** Clickable follow-ups under a predefined reply */
+  suggestions?: string[];
+  /** Agentic mode: which specialist answered, what it showed and which tools it used */
+  specialist?: string;
+  cancelled?: boolean;
+  route?: string;
+  cards?: AgenticCard[];
+  /** A file attached to this message (Agentic mode) */
+  attachment?: { filename: string };
+  trace?: Array<{ step: number; tool: string; ok: boolean; ms: number; args: Record<string, string> }>;
+}
+
+/** A result shown as a card in Agentic mode. Built by the server from application data (never from the model's wording). */
+export interface AgenticCard {
+  type: string;
+  /** What "Show more" asks for next (absent when everything is already on screen) */
+  page?: { tool: string; args: Record<string, any>; offset: number; cursor: string | null } | null;
+  [key: string]: any;
+}
+
+export interface AgenticSkill {
+  name: string;
+  label: string;
+  description: string;
+  examples: string[];
+}
+
+export interface AgenticCapabilities {
+  role: string;
+  username: string;
+  skills: AgenticSkill[];
+  examples: string[];
+}
+
+export interface AgentMessage {
+  id: string | null;
+  seq: number;
+  role: 'user' | 'assistant';
+  content: string;
+  status: 'ok' | 'blocked' | 'error';
+  blocked_reason: string | null;
+  meta: AgentMessageMeta | null;
+  model: string | null;
+  tokens?: number;
+  created_at: string;
+}
+
+export interface AgentConversation {
+  id: string;
+  agent: string;
+  title: string;
+  jd_id: string | null;
+  jd_title: string | null;
+  jd_source: string;
+  cv_title?: string | null;
+  created_at: string;
+}
+
+export interface AgentChatResponse {
+  conversation: AgentConversation | null;
+  user_message: AgentMessage | null;
+  assistant_message: AgentMessage;
+  usage?: AgentUsage;
+}
+
+export interface AgentUsage {
+  limit: number;
+  used: number;
+  remaining: number;
+  percent: number;
+  calls: number;
+  cost_usd: number;
+  resets_at: string | null;
+  last_reset_at: string | null;
+  last_reset_by: string | null;
+  reset_request?: AgentResetRequestState | null;
+}
+
+export interface AgentResetRequestState {
+  status: 'pending' | 'approved' | 'rejected';
+  requested_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+}
+
+export interface AgentResetRequestRow {
+  id: string;
+  username: string;
+  reason: string;
+  requested_at: string;
+  used: number;
+  limit: number;
+  percent: number;
+}
+
+export interface AgentResetDecisionRow {
+  id: string;
+  username: string;
+  reason: string;
+  requested_at: string;
+  decision: 'approved' | 'rejected';
+  decided_by: string;
+  decided_at: string;
+}
+
+export interface AgentResetRequests {
+  pending: AgentResetRequestRow[];
+  recent: AgentResetDecisionRow[];
+}
+
+export interface AgentAdminUsage {
+  limit_per_user: number;
+  global_limit: number;
+  global_used: number;
+  users: Array<AgentUsage & { username: string; role: string }>;
+}
+
+export interface AgentChatRequest {
+  message: string;
+  conversation_id?: string | null;
+  jd_source?: 'library' | 'pasted' | 'uploaded';
+  jd_id?: string | null;
+  jd_text?: string | null;
+  jd_title?: string | null;
+  cv_source?: 'none' | 'library' | 'uploaded';
+  cv_id?: string | null;
+  cv_text?: string | null;
+  cv_title?: string | null;
+}
+

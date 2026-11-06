@@ -24,7 +24,9 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from app.config.settings import settings
+from app.security.llm_guard import sanitize_untrusted
 from app.monitoring.recorder import get_recorder
+from app.ingestion.categories import CATEGORIES, normalize_category, prompt_list as category_prompt_list
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +46,10 @@ YEARS OF EXPERIENCE (total professional experience by seeing the date the candid
 JOB CATEGORY: Classify the candidate's role as one of (Technical/Management/Sales/Finance/HR/Marketing/Operations/Specialized).
 SENIORITY LEVEL: Determine the seniority as one of (Entry/Junior/Mid/Senior/Lead/Manager/Director/VP/C-Level).
 ROLE FAMILY: Identify the role family such as (Engineering/Management/Sales/Finance/HR/Marketing/Operations/Healthcare/Education/etc).
-CATEGORY: Classify the candidate's primary domain as one of (Cloud & Infrastructure Engineering/Software & Application Development/Data & Analytics/Cybersecurity & Governance/Project & Program Management/Business Applications & Functional Consulting/IT Operations & Support/Networking & Systems/Specialized Technical Roles/Non IT). Base this on their primary skills, experience, and job titles.
+CATEGORY: Classify the candidate's primary domain as EXACTLY one of (<<CATEGORIES>>). Copy the name exactly as written; never invent a new category. Choose by the candidate's main function: accountants, auditors and finance staff are "Finance & Accounting"; sales and account managers "Sales & Business Development"; HR "Human Resources & Administration"; nurses and doctors "Healthcare & Life Sciences"; and so on. Only IT roles get an IT category. Use "Other" only when nothing fits. Base this on their primary skills, experience, and job titles.
 Exactly 20 SEARCH KEYWORDS: short, precise keyword tags (1-3 words each, e.g. "Python", "AWS", "Financial Modeling", "Salesforce CRM", "Project Management") that a recruiter would type into a search box to find this exact candidate. These are NOT the same as the skill phrases above: a skill phrase can be a longer descriptive sentence fragment, a keyword must be the bare searchable term itself (the specific technology, tool, certification, methodology, or domain expertise named in the CV, not a paraphrase, not a generic word like "communication" or "teamwork" unless the CV gives no more specific skills at all). Pick the 20 terms that most precisely and distinctively describe THIS candidate, ranked by how central they are to their profile. This field is used to power exact-match candidate search, so precision matters more than creativity: only use terms that actually appear (or are unambiguously implied, e.g. "AWS" implying "Amazon Web Services") in the CV. If fewer than 20 genuinely distinct, specific keywords exist, leave the remaining slots as "" rather than inventing or repeating ones.
 GENDER: Infer only when the CV explicitly states gender/sex OR uses unambiguous gendered pronouns referring to the candidate (he/him/his → "Male", she/her/hers → "Female"), or an explicit label like "Gender: Male". If unclear, ambiguous, or not mentioned, return null. NEVER invent gender from the name alone.
+CERTIFICATIONS: Professional certifications and licences the candidate holds, ONLY if the CV states them (e.g. a Certifications/Licences section, or "ACCA qualified", "PMP certified"). Give each as its full official name with the acronym in parentheses, e.g. "Association of Chartered Certified Accountants (ACCA)", "Project Management Professional (PMP)", "Amazon Web Services Certified Developer Associate". Do NOT list degrees, university courses, training attendance or skills. Return a de-duplicated array (max 20); return [] if none are stated.
 LANGUAGES: Extract spoken/written languages ONLY if the CV explicitly lists them (e.g. Languages, Language proficiency, Mother tongue sections, or phrases like "Fluent in English and Arabic"). Return a de-duplicated array of language names (e.g. ["English", "Arabic"]). If none are mentioned, return []. Do not invent languages from location or nationality.
 General Rules:
 Output valid JSON only. No markdown, no comments, no trailing commas.
@@ -75,6 +78,7 @@ Output Format:
   "category": string | null,
   "gender": "Male" | "Female" | null,
   "languages": ["English", "..."] | [],
+  "certifications": ["Project Management Professional (PMP)", "..."] | [],
   "skills_sentences": [
     "<Skill phrase 1>",
     "... (total 20 items)",
@@ -93,6 +97,9 @@ Output Format:
   "contact_info": {"name": string | null}
 }
 """
+
+# CV / JD extraction answers are long (20 skills, 10 responsibilities, keywords ...). A 1500-token cap cut them off mid-JSON.
+EXTRACTION_MAX_TOKENS = 4000
 
 DEFAULT_JD_PROMPT = """You are an information-extraction engine. You will receive the full plain text of ONE job description (JD).
 Your job is to output STRICT JSON with the following schema, extracting:
@@ -113,7 +120,9 @@ YEARS OF EXPERIENCE (minimum required). Look for explicit mentions like "5+ year
 JOB CATEGORY: Classify the role as one of (Technical/Management/Sales/Finance/HR/Marketing/Operations/Specialized).
 SENIORITY LEVEL: Determine the seniority as one of (Entry/Junior/Mid/Senior/Lead/Manager/Director/VP/C-Level).
 ROLE FAMILY: Identify the role family such as (Engineering/Management/Sales/Finance/HR/Marketing/Operations/Healthcare/Education/etc).
-CATEGORY: Classify the job's primary domain as one of (Cloud & Infrastructure Engineering/Software & Application Development/Data & Analytics/Cybersecurity & Governance/Project & Program Management/Business Applications & Functional Consulting/IT Operations & Support/Networking & Systems/Specialized Technical Roles/Non IT). Base this on the required skills, technologies, and job responsibilities.
+CATEGORY: Classify the job's primary domain as EXACTLY one of (<<CATEGORIES>>). Copy the name exactly as written; never invent a new category. Choose by the job's main function: an accountant or auditor role is "Finance & Accounting", a sales role "Sales & Business Development", an HR role "Human Resources & Administration", and so on. Only IT roles get an IT category. Use "Other" only when nothing fits. Base this on the required skills, technologies, and job responsibilities.
+REQUIRED LANGUAGES: languages the job asks for, each as {"name": "English", "mandatory": true|false}. mandatory is true ONLY when the text makes it a requirement ("must", "required", "mandatory", "essential", "fluent X is a must", or it is listed under requirements/qualifications); false when it is a plus ("preferred", "advantage", "desirable", "nice to have"). Language names only (e.g. "Arabic", "English"), no levels. [] if the job states none; never infer a language from the country or company.
+REQUIRED CERTIFICATIONS: professional certifications or licences the job asks for, each as {"name": "...", "mandatory": true|false}, with the same rule for mandatory. Use the full official name with the acronym in parentheses, e.g. "Association of Chartered Certified Accountants (ACCA)". When the job accepts alternatives (e.g. "ACCA or CPA"), put them in ONE entry joined with " OR ". Do NOT list degrees or experience. [] if the job states none.
 BOOLEAN SEARCH STRING: Build ONE recruiter-style Boolean search string that recruiters can paste directly into Naukri Gulf (and similar job portals) to find matching candidates. Rules for it:
   - Combine the most important job title(s) and core skills using uppercase boolean operators AND / OR and parentheses.
   - Wrap multi-word phrases in double quotes, e.g. ("Project Manager" OR "Program Manager").
@@ -145,6 +154,8 @@ Output Format:
   "role_family": string | null,
   "category": string | null,
   "boolean_search_string": string | null,
+  "required_languages": [{"name": "English", "mandatory": true}] | [],
+  "required_certifications": [{"name": "Project Management Professional (PMP)", "mandatory": false}] | [],
   "skills_sentences": [
     "<Skill phrase 1>",
     "... (total 20 items)",
@@ -157,6 +168,9 @@ Output Format:
   ]
 }
 """
+
+DEFAULT_CV_PROMPT = DEFAULT_CV_PROMPT.replace("<<CATEGORIES>>", category_prompt_list())
+DEFAULT_JD_PROMPT = DEFAULT_JD_PROMPT.replace("<<CATEGORIES>>", category_prompt_list())
 
 # ===================================
 # ---- Optional JSON Schema lock ----
@@ -172,16 +186,21 @@ CV_JSON_SCHEMA: Dict[str, Any] = {
         "required": [
             "doc_type", "name", "job_title", "years_of_experience",
             "skills_sentences", "responsibility_sentences", "keywords", "contact_info",
-            "gender", "languages"
+            "gender", "languages", "certifications"
         ],
         "properties": {
             "doc_type": {"type": "string", "const": "resume"},
             "name": {"type": ["string", "null"]},
             "job_title": {"type": ["string", "null"]},
             "years_of_experience": {"type": ["number", "integer", "null"]},
-            "category": {"type": ["string", "null"]},
+            "category": {"type": ["string", "null"], "enum": CATEGORIES + [None]},
             "gender": {"type": ["string", "null"]},
             "languages": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 20
+            },
+            "certifications": {
                 "type": "array",
                 "items": {"type": "string"},
                 "maxItems": 20
@@ -221,14 +240,34 @@ JD_JSON_SCHEMA: Dict[str, Any] = {
         "additionalProperties": False,
         "required": [
             "doc_type", "job_title", "years_of_experience",
-            "skills_sentences", "responsibility_sentences"
+            "skills_sentences", "responsibility_sentences", "required_languages", "required_certifications"
         ],
         "properties": {
             "doc_type": {"type": "string", "const": "job_description"},
             "job_title": {"type": ["string", "null"]},
             "years_of_experience": {"type": ["number", "integer", "null"]},
-            "category": {"type": ["string", "null"]},
+            "category": {"type": ["string", "null"], "enum": CATEGORIES + [None]},
             "boolean_search_string": {"type": ["string", "null"]},
+            "required_languages": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["name", "mandatory"],
+                    "properties": {"name": {"type": "string"}, "mandatory": {"type": "boolean"}}
+                },
+                "maxItems": 10
+            },
+            "required_certifications": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["name", "mandatory"],
+                    "properties": {"name": {"type": "string"}, "mandatory": {"type": "boolean"}}
+                },
+                "maxItems": 10
+            },
             "skills_sentences": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -260,6 +299,8 @@ class LLMResponse:
     tokens_in: int = 0
     tokens_out: int = 0
     attempts: int = 1
+    cost_usd: Optional[float] = None
+    truncated: bool = False                # the model stopped because it ran out of output tokens, not because it was finished
 
 
 # ============================
@@ -268,81 +309,53 @@ class LLMResponse:
 
 class LLMService:
     """
-    Deterministic, cached LLM extraction using OpenAI Chat Completions.
+    Deterministic LLM extraction through OpenRouter (OpenAI-style Chat Completions).
     """
 
     # Disk cache is pruned (oldest first) once it exceeds this many entries.
-    CACHE_MAX_FILES = 5000
 
     def __init__(self):
-        self.api_key = settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY")
+        self.api_key = settings.OPENROUTER_API_KEY or os.getenv("OPENROUTER_API_KEY")
         if not self.api_key:
-            raise ValueError("OPENAI_API_KEY environment variable is required")
+            raise ValueError("OPENROUTER_API_KEY environment variable is required")
 
-        # Pinned snapshot (override with OPENAI_MODEL). Avoid floating aliases.
-        self.default_model = settings.OPENAI_MODEL
+        # The model comes from LLM_MODEL (an OpenRouter id such as anthropic/claude-haiku-5.5).
+        self.default_model = settings.LLM_MODEL
 
-        # Determinism knobs
-        self.seed = settings.OPENAI_SEED
-        self.max_retries = settings.OPENAI_MAX_RETRIES
-        self.base_delay = settings.OPENAI_RETRY_BASE_DELAY
-
-        # Cache on disk (works across restarts)
-        self.cache_dir = settings.LLM_CACHE_DIR
-        os.makedirs(self.cache_dir, exist_ok=True)
-        self._prune_disk_cache()
+        self.max_retries = settings.LLM_MAX_RETRIES
+        self.base_delay = settings.LLM_RETRY_BASE_DELAY
 
         # Endpoint & session (API key lives only in session headers; never logged)
-        self.base_url = settings.OPENAI_API_BASE.rstrip("/") + "/chat/completions"
+        self.base_url = settings.OPENROUTER_BASE_URL.rstrip("/") + "/chat/completions"
         self.session = requests.Session()
         self.session.headers.update({
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "X-Title": settings.OPENROUTER_APP_NAME,
         })
+        if settings.OPENROUTER_SITE_URL:
+            self.session.headers["HTTP-Referer"] = settings.OPENROUTER_SITE_URL
 
-        logger.info(f"LLMService initialized (model={self.default_model}, deterministic & cached)")
-
-    def _prune_disk_cache(self) -> None:
-        """Keep the disk cache bounded; drop oldest entries beyond the cap."""
-        try:
-            files = [os.path.join(self.cache_dir, f) for f in os.listdir(self.cache_dir) if f.endswith(".json")]
-            if len(files) <= self.CACHE_MAX_FILES:
-                return
-            files.sort(key=os.path.getmtime)
-            for path in files[: len(files) - self.CACHE_MAX_FILES // 2]:
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
-            logger.info(f"LLM disk cache pruned to ~{self.CACHE_MAX_FILES // 2} entries")
-        except Exception as e:
-            logger.warning(f"LLM cache prune failed: {e}")
+        logger.info(f"LLMService initialized (model={self.default_model}, deterministic)")
 
     # ------------- Public APIs -------------
 
     def standardize_cv(self, raw_text: str, filename: str = "cv.txt") -> Dict[str, Any]:
         """
         Extract & standardize CV → normalized, stable JSON.
-        Caches by (model+seed+prompt+normalized-text) to return identical results for identical content.
         """
         try:
             # Normalize + guard size
-            norm = self._normalize_text(raw_text)
+            norm = self._normalize_text(sanitize_untrusted(raw_text))
             if len(norm) > 50000:
                 logger.warning(f"Large CV detected ({len(norm):,}); truncating to 50k")
                 norm = norm[:50000] + "\n\n[TRUNCATED FOR PROCESSING]"
-
-            cache_key = self._hash_key("cv", norm)
-            cached = self._cache_get(cache_key)
-            if cached is not None:
-                logger.info("Cache hit (CV)")
-                return cached
 
             messages = self._build_cv_prompt(norm)
             self._log_llm_outbound("CV", filename, norm, messages)
 
             response = self._call_openai_api(messages, json_schema=CV_JSON_SCHEMA if STRICT_SCHEMA_ENABLED else None,
-                                             role="cv_extract")
+                                             role="cv_extract", max_tokens=EXTRACTION_MAX_TOKENS)
             self._log_llm_inbound("CV", response)
 
             if not response.success:
@@ -355,10 +368,8 @@ class LLMService:
                 "model_used": response.model_used,
                 "system_fingerprint": response.system_fingerprint,
                 "text_length": len(norm),
-                "cache_key": cache_key,
             }
 
-            self._cache_put(cache_key, normalized)
             return normalized
 
         except Exception as e:
@@ -368,25 +379,18 @@ class LLMService:
     def standardize_jd(self, raw_text: str, filename: str = "jd.txt") -> Dict[str, Any]:
         """
         Extract & standardize JD → normalized, stable JSON.
-        Caches by (model+seed+prompt+normalized-text) to return identical results for identical content.
         """
         try:
-            norm = self._normalize_text(raw_text)
+            norm = self._normalize_text(sanitize_untrusted(raw_text))
             if len(norm) > 30000:
                 logger.warning(f"Large JD detected ({len(norm):,}); truncating to 30k")
                 norm = norm[:30000] + "\n\n[TRUNCATED FOR PROCESSING]"
-
-            cache_key = self._hash_key("jd", norm)
-            cached = self._cache_get(cache_key)
-            if cached is not None:
-                logger.info("Cache hit (JD)")
-                return cached
 
             messages = self._build_jd_prompt(norm)
             self._log_llm_outbound("JD", filename, norm, messages)
 
             response = self._call_openai_api(messages, json_schema=JD_JSON_SCHEMA if STRICT_SCHEMA_ENABLED else None,
-                                             role="jd_extract")
+                                             role="jd_extract", max_tokens=EXTRACTION_MAX_TOKENS)
             self._log_llm_inbound("JD", response)
 
             if not response.success:
@@ -399,10 +403,8 @@ class LLMService:
                 "model_used": response.model_used,
                 "system_fingerprint": response.system_fingerprint,
                 "text_length": len(norm),
-                "cache_key": cache_key,
             }
 
-            self._cache_put(cache_key, normalized)
             return normalized
 
         except Exception as e:
@@ -421,6 +423,8 @@ class LLMService:
         timeout: Optional[int] = None,
         role: str = "llm",
         detail: Optional[Dict[str, Any]] = None,
+        raw: bool = False,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> LLMResponse:
         """Call OpenAI and record the call (latency, tokens, estimated cost, errors, retries) for the Monitor page.
 
@@ -430,7 +434,7 @@ class LLMService:
         response: Optional[LLMResponse] = None
         try:
             response = self._send_openai_request(messages, model=model, max_tokens=max_tokens,
-                                                 json_schema=json_schema, timeout=timeout)
+                                                 json_schema=json_schema, timeout=timeout, raw=raw, tools=tools)
             return response
         finally:
             ok = bool(response and response.success)
@@ -453,46 +457,50 @@ class LLMService:
         max_tokens: int = 1500,
         json_schema: Optional[Dict[str, Any]] = None,
         timeout: Optional[int] = None,
+        raw: bool = False,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> LLMResponse:
+        """``tools`` (OpenAI function-calling format) lets the model ask for tool calls; with ``raw=True`` they come back as
+        ``data["_tool_calls"]``. ``raw=True`` returns the model's text as ``data["_text"]`` without parsing it as JSON (the AI agents use a plain-text
+        layout, which cannot fail to parse the way long JSON can, so there is no wasted retry)."""
         if not model:
             model = self.default_model
         request_timeout = timeout if timeout is not None else 60
 
-        # response_format: JSON object (or JSON Schema strict)
-        if json_schema:
-            response_format = {"type": "json_schema", "json_schema": json_schema}
-        else:
-            response_format = {"type": "json_object"}
-
-        body = {
+        # No response_format / seed / penalty parameters: Claude models behind OpenRouter do not take them, and every
+        # prompt in this app already demands "valid JSON only", which _parse_json_response then extracts and validates.
+        body: Dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": 0.0,
-            "top_p": 1,
-            "n": 1,
-            "frequency_penalty": 0,
-            "presence_penalty": 0,
-            "seed": self.seed,
-            "response_format": response_format
+            "usage": {"include": True},            # OpenRouter reports the real cost of each call
         }
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
+        if settings.OPENROUTER_ZDR:
+            body["provider"] = {"zdr": True, "data_collection": "deny"}
 
         start = time.time()
         last_err: Optional[str] = None
 
         for attempt in range(self.max_retries):
             try:
-                logger.info(f"OpenAI API call (attempt {attempt + 1}/{self.max_retries}) - Model: {model}, timeout={request_timeout}s")
+                logger.info(f"LLM API call (attempt {attempt + 1}/{self.max_retries}) - Model: {model}, timeout={request_timeout}s")
                 r = self.session.post(self.base_url, json=body, timeout=request_timeout)
                 if r.status_code == 200:
                     payload = r.json()
                     sys_fp = payload.get("system_fingerprint")
-                    content = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    message = payload.get("choices", [{}])[0].get("message", {}) or {}
+                    content = message.get("content") or ""
+                    tool_calls = message.get("tool_calls") or []
+                    finish = str((payload.get("choices", [{}])[0] or {}).get("finish_reason") or "").lower()
 
-                    if not content or not content.strip():
-                        raise Exception("Empty response from OpenAI")
+                    if not content.strip() and not tool_calls:
+                        raise Exception("Empty response from the model")
 
-                    data = self._parse_json_response(content)
+                    data = {"_text": content, "_tool_calls": tool_calls} if raw else self._parse_json_response(content)
                     usage = payload.get("usage") or {}
                     return LLMResponse(
                         success=True,
@@ -503,6 +511,8 @@ class LLMService:
                         tokens_in=int(usage.get("prompt_tokens") or 0),
                         tokens_out=int(usage.get("completion_tokens") or 0),
                         attempts=attempt + 1,
+                        cost_usd=(float(usage["cost"]) if usage.get("cost") is not None else None),
+                        truncated=finish in ("length", "max_tokens"),
                     )
 
                 # Retryable HTTP statuses
@@ -551,9 +561,48 @@ class LLMService:
         cleaned = re.sub(r'```(json)?', '', content, flags=re.IGNORECASE).strip()
         start = cleaned.find("{")
         end = cleaned.rfind("}")
-        if start == -1 or end == -1:
+        if start == -1:
             raise json.JSONDecodeError("No valid JSON found", content, 0)
-        return json.loads(cleaned[start:end + 1])
+        if end > start:
+            try:
+                return json.loads(cleaned[start:end + 1])
+            except json.JSONDecodeError:
+                pass
+        # the answer was cut off before it finished (a long list hit the output limit): keep everything that was written
+        repaired = self._repair_truncated_json(cleaned[start:])
+        try:
+            value = json.loads(repaired)
+        except json.JSONDecodeError:
+            raise json.JSONDecodeError("No valid JSON found", content, 0)
+        logger.warning("The model's JSON was cut off; the complete part of it was used")
+        return value
+
+    @staticmethod
+    def _repair_truncated_json(text: str) -> str:
+        """Close whatever a cut-off JSON object left open: an unfinished string, a dangling key, trailing commas, brackets."""
+        stack: List[str] = []
+        in_string = escaped = False
+        for ch in text:
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+            elif ch == '"':
+                in_string = True
+            elif ch in "{[":
+                stack.append("}" if ch == "{" else "]")
+            elif ch in "}]" and stack:
+                stack.pop()
+        out = text + ('"' if in_string else "")
+        if stack and stack[-1] == "}":
+            out = re.sub(r'([,{])\s*"[^"]*"\s*$', r"\1", out)    # a key that was cut off before its colon
+        out = re.sub(r',\s*"[^"]*"\s*:\s*$', "", out)           # a key with no value yet
+        out = re.sub(r'\{\s*"[^"]*"\s*:\s*$', "{", out)
+        out = re.sub(r",\s*$", "", out)
+        return out + "".join(reversed(stack))
 
     @staticmethod
     def _normalize_fixed_list(items: Optional[List[Any]], target_len: int) -> List[str]:
@@ -601,6 +650,44 @@ class LLMService:
         s = re.sub(r"\s+", " ", s)
         return s
 
+    def _clean_name_list(self, raw: Any, limit: int) -> List[str]:
+        """Strings, canonicalised, de-duplicated case-insensitively, at most ``limit`` (a lone string is split on , ; |)."""
+        if isinstance(raw, str):
+            raw = [p.strip() for p in re.split(r"[,;|\n]+", raw) if p.strip()]
+        out: List[str] = []
+        seen = set()
+        for item in raw if isinstance(raw, list) else []:
+            if not isinstance(item, str):
+                continue
+            cleaned = self._canonicalize(item)[:120]
+            if cleaned and cleaned.lower() not in seen:
+                seen.add(cleaned.lower())
+                out.append(cleaned)
+            if len(out) >= limit:
+                break
+        return out
+
+    def _clean_requirements(self, raw: Any) -> List[Dict[str, Any]]:
+        """[{'name', 'mandatory'}]: the model's objects (or bare strings, taken as mandatory), cleaned and de-duplicated."""
+        out: List[Dict[str, Any]] = []
+        seen = set()
+        for item in raw if isinstance(raw, list) else []:
+            if isinstance(item, dict):
+                name, mandatory = item.get("name"), item.get("mandatory", True)
+                if isinstance(mandatory, str):
+                    mandatory = mandatory.strip().lower() not in {"false", "no", "preferred", "optional", "0"}
+            else:
+                name, mandatory = item, True
+            if not isinstance(name, str):
+                continue
+            cleaned = self._canonicalize(name)[:120]
+            if cleaned and cleaned.lower() not in seen:
+                seen.add(cleaned.lower())
+                out.append({"name": cleaned, "mandatory": bool(mandatory)})
+            if len(out) >= 10:
+                break
+        return out
+
     def _validate_cv_response(self, data: Dict[str, Any], *, source_text: str) -> Dict[str, Any]:
         skills_src = data.get("skills_sentences") or data.get("skills") or []
         resp_src = data.get("responsibility_sentences") or data.get("responsibilities") or []
@@ -647,14 +734,17 @@ class LLMService:
                 if len(languages) >= 20:
                     break
 
+        certifications = self._clean_name_list(data.get("certifications"), 20)
+
         out = {
             "doc_type": "resume",
             "name": data.get("name"),
             "job_title": data.get("job_title"),
             "years_of_experience": data.get("years_of_experience"),
-            "category": data.get("category"),
+            "category": normalize_category(data.get("category")),
             "gender": gender,
             "languages": languages,
+            "certifications": certifications,
             "skills_sentences": skills,
             "responsibility_sentences": resps,
             "keywords": keywords,
@@ -682,8 +772,10 @@ class LLMService:
             "doc_type": "job_description",
             "job_title": data.get("job_title"),
             "years_of_experience": data.get("years_of_experience"),
-            "category": data.get("category"),
+            "category": normalize_category(data.get("category")),
             "boolean_search_string": boolean_str,
+            "required_languages": self._clean_requirements(data.get("required_languages")),
+            "required_certifications": self._clean_requirements(data.get("required_certifications")),
             "skills_sentences": skills,
             "responsibility_sentences": resps,
         }
@@ -697,33 +789,6 @@ class LLMService:
         s = re.sub(r"[ \t]+", " ", s)
         s = re.sub(r"\n{3,}", "\n\n", s)
         return s.strip()
-
-    def _hash_key(self, kind: str, text: str) -> str:
-        # Include prompt + model + seed so any change invalidates cache deterministically
-        prompt = DEFAULT_CV_PROMPT if kind == "cv" else DEFAULT_JD_PROMPT
-        basis = f"{kind}||{self.default_model}||{self.seed}||{prompt}||{text}"
-        return hashlib.sha256(basis.encode("utf-8")).hexdigest()
-
-    def _cache_path(self, key: str) -> str:
-        return os.path.join(self.cache_dir, f"{key}.json")
-
-    def _cache_get(self, key: str) -> Optional[Dict[str, Any]]:
-        p = self._cache_path(key)
-        if os.path.exists(p):
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.warning(f"Cache read failed for {p}: {e}")
-        return None
-
-    def _cache_put(self, key: str, obj: Dict[str, Any]) -> None:
-        p = self._cache_path(key)
-        try:
-            with open(p, "w", encoding="utf-8") as f:
-                json.dump(obj, f, ensure_ascii=False)
-        except Exception as e:
-            logger.warning(f"Cache write failed for {p}: {e}")
 
     # ------------- Logging helpers -------------
 

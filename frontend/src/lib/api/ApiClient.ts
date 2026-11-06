@@ -2,6 +2,17 @@ import { AxiosInstance } from 'axios';
 import { logger } from '../logger';
 import { createAxiosClient } from './httpClient';
 import {
+  AgentChatRequest,
+  AgentChatResponse,
+  AgentConversation,
+  AgentConversationSummary,
+  AgentInfo,
+  AgentMessage,
+  AgentUsage,
+  AgentAdminUsage,
+  AgenticCapabilities,
+  AgenticCard,
+  AgentResetRequests,
   MatchRequest,
   MatchResponse,
   CVListResponse,
@@ -81,16 +92,18 @@ export class ApiClient {
   }
 
   /** Only the ids of the most recent CVs (optionally in one category); no contact data. Used to launch a match. */
-  async listCVIds(params?: { limit?: number; category?: string }): Promise<{ ids: string[]; total: number }> {
+  async listCVIds(params?: { limit?: number; category?: string; categories?: string[] }): Promise<{ ids: string[]; total: number }> {
     const response = await this.client.get<{ ids: string[]; total: number }>('/api/cv/cvs', {
       headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', Pragma: 'no-cache', Expires: '0' },
       params: { ...(params ?? {}), ids_only: true, _t: Date.now() },
+      // several categories go as repeated ?categories=a&categories=b (what the server reads)
+      paramsSerializer: { indexes: null },
     });
     return response.data;
   }
 
   /** Distinct values + counts for a filterable CV field (location, nationality, notice_period). */
-  async getCVSearchFacet(field: 'location' | 'nationality' | 'notice_period'): Promise<{ field: string; values: { value: string; count: number }[] }> {
+  async getCVSearchFacet(field: 'location' | 'nationality' | 'notice_period' | 'languages'): Promise<{ field: string; values: { value: string; count: number }[] }> {
     const response = await this.client.get(`/api/cv/search/facets/${field}`);
     return response.data;
   }
@@ -473,23 +486,6 @@ export class ApiClient {
   }
 
   // Careers methods
-  async createJobPosting(file: File): Promise<JobPostingResponse> {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    const response = await this.client.post<JobPostingResponse>(
-      '/api/careers/admin/jobs/post',
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-        },
-      }
-    );
-    return response.data;
-  }
-
   async createJobPostingWithFormData(file: File | null, formData: any): Promise<JobPostingResponse> {
     const formDataToSend = new FormData();
 
@@ -506,31 +502,6 @@ export class ApiClient {
 
     const response = await this.client.post<JobPostingResponse>(
       '/api/careers/admin/jobs/post',
-      formDataToSend,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-        },
-      }
-    );
-    return response.data;
-  }
-
-  async createManualJobPosting(formData: any): Promise<JobPostingResponse> {
-    const formDataToSend = new FormData();
-
-    // Add required and optional form data fields
-    formDataToSend.append('job_title', formData.jobTitle);
-    if (formData.jobLocation) formDataToSend.append('job_location', formData.jobLocation);
-    if (formData.jobSummary) formDataToSend.append('job_summary', formData.jobSummary);
-    if (formData.keyResponsibilities) formDataToSend.append('key_responsibilities', formData.keyResponsibilities);
-    if (formData.qualifications) formDataToSend.append('qualifications', formData.qualifications);
-    if (formData.companyName) formDataToSend.append('company_name', formData.companyName);
-    if (formData.additionalInfo) formDataToSend.append('additional_info', formData.additionalInfo);
-
-    const response = await this.client.post<JobPostingResponse>(
-      '/api/careers/admin/jobs/post-manual',
       formDataToSend,
       {
         headers: {
@@ -694,6 +665,110 @@ export class ApiClient {
       }
     );
     return response.data;
+  }
+
+  /** Read a dropped CV and get back only the form values that are certain (same parsers and prompt as an application). */
+  async autofillFromCV(token: string, cvFile: File): Promise<{ fields: Record<string, string>; sources: Record<string, string>; readable: boolean }> {
+    const formData = new FormData();
+    formData.append('cv_file', cvFile);
+    const response = await this.client.post(`/api/careers/jobs/${token}/autofill`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    });
+    return response.data;
+  }
+
+  // ---- AI agents: read, send a message, read history. There is no edit or delete: the history is a record. ----
+  // ---- Agentic mode: one assistant that uses the app's features. Read, send, hide: there is no edit or delete call. ----
+  async getAgenticCapabilities(): Promise<AgenticCapabilities> {
+    return (await this.client.get<AgenticCapabilities>('/api/agentic/capabilities')).data;
+  }
+
+  async listAgenticConversations(): Promise<AgentConversationSummary[]> {
+    return (await this.client.get<AgentConversationSummary[]>('/api/agentic/conversations')).data;
+  }
+
+  async getAgenticConversation(id: string): Promise<{ conversation: AgentConversation; messages: AgentMessage[] }> {
+    return (await this.client.get(`/api/agentic/conversations/${id}`)).data;
+  }
+
+  /** One turn. Not retried automatically (a retry would repeat the work), and given time: matching can take a while. */
+  /** Attach a job description file to post. It is read and held privately; nothing is posted until the person confirms the draft. */
+  async agenticUpload(file: File): Promise<{ ref: string; filename: string; chars: number }> {
+    const form = new FormData();
+    form.append('file', file);
+    return (await this.client.post('/api/agentic/uploads', form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })).data;
+  }
+
+  async agenticChat(body: { message: string; conversation_id?: string | null; attachment_ref?: string | null; selection?: Record<string, any> | null }): Promise<AgentChatResponse> {
+    return (await this.client.post<AgentChatResponse>('/api/agentic/chat', body, { timeout: 180000 })).data;
+  }
+
+  /** The next page of a list already on screen. Read straight from the application, no assistant and no tokens. */
+  async agenticMore(body: { tool: string; args: Record<string, any>; offset: number; cursor: string | null }): Promise<{ rows: any[]; total: number; page: AgenticCard['page'] }> {
+    return (await this.client.post('/api/agentic/cards/more', body)).data;
+  }
+
+  /** Progress of a matching run (and its results when done). Read straight from the matching engine: no assistant, no tokens. */
+  async agenticMatchStatus(jobId: string): Promise<{ status: 'running' | 'failed' | 'completed'; percent?: number | null; card?: AgenticCard; summary?: string }> {
+    return (await this.client.get(`/api/agentic/match-status/${encodeURIComponent(jobId)}`)).data;
+  }
+
+  async hideAgenticConversation(id: string): Promise<void> {
+    await this.client.post(`/api/agentic/conversations/${id}/hide`);
+  }
+
+  async getAgentUsage(): Promise<AgentUsage> {
+    return (await this.client.get<AgentUsage>('/api/agents/usage')).data;
+  }
+
+  /** Ask an admin to reset the signed-in person's tokens for today. */
+  async requestAgentReset(reason: string): Promise<AgentUsage> {
+    return (await this.client.post<AgentUsage>('/api/agents/usage/request-reset', { reason })).data;
+  }
+
+  async getAgentResetRequests(): Promise<AgentResetRequests> {
+    return (await this.client.get<AgentResetRequests>('/api/agents/admin/reset-requests')).data;
+  }
+
+  async answerAgentResetRequest(id: string, decision: 'approve' | 'reject'): Promise<void> {
+    await this.client.post(`/api/agents/admin/reset-requests/${encodeURIComponent(id)}/${decision}`);
+  }
+
+  async getAgentUsageAdmin(): Promise<AgentAdminUsage> {
+    return (await this.client.get<AgentAdminUsage>('/api/agents/admin/usage')).data;
+  }
+
+  async resetAgentUsage(username: string): Promise<AgentUsage> {
+    return (await this.client.post<AgentUsage>(`/api/agents/admin/usage/${encodeURIComponent(username)}/reset`)).data;
+  }
+
+  async getAgentInfo(agent: string): Promise<AgentInfo> {
+    return (await this.client.get<AgentInfo>(`/api/agents/${agent}`)).data;
+  }
+
+  async listAgentConversations(agent: string): Promise<AgentConversationSummary[]> {
+    return (await this.client.get<AgentConversationSummary[]>(`/api/agents/${agent}/conversations`)).data;
+  }
+
+  async getAgentConversation(agent: string, id: string): Promise<{ conversation: AgentConversation; messages: AgentMessage[] }> {
+    return (await this.client.get(`/api/agents/${agent}/conversations/${id}`)).data;
+  }
+
+  /** One turn. Deliberately NOT retried automatically: a retry would be a second model call. */
+  async agentChat(agent: string, body: AgentChatRequest): Promise<AgentChatResponse> {
+    return (await this.client.post<AgentChatResponse>(`/api/agents/${agent}/chat`, body, { timeout: 150000 })).data;
+  }
+
+  /** Removes a chat from the person's list. The record itself is kept on the server. */
+  async hideAgentConversation(agent: string, id: string): Promise<void> {
+    await this.client.post(`/api/agents/${agent}/conversations/${id}/hide`);
+  }
+
+  async agentExtractText(file: File, kind: 'jd' | 'cv' = 'jd'): Promise<{ filename: string; text: string; chars: number; truncated: boolean }> {
+    const form = new FormData();
+    form.append('file', file);
+    return (await this.client.post(`/api/agents/extract-text?kind=${kind}`, form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 })).data;
   }
 
   async getJobApplications(jobId: string): Promise<JobApplicationListItem[]> {

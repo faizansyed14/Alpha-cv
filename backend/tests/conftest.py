@@ -5,6 +5,10 @@ import pytest
 import os
 import sys
 from typing import Generator
+
+if not os.getenv("TESTS_USE_REAL_REDIS"):
+    os.environ["REDIS_HOST"] = "127.0.0.1"
+    os.environ["REDIS_PORT"] = "1"            # nothing listens here: tests run without Redis, never against a live one
 from unittest.mock import Mock
 from sqlmodel import Session, create_engine, SQLModel
 from fastapi.testclient import TestClient
@@ -49,7 +53,7 @@ def db_session(db_engine) -> Generator[Session, None, None]:
 @pytest.fixture
 def test_client(db_session, db_engine) -> TestClient:
     """Create a test client for FastAPI with dependency overrides."""
-    from app.db.auth_db import get_session
+    from app.db.database import get_session
     from app.models.user import User  # Ensure User model is imported
     
     # Ensure tables are created (in case they weren't)

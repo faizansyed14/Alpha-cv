@@ -1,4 +1,5 @@
-import { runMatchJob, toMatchingProgress } from '@/lib/matchRun';
+import { MATCH_MAX_CVS, finishMatchProgress, loadActiveMatch, resumeMatchJob, runMatchJob, toMatchingProgress } from '@/lib/matchRun';
+import { useAuthStore } from '@/stores/authStore';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import {
@@ -45,7 +46,7 @@ interface MatchingProgress {
 
 interface AppState {
   // Current tab
-  currentTab: 'dashboard' | 'upload' | 'database' | 'candidates' | 'jobs' | 'match' | 'careers' | 'email' | 'reports' | 'system' | 'monitor';
+  currentTab: 'dashboard' | 'upload' | 'database' | 'candidates' | 'jobs' | 'match' | 'careers' | 'reports' | 'system' | 'monitor';
   
   // Database tab state
   databaseActiveTab: 'cvs' | 'jds';
@@ -117,6 +118,8 @@ interface AppState {
   // Matching actions
   setMatchWeights: (weights: Partial<MatchWeights>) => void;
   runMatch: (request?: Partial<MatchRequest>) => Promise<void>;
+  /** Re-attaches to a match that was still running when the page was reloaded; resolves true when its results are now in the store. */
+  resumeMatch: () => Promise<boolean>;
   clearMatchResult: () => void;
   setMatchingProgress: (progress: Partial<MatchingProgress>) => void;
   hideMatchingProgress: () => void;
@@ -439,7 +442,10 @@ export const useAppStore = create<AppState>()(
             throw new Error('Please select a job description first');
           }
 
-          // Any number of CVs can be matched: the backend streams them in chunks. No client-side limit.
+          // One match scores at most MATCH_MAX_CVS CVs (the backend refuses more).
+          if (selectedCVs.length > MATCH_MAX_CVS) {
+            throw new Error(`A match can score at most ${MATCH_MAX_CVS.toLocaleString()} CVs. You selected ${selectedCVs.length.toLocaleString()}.`);
+          }
           const matchRequest: MatchRequest = {
             jd_id: selectedJD || undefined,
             cv_ids: selectedCVs.length > 0 ? selectedCVs : undefined,
@@ -472,8 +478,9 @@ export const useAppStore = create<AppState>()(
                 ? { isQueued: true, queuePosition: u.queuePosition, estimatedWaitTime: u.estimatedWaitTime, message: u.message }
                 : null,
             });
-          });
+          }, { remember: true, owner: useAuthStore.getState().user?.username });
 
+          await finishMatchProgress(setMatchingProgress);   // the bar reaches 100 before the results replace it
           hideMatchingProgress();
           set({ matchResult: result, matchingQueue: null });
           setLoading('matching', false);
@@ -485,6 +492,56 @@ export const useAppStore = create<AppState>()(
           set({ matchingQueue: null });
           const errorMessage = error?.detail || error?.response?.data?.detail || error?.message || 'Failed to run matching';
           setLoading('matching', false, errorMessage);
+        }
+      },
+
+      resumeMatch: async () => {
+        const { setLoading, setMatchingProgress, hideMatchingProgress } = get();
+        const active = loadActiveMatch(useAuthStore.getState().user?.username);
+        if (!active || get().loadingStates.matching.isLoading) return false;
+
+        setLoading('matching', true);
+        try {
+          setMatchingProgress({
+            totalCVs: active.totalCVs,
+            processedCVs: 0,
+            percent: 0,
+            currentStage: 'initializing',
+            isVisible: true,
+            estimatedTimeRemaining: undefined,
+            currentBatch: 0,
+            totalBatches: 0,
+            phase: 'initializing',
+            currentCandidate: null,
+            recentCandidates: [],
+            llmDone: 0,
+            llmTotal: 0,
+          });
+          logger.info('Resuming the match that was running before the reload', active.jobId);
+          const result = await resumeMatchJob(active, (u) => {
+            setMatchingProgress(toMatchingProgress(u));
+            set({
+              matchingQueue: u.waiting
+                ? { isQueued: true, queuePosition: u.queuePosition, estimatedWaitTime: u.estimatedWaitTime, message: u.message }
+                : null,
+            });
+          });
+          await finishMatchProgress(setMatchingProgress);
+          hideMatchingProgress();
+          set({ matchResult: result, matchingQueue: null });
+          setLoading('matching', false);
+          return true;
+        } catch (error: any) {
+          hideMatchingProgress();
+          setMatchingProgress({ isVisible: false });
+          set({ matchingQueue: null });
+          if (error?.response?.status === 404) {          // the result has expired on the server: nothing to show, nothing to report
+            setLoading('matching', false);
+            return false;
+          }
+          const errorMessage = error?.detail || error?.response?.data?.detail || error?.message || 'Failed to run matching';
+          setLoading('matching', false, errorMessage);
+          return false;
         }
       },
 

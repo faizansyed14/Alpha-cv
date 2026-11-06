@@ -1,6 +1,6 @@
 # =============================================================================
 # AlphaCV, Production (CPU-only)
-# Configuration comes exclusively from ./.env (copy .env.example and fill in).
+# Configuration comes exclusively from ./.env.prod (created from .env.prod.example on first run; fill in every CHANGE_ME).
 # Start:  ./scripts/start.sh prod        Stop: ./scripts/stop.sh prod
 # Volumes are named and are NEVER deleted by the start/stop scripts.
 #
@@ -8,9 +8,9 @@
 # local file-storage volume. Both live off-box so the EC2 instance holds no
 # durable application data and can be replaced/rebuilt/scaled without a data
 # migration:
-#   - AUTH_DB_URL / TRACKER_DB_URL / POSTGRES_* -> point at an AWS RDS
-#     (PostgreSQL) endpoint. Enable "Multi-AZ" + automated backups on the RDS
-#     instance itself; see db/init/rds-bootstrap.sql for the one-time setup.
+#   - DATABASE_URL -> points at an AWS RDS (PostgreSQL) endpoint: one database
+#     for users, tracker and email intake. Enable "Multi-AZ" + automated backups on
+#     the RDS instance itself; see db/init/rds-bootstrap.sql for the one-time setup.
 #   - STORAGE_BACKEND=s3, S3_BUCKET / S3_REGION -> CV/JD files go straight to
 #     S3 (credentials via the EC2 instance's IAM role, no static keys on the
 #     box). Enable bucket versioning + default SSE-S3/KMS encryption on the
@@ -30,7 +30,7 @@ services:
     build:
       context: ./backend
     env_file:
-      - ./.env
+      - ./.env.prod
     environment:
       # 4 vCPU host: keep the API to 2 workers so the match-worker has cores to run.
       UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
@@ -46,12 +46,8 @@ services:
       model-server:
         condition: service_healthy
     restart: unless-stopped
-    volumes:
-      # No uploads_data here: STORAGE_BACKEND=s3 means CV/JD files never touch
-      # local disk (temp files during parse/preview live in the container's
-      # own /tmp and are discarded on restart). llm_cache is a disposable
-      # performance cache (safe to lose on redeploy), not source-of-truth data.
-      - llm_cache:/data/llm_cache
+    # No volumes: STORAGE_BACKEND=s3 means CV/JD files never touch local disk (temp files during parse/preview
+    # live in the container's own /tmp and are discarded on restart).
     networks:
       - cv-network
     healthcheck:
@@ -80,7 +76,7 @@ services:
     # Longer than MATCH_SHUTDOWN_GRACE_SECONDS (100) so running jobs finish or are handed back before Docker kills it.
     stop_grace_period: 120s
     env_file:
-      - ./.env
+      - ./.env.prod
     environment:
       ENABLE_MATCH_QUEUE: "true"
       TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
@@ -101,8 +97,6 @@ services:
         condition: service_started
       model-server:
         condition: service_healthy
-    volumes:
-      - llm_cache:/data/llm_cache
     networks:
       - cv-network
     restart: unless-stopped
@@ -129,9 +123,8 @@ services:
     command: ["python", "-m", "app.jobs.background_worker"]
     init: true
     env_file:
-      - ./.env
+      - ./.env.prod
     environment:
-      ENABLE_EMAIL_SCHEDULER: "true"
       ENABLE_PUBLIC_CV_QUEUE: "true"
       TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
       EMBEDDING_SERVICE_URL: http://model-server:8080
@@ -143,8 +136,6 @@ services:
         condition: service_started
       model-server:
         condition: service_healthy
-    volumes:
-      - llm_cache:/data/llm_cache
     networks:
       - cv-network
     restart: unless-stopped
@@ -158,8 +149,8 @@ services:
           cpus: '0.25'
 
   # ---------------------------------------------------------------------------
-  # Embedding model server: the ONE process that holds torch + the sentence-transformer. The API and the workers call
-  # it over the internal network, so the backend image has no ML runtime and the model sits in RAM once.
+  # Embedding model server: the ONE process that holds the embedding model (multilingual-e5-small, ONNX Runtime). The API
+  # and the workers call it over the internal network, so the backend image has no ML runtime and the model sits in RAM once.
   # ---------------------------------------------------------------------------
   model-server:
     image: alpha-model-server:prod
@@ -216,11 +207,11 @@ services:
           cpus: '0.25'
 
   # ---------------------------------------------------------------------------
-  # PostgreSQL: NOT run here in production. AUTH_DB_URL / TRACKER_DB_URL /
-  # POSTGRES_* in ./.env point at an AWS RDS PostgreSQL instance instead (see
+  # PostgreSQL: NOT run here in production. DATABASE_URL in ./.env.prod points at an
+  # AWS RDS PostgreSQL instance instead (see
   # the header comment above and db/init/rds-bootstrap.sql for one-time setup:
-  # RDS doesn't execute docker-entrypoint-initdb.d, so the auth_db database
-  # and its grant have to be created once against the RDS endpoint directly).
+  # RDS doesn't execute docker-entrypoint-initdb.d, so the application role and
+  # its grant have to be created once against the RDS endpoint directly).
   # ---------------------------------------------------------------------------
 
   # ---------------------------------------------------------------------------
@@ -237,7 +228,7 @@ services:
       QDRANT__SERVICE__HTTP_PORT: 6333
       QDRANT__SERVICE__GRPC_PORT: 6334
       QDRANT__SERVICE__MAX_REQUEST_SIZE_MB: 512
-      # Optional: require an API key (set QDRANT_API_KEY in .env to enable).
+      # Optional: require an API key (set QDRANT_API_KEY in .env.prod to enable).
       QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
     deploy:
       resources:
@@ -255,7 +246,7 @@ services:
     image: redis:7-alpine
     volumes:
       - redis_data:/data
-    # Optional auth: setting REDIS_PASSWORD in .env makes Redis require it (the
+    # Optional auth: setting REDIS_PASSWORD in .env.prod makes Redis require it (the
     # backend reads the same var and authenticates). Empty = no password (the
     # service is only reachable on the internal docker network).
     command: >
@@ -280,7 +271,7 @@ services:
           cpus: '0.25'
 
   # ---------------------------------------------------------------------------
-  # Nginx (only service that publishes ports; DOMAIN comes from .env)
+  # Nginx (only service that publishes ports; DOMAIN comes from .env.prod)
   # ---------------------------------------------------------------------------
   nginx:
     image: nginx:alpine
@@ -305,7 +296,7 @@ services:
     networks:
       - cv-network
     environment:
-      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env.prod}
     deploy:
       resources:
         limits:
@@ -318,7 +309,6 @@ volumes:
   # nor the file store has state on this host anymore.
   qdrant_data:
   redis_data:
-  llm_cache:
   nginx_cache:
 
 networks:

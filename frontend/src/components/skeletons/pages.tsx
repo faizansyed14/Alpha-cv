@@ -3,24 +3,29 @@ import { Bone, SkeletonCandidateCard, SkeletonFilterRail, SkeletonHeader, Skelet
 export function DashboardSkeleton() {
   return (
     <SkeletonRegion label="Loading dashboard" className="space-y-6">
-      <SkeletonHeader withActions />
-      <SkeletonStats count={3} />
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-        {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="space-y-2 rounded-2xl border border-surface-border bg-paper p-5 shadow-card">
-            <Bone className="mb-3 h-4 w-40" />
-            {Array.from({ length: 3 }).map((__, j) => (
-              <div key={j} className="flex items-center gap-3 rounded-xl border border-surface-border p-3">
-                <Bone className="h-8 w-8 rounded-full" />
-                <div className="flex-1 space-y-1.5">
-                  <Bone className="h-3.5 w-40" />
-                  <Bone className="h-3 w-56" />
-                </div>
-                <Bone className="h-8 w-24" />
+      <div className="rounded-2xl border border-surface-border bg-paper px-6 py-8 shadow-card sm:px-8">
+        <Bone className="mb-3 h-3 w-24" />
+        <Bone className="mb-2 h-8 w-72 max-w-full" />
+        <Bone className="h-4 w-96 max-w-full" />
+        <div className="mt-6 flex gap-2">
+          <Bone className="h-9 w-24" />
+          <Bone className="h-9 w-28" />
+        </div>
+      </div>
+      <SkeletonStats count={4} />
+      <div>
+        <Bone className="mb-3 h-4 w-28" />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="flex items-start gap-3.5 rounded-2xl border border-surface-border bg-paper p-4 shadow-card">
+              <Bone className="h-10 w-10 rounded-xl" />
+              <div className="flex-1 space-y-2">
+                <Bone className="h-3.5 w-28" />
+                <Bone className="h-3 w-40" />
               </div>
-            ))}
-          </div>
-        ))}
+            </div>
+          ))}
+        </div>
       </div>
     </SkeletonRegion>
   );
@@ -143,23 +148,6 @@ export function CareersSkeleton() {
   );
 }
 
-export function EmailSkeleton() {
-  return (
-    <SkeletonRegion label="Loading email">
-      <SkeletonHeader withActions />
-      <SkeletonStats count={4} />
-      <div className="mt-4 rounded-xl border border-surface-border bg-white p-5 shadow-card">
-        <Bone className="mb-3 h-3 w-36" />
-        <div className="flex flex-wrap gap-2">
-          <Bone className="h-6 w-24 rounded-full" />
-          <Bone className="h-6 w-28 rounded-full" />
-          <Bone className="h-6 w-24 rounded-full" />
-        </div>
-      </div>
-    </SkeletonRegion>
-  );
-}
-
 export function ReportsSkeleton() {
   return (
     <SkeletonRegion label="Loading reports">
@@ -256,7 +244,7 @@ export function TrackerSkeleton() {
         ))}
       </div>
       <div className="min-w-0 flex-1 p-4">
-        <div className="mb-3 flex items-center justify-between border-b border-slate-200 pb-3">
+        <div className="mb-3 flex items-center justify-between border-b border-surface-border pb-3">
           <Bone className="h-4 w-40" />
           <Bone className="h-8 w-28" />
         </div>
@@ -271,7 +259,7 @@ export function LoginSkeleton() {
     <SkeletonRegion label="Loading sign in" className="flex min-h-screen w-full items-center justify-center bg-[var(--app-bg)] px-4 py-12">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-slate-200 bg-white p-2 shadow-[var(--shadow-md)]">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-surface-border bg-white p-2 shadow-[var(--shadow-md)]">
             <img src="/alphadatalogo.svg" alt="" className="h-full w-full object-contain" />
           </div>
           <Bone className="h-5 w-28" />

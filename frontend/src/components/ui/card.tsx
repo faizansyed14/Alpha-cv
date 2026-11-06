@@ -2,7 +2,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Card: white surface, hairline border, soft shadow.
+ * Card: white surface, thin dark-navy border, soft shadow.
  */
 const Card = React.forwardRef<
   HTMLDivElement,

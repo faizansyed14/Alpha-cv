@@ -78,7 +78,7 @@ export function Toast({ id, type, title, message, duration = 4000, onClose }: To
           ? 'translate-x-0 opacity-100 scale-100'
           : 'translate-x-full opacity-0 scale-95'
         }
-        bg-white border border-slate-200 rounded-lg shadow-lg shadow-gray-900/5 overflow-hidden
+        bg-white border border-surface-border rounded-lg shadow-lg shadow-gray-900/5 overflow-hidden
       `}
     >
       <div className="p-3.5">

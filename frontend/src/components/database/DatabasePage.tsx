@@ -11,10 +11,8 @@ import {
   Eye,
   Loader2,
   Trash2,
-  MessageSquare,
   X,
   Code2,
-  Save,
   FileText as FileTextIcon,
   GripVertical,
   Upload,
@@ -22,7 +20,10 @@ import {
   Check,
   Code,
   SlidersHorizontal,
+  Megaphone,
 } from '@/components/icons';
+import { useRouter } from 'next/navigation';
+import { canUseAgents, linkedinHref } from '@/lib/agentLinks';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useWorkspaceNav } from '@/hooks/useWorkspaceNav';
@@ -32,7 +33,7 @@ import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table';
 import { PageHeader, EmptyState } from '@/components/ui/page';
 import { Segmented } from '@/components/ui/segmented';
 import { Avatar } from '@/components/ui/avatar';
-import { CVListItem, JDListItem } from '@/lib/types';
+import { CVAdvancedSearchParams, CVListItem, JDListItem, CVSearchResult } from '@/lib/types';
 import { CandidatesListSkeleton, JobsTableSkeleton } from '@/components/skeletons';
 import AdvancedSearchModal from '@/components/database/AdvancedSearchModal';
 import ContactActions from '@/components/common/ContactActions';
@@ -65,6 +66,9 @@ function getCVDisplay(cv: CVListItem) {
   const languages = Array.isArray(cv.languages)
     ? cv.languages.filter((l): l is string => typeof l === 'string' && !!l.trim())
     : [];
+  const certifications = Array.isArray(cv.certifications)
+    ? cv.certifications.filter((c): c is string => typeof c === 'string' && !!c.trim())
+    : [];
   return {
     name: cv.full_name || cv.filename || 'Unknown',
     title: cv.job_title || '-',
@@ -82,8 +86,11 @@ function getCVDisplay(cv: CVListItem) {
     skillKeywords,
     email: contactEmail,
     phone: contactPhone,
+    linkedin: cv.linkedin_url || null,
+    github: cv.github_url || null,
     gender: cv.gender || null,
     languages,
+    certifications,
     location: cv.location || null,
     nationality: cv.nationality || null,
   };
@@ -120,6 +127,7 @@ const DETAIL_WIDTH_KEY = 'alphacv.detailWidth';
 
 export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   const { go } = useWorkspaceNav();
+  const router = useRouter();
   const {
     cvs,
     jds,
@@ -167,14 +175,12 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     if (lockedView) setView(lockedView);
   }, [lockedView]);
   const [detailCVId, setDetailCVId] = useState<string | null>(null);
-  const [notesSummary, setNotesSummary] = useState<Record<string, number>>({});
+  const [notesSummary, setNotesSummary] = useState<
+    Record<string, { count: number; text: string | null; author: string | null }>
+  >({});
+  const [cardNoteSavingId, setCardNoteSavingId] = useState<string | null>(null);
   const [detailCV, setDetailCV] = useState<any>(null);
-  const [detailNotes, setDetailNotes] = useState<any[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [newNoteText, setNewNoteText] = useState('');
-  const [savingNote, setSavingNote] = useState(false);
-  const [editingNoteIndex, setEditingNoteIndex] = useState<number | null>(null);
-  const [editNoteText, setEditNoteText] = useState('');
   const [detailJDId, setDetailJDId] = useState<string | null>(null);
   const [detailJD, setDetailJD] = useState<any>(null);
   const [detailJDLoading, setDetailJDLoading] = useState(false);
@@ -221,11 +227,21 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     category: [],
     location: [],
     nationality: [],
+    language: [],
   });
-  const [locationFacets, setLocationFacets] = useState<{ value: string; count: number }[]>([]);
+  const [locationFacets, setLocationFacets] = useState<{ value: string; count: number; members?: string[] }[]>([]);
   const [nationalityFacets, setNationalityFacets] = useState<{ value: string; count: number }[]>([]);
+  const [languageFacets, setLanguageFacets] = useState<{ value: string; count: number }[]>([]);
   const [geoFilterCVs, setGeoFilterCVs] = useState<CVListItem[] | null>(null);
   const [geoFilterLoading, setGeoFilterLoading] = useState(false);
+  /** Advanced / boolean search results shown in place of the normal CV list. */
+  const [advancedResults, setAdvancedResults] = useState<CVSearchResult[] | null>(null);
+  const [advancedSearching, setAdvancedSearching] = useState(false);
+  const [advancedTotal, setAdvancedTotal] = useState<{ count: number; estimate: boolean } | null>(null);
+  const [advancedError, setAdvancedError] = useState<string | null>(null);
+  /** Last submitted advanced query — kept so boolean string can be edited above results. */
+  const [advancedQuery, setAdvancedQuery] = useState<CVAdvancedSearchParams | null>(null);
+  const [booleanEdit, setBooleanEdit] = useState('');
 
   // Open the document preview. Identical to the Matching page: fetch the
   // original file as an authenticated blob, hand the modal a blob URL, and
@@ -275,35 +291,58 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   }, [loadCVs, loadJDs]);
 
   useEffect(() => {
-    if (cvs.length === 0) return;
-    const ids = cvs.map((c) => c.id).filter(Boolean);
+    const pool =
+      advancedResults && advancedResults.length > 0
+        ? advancedResults
+        : geoFilterCVs && geoFilterCVs.length > 0
+          ? geoFilterCVs
+          : activeFolder !== CATEGORY_ALL
+            ? (folderCVs[activeFolder]?.items ?? [])
+            : cvs;
+    const ids = pool.map((c) => c.id).filter(Boolean);
     if (ids.length === 0) return;
+    let cancelled = false;
     api.getNotesSummary(ids).then((r) => {
-      const next: Record<string, number> = {};
-      (r.summaries || []).forEach((s: any) => {
-        if (s.cv_id && (s.notes_count || 0) > 0) next[s.cv_id] = s.notes_count;
+      if (cancelled) return;
+      setNotesSummary((prev) => {
+        const next = { ...prev };
+        (r.summaries || []).forEach((s: any) => {
+          if (!s.cv_id) return;
+          const count = Number(s.notes_count || 0);
+          if (count <= 0) {
+            delete next[s.cv_id];
+            return;
+          }
+          const latest = s.latest_note;
+          const text =
+            typeof latest === 'string'
+              ? latest
+              : typeof latest?.note === 'string'
+                ? latest.note
+                : null;
+          const author =
+            typeof latest === 'object' && latest && typeof latest.hr_user === 'string'
+              ? latest.hr_user
+              : null;
+          next[s.cv_id] = { count, text, author };
+        });
+        return next;
       });
-      setNotesSummary(next);
     }).catch(() => { });
-  }, [cvs]);
+    return () => { cancelled = true; };
+  }, [cvs, geoFilterCVs, activeFolder, folderCVs, advancedResults]);
 
   useEffect(() => {
     if (!detailCVId) {
       setDetailCV(null);
-      setDetailNotes([]);
       return;
     }
     setDetailLoading(true);
-    Promise.all([
-      api.getCVDetails(detailCVId),
-      api.getCVNotes(detailCVId),
-    ]).then(([cvRes, notesRes]) => {
-      setDetailCV(cvRes);
-      setDetailNotes(notesRes.notes || []);
-    }).catch(() => {
-      setDetailCV(null);
-      setDetailNotes([]);
-    }).finally(() => setDetailLoading(false));
+    api
+      .getCVDetails(detailCVId)
+      .then(setDetailCV)
+      .catch(() => setDetailCV(null))
+      .finally(() => setDetailLoading(false));
   }, [detailCVId]);
 
   useEffect(() => {
@@ -332,23 +371,26 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     return () => { cancelled = true; };
   }, [cvs.length]);
 
-  /** Facet counts for location / nationality (whole DB). */
+  /** Facet counts for location / nationality / language (whole DB). */
   useEffect(() => {
     if (view !== 'candidates') return;
     let cancelled = false;
     Promise.all([
       api.getCVSearchFacet('location'),
       api.getCVSearchFacet('nationality'),
+      api.getCVSearchFacet('languages'),
     ])
-      .then(([loc, nat]) => {
+      .then(([loc, nat, lang]) => {
         if (cancelled) return;
         setLocationFacets(loc.values || []);
         setNationalityFacets(nat.values || []);
+        setLanguageFacets(lang.values || []);
       })
       .catch(() => {
         if (cancelled) return;
         setLocationFacets([]);
         setNationalityFacets([]);
+        setLanguageFacets([]);
       });
     return () => { cancelled = true; };
   }, [view, cvs.length]);
@@ -363,11 +405,12 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     }
   }, [sidebarFilters.category]);
 
-  /** Server-side geo filter when location/nationality checkboxes are used. */
+  /** Server-side filter when location / nationality / language checkboxes are used. */
   useEffect(() => {
     const locations = sidebarFilters.location || [];
     const nationalities = sidebarFilters.nationality || [];
-    if (locations.length === 0 && nationalities.length === 0) {
+    const languages = sidebarFilters.language || [];
+    if (locations.length === 0 && nationalities.length === 0 && languages.length === 0) {
       setGeoFilterCVs(null);
       setGeoFilterLoading(false);
       return;
@@ -381,8 +424,10 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         let pages = 0;
         do {
           const res = await api.searchCVsAdvanced({
-            locations: locations.length ? locations : undefined,
+            // the filter lists countries; search the locations stored behind the ticked ones
+            locations: locations.length ? locations.flatMap((c) => locationFacets.find((f) => f.value === c)?.members || [c]) : undefined,
             nationalities: nationalities.length ? nationalities : undefined,
+            languages: languages.length ? languages : undefined,
             limit: 100,
             cursor,
           });
@@ -398,7 +443,8 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       }
     })();
     return () => { cancelled = true; };
-  }, [sidebarFilters.location, sidebarFilters.nationality]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarFilters.location, sidebarFilters.nationality, sidebarFilters.language]);
 
   const loadFolderCVPage = async (category: string, offset: number) => {
     setLoadingFolderCVs((s) => ({ ...s, [category]: true }));
@@ -462,6 +508,16 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   }, [search, activeFolder, page, isServerSearchMode]);
 
   const filteredCVs = useMemo(() => {
+    if (advancedResults) {
+      let list: CVListItem[] = advancedResults;
+      if (notesFilter === 'with_notes') {
+        list = list.filter((cv) => (notesSummary[cv.id]?.count ?? 0) > 0);
+      } else if (notesFilter === 'without_notes') {
+        list = list.filter((cv) => (notesSummary[cv.id]?.count ?? 0) === 0);
+      }
+      return list;
+    }
+
     if (isServerSearchMode) {
       return serverSearchCVs.items;
     }
@@ -486,9 +542,9 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     }
 
     if (notesFilter === 'with_notes') {
-      list = list.filter((cv) => (notesSummary[cv.id] ?? 0) > 0);
+      list = list.filter((cv) => (notesSummary[cv.id]?.count ?? 0) > 0);
     } else if (notesFilter === 'without_notes') {
-      list = list.filter((cv) => (notesSummary[cv.id] ?? 0) === 0);
+      list = list.filter((cv) => (notesSummary[cv.id]?.count ?? 0) === 0);
     }
     return list;
   }, [
@@ -501,7 +557,68 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     notesSummary,
     sidebarFilters.category,
     geoFilterCVs,
+    advancedResults,
   ]);
+
+  const runAdvancedSearch = async (query: CVAdvancedSearchParams) => {
+    setShowAdvancedSearch(false);
+    setAdvancedQuery(query);
+    setBooleanEdit(query.boolean_query || '');
+    setAdvancedSearching(true);
+    setAdvancedError(null);
+    setAdvancedResults(null);
+    setAdvancedTotal(null);
+    setPage(1);
+    try {
+      const collected: CVSearchResult[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      let firstTotal: { count: number; estimate: boolean } | null = null;
+      do {
+        const res = await api.searchCVsAdvanced({ ...query, limit: query.limit || 100, cursor });
+        collected.push(...(res.results || []));
+        if (pages === 0 && res.total != null) {
+          firstTotal = { count: res.total, estimate: !!res.total_is_estimate };
+        }
+        cursor = res.next_cursor;
+        pages += 1;
+      } while (cursor && pages < 10);
+      setAdvancedResults(collected);
+      setAdvancedTotal(firstTotal ?? { count: collected.length, estimate: false });
+    } catch (e: any) {
+      setAdvancedResults([]);
+      setAdvancedTotal({ count: 0, estimate: false });
+      setAdvancedError(
+        (typeof e?.detail === 'string' && e.detail) ||
+          (typeof e?.message === 'string' && e.message) ||
+          'Search failed',
+      );
+    } finally {
+      setAdvancedSearching(false);
+    }
+  };
+
+  const rerunBooleanFromTop = () => {
+    const text = booleanEdit.trim();
+    if (!text) return;
+    const base = advancedQuery || {};
+    void runAdvancedSearch({
+      ...base,
+      keywords: undefined,
+      boolean_query: text,
+      limit: base.limit || 100,
+    });
+  };
+
+  const clearAdvancedSearch = () => {
+    setAdvancedResults(null);
+    setAdvancedTotal(null);
+    setAdvancedError(null);
+    setAdvancedSearching(false);
+    setAdvancedQuery(null);
+    setBooleanEdit('');
+    setPage(1);
+  };
 
   const filteredJDs = useMemo(() => {
     if (!search.trim()) return jds;
@@ -529,16 +646,17 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         : (folderCVs[activeFolder]?.items?.length ?? 0);
 
   // When not searching, the server knows the true total for folders; client may have partial list loaded.
-  // Geo facet results are a finite client list, page against that length.
-  const totalItemsForPaging = geoFilterCVs
-    ? filteredCVs.length
-    : (activeTotalCount ?? filteredCVs.length);
+  // Geo / advanced search results are finite client lists — page against that length.
+  const totalItemsForPaging =
+    advancedResults || geoFilterCVs
+      ? filteredCVs.length
+      : (activeTotalCount ?? filteredCVs.length);
   const totalPages = Math.ceil(totalItemsForPaging / ITEMS_PER_PAGE) || 1;
   const paginatedCVs = useMemo(() => {
     if (isServerSearchMode) return filteredCVs;
     const start = (page - 1) * ITEMS_PER_PAGE;
     return filteredCVs.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredCVs, page]);
+  }, [filteredCVs, page, isServerSearchMode]);
 
   useEffect(() => {
     if (page > totalPages && totalPages > 0) setPage(1);
@@ -603,45 +721,50 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     void handlePreviewFile(id, type, rawName);
   };
 
-  const handleAddNote = async () => {
-    if (!detailCVId || !newNoteText.trim() || !user?.username) return;
-    setSavingNote(true);
+  const syncNotesSummaryForCv = (cvId: string, notes: any[]) => {
+    const list = Array.isArray(notes) ? notes : [];
+    if (list.length === 0) {
+      setNotesSummary((prev) => {
+        const next = { ...prev };
+        delete next[cvId];
+        return next;
+      });
+      return;
+    }
+    const latest = [...list].sort((a, b) =>
+      String(b?.updated_at || b?.created_at || '').localeCompare(String(a?.updated_at || a?.created_at || '')),
+    )[0];
+    const text = typeof latest?.note === 'string' ? latest.note : null;
+    const author = typeof latest?.hr_user === 'string' ? latest.hr_user : null;
+    setNotesSummary((prev) => ({ ...prev, [cvId]: { count: list.length, text, author } }));
+  };
+
+  const handleCardSaveNote = async (cvId: string, text: string) => {
+    if (!user?.username || !text.trim()) return;
+    setCardNoteSavingId(cvId);
     try {
-      await api.addOrUpdateNote(detailCVId, newNoteText.trim(), user.username);
-      const res = await api.getCVNotes(detailCVId);
-      setDetailNotes(res.notes || []);
-      setNotesSummary((prev) => ({ ...prev, [detailCVId]: (res.notes || []).length }));
-      setNewNoteText('');
+      await api.addOrUpdateNote(cvId, text.trim(), user.username);
+      const res = await api.getCVNotes(cvId);
+      syncNotesSummaryForCv(cvId, res.notes || []);
     } catch (e) {
       console.error(e);
     } finally {
-      setSavingNote(false);
+      setCardNoteSavingId(null);
     }
   };
 
-  const handleSaveEditNote = async () => {
-    if (editingNoteIndex == null || !detailCVId || !editNoteText.trim() || !user?.username) return;
-    setSavingNote(true);
+  const handleCardDeleteNote = async (cvId: string, hrUser?: string | null) => {
+    const author = hrUser || user?.username;
+    if (!author) return;
+    setCardNoteSavingId(cvId);
     try {
-      await api.addOrUpdateNote(detailCVId, editNoteText.trim(), user.username);
-      const res = await api.getCVNotes(detailCVId);
-      setDetailNotes(res.notes || []);
-      setEditingNoteIndex(null);
-      setEditNoteText('');
-    } finally {
-      setSavingNote(false);
-    }
-  };
-
-  const handleDeleteNote = async (hrUser: string) => {
-    if (!detailCVId || !user?.username || !window.confirm('Delete this note?')) return;
-    try {
-      await api.deleteCVNote(detailCVId, hrUser);
-      const res = await api.getCVNotes(detailCVId);
-      setDetailNotes(res.notes || []);
-      setNotesSummary((prev) => ({ ...prev, [detailCVId]: (res.notes || []).length }));
+      await api.deleteCVNote(cvId, author);
+      const res = await api.getCVNotes(cvId);
+      syncNotesSummaryForCv(cvId, res.notes || []);
     } catch (e) {
       console.error(e);
+    } finally {
+      setCardNoteSavingId(null);
     }
   };
 
@@ -670,7 +793,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       { key: 'category', label: 'Category', options: categoryOptions },
       {
         key: 'location',
-        label: 'Location',
+        label: 'Country',
         options: locationFacets.map((f) => ({ value: f.value, label: f.value, count: f.count })),
       },
       {
@@ -678,8 +801,13 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         label: 'Nationality',
         options: nationalityFacets.map((f) => ({ value: f.value, label: f.value, count: f.count })),
       },
+      {
+        key: 'language',
+        label: 'Language',
+        options: languageFacets.map((f) => ({ value: f.value, label: f.value, count: f.count })),
+      },
     ];
-  }, [folderList, locationFacets, nationalityFacets]);
+  }, [folderList, locationFacets, nationalityFacets, languageFacets]);
 
   const toggleSidebarFilter = (groupKey: string, value: string) => {
     setPage(1);
@@ -694,18 +822,21 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
 
   const clearSidebarFilters = () => {
     setPage(1);
-    setSidebarFilters({ category: [], location: [], nationality: [] });
+    setSidebarFilters({ category: [], location: [], nationality: [], language: [] });
   };
 
   const cvCount = totalCVs ?? cvs.length;
   const jdCount = totalJDs ?? jds.length;
   const cvLoading =
+    advancedSearching ||
     ((loadingStates.cvs.isLoading || loadingFolderCVs[activeFolder] || geoFilterLoading) &&
-      paginatedCVs.length === 0);
+      paginatedCVs.length === 0 &&
+      !advancedResults);
   const jdLoading = loadingStates.jds.isLoading && jds.length === 0;
 
   const renderCandidateCard = (cv: CVListItem, index: number) => {
     const d = getCVDisplay(cv);
+    const noteMeta = notesSummary[cv.id];
     return (
       <CandidateCard
         key={cv.id}
@@ -714,15 +845,50 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         index={index}
         selected={selectedCVs.includes(cv.id)}
         matchedKeywords={cv.matched_keywords || []}
+        noteText={noteMeta?.text || null}
+        noteAuthor={noteMeta?.author || null}
+        noteSaving={cardNoteSavingId === cv.id}
         onToggleSelect={() => toggleCV(cv.id)}
-        onOpenDetails={() => setDetailCVId(cv.id)}
+        onOpenDetails={() => router.push(`/candidates/${cv.id}`)}
         onPreview={() => openPreview(cv.id, 'cv', d.name, cv)}
         onDelete={() => handleDeleteCV(cv.id)}
+        onSaveNote={(text) => handleCardSaveNote(cv.id, text)}
+        onDeleteNote={() => handleCardDeleteNote(cv.id, noteMeta?.author)}
       />
     );
   };
 
   const renderCandidatesBody = () => {
+    if (advancedSearching) {
+      return (
+        <div className="space-y-3" aria-busy="true" aria-live="polite">
+          <div className="overflow-hidden rounded-2xl border border-surface-border bg-white shadow-card">
+            <div className="px-5 pb-3 pt-4">
+              <p className="text-[15px] font-semibold tracking-[-0.01em] text-slate-900">
+                Searching {cvCount > 0 ? `${cvCount.toLocaleString()} CVs` : 'your CVs'}
+              </p>
+              <p className="mt-0.5 text-[12.5px] text-slate-500">Checking every CV against your search. Matches appear here as soon as they are found.</p>
+            </div>
+            <div className="search-track"><div className="search-bar" /></div>
+          </div>
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="search-sheen relative flex gap-3.5 overflow-hidden rounded-2xl border border-surface-border bg-white p-5" style={{ animationDelay: `${i * 140}ms` }}>
+              <div className="h-12 w-12 shrink-0 rounded-full bg-slate-100" />
+              <div className="min-w-0 flex-1 space-y-2.5">
+                <div className="h-3.5 w-1/3 rounded bg-slate-100" />
+                <div className="h-3 w-1/2 rounded bg-slate-100" />
+                <div className="flex gap-2 pt-1">
+                  <div className="h-5 w-16 rounded-full bg-slate-100" />
+                  <div className="h-5 w-20 rounded-full bg-slate-100" />
+                  <div className="h-5 w-14 rounded-full bg-slate-100" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
     if (cvLoading) {
       return <CandidatesListSkeleton />;
     }
@@ -732,15 +898,17 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         <EmptyState
           icon={Users}
           title={
-            search
+            advancedResults
+              ? 'No candidates match this search'
+              : search
               ? 'No candidates match your search'
-              : (sidebarFilters.category?.length || sidebarFilters.location?.length || sidebarFilters.nationality?.length)
+              : (sidebarFilters.category?.length || sidebarFilters.location?.length || sidebarFilters.nationality?.length || sidebarFilters.language?.length)
                 ? 'No candidates match these filters'
                 : 'No CVs yet'
           }
           hint={
             !search &&
-            !(sidebarFilters.category?.length || sidebarFilters.location?.length || sidebarFilters.nationality?.length)
+            !(sidebarFilters.category?.length || sidebarFilters.location?.length || sidebarFilters.nationality?.length || sidebarFilters.language?.length)
               ? 'Upload CVs from the Upload tab to build your database.'
               : undefined
           }
@@ -764,7 +932,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
           <div className="flex items-center gap-3 text-xs text-slate-500">
             {pagingStart > 0 && (
               <span className="tabular-nums">
-                {pagingStart}–{pagingEnd} of {(geoFilterCVs ? filteredCVs.length : totalItemsForPaging).toLocaleString()}
+                {pagingStart}–{pagingEnd} of {((advancedResults || geoFilterCVs) ? filteredCVs.length : totalItemsForPaging).toLocaleString()}
               </span>
             )}
             {selectedCVs.length > 0 && (
@@ -783,7 +951,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
           <div className="mt-3 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
             <div className="flex items-center gap-3">
               <p className="text-[13px] text-slate-500 tabular-nums">
-                Showing {pagingStart}–{pagingEnd} of {(geoFilterCVs ? filteredCVs.length : totalItemsForPaging).toLocaleString()}
+                Showing {pagingStart}–{pagingEnd} of {((advancedResults || geoFilterCVs) ? filteredCVs.length : totalItemsForPaging).toLocaleString()}
               </p>
               <Button variant="secondary" size="sm" onClick={selectAllInFolder}>
                 {allOnPageSelected ? 'Deselect page' : 'Select page'}
@@ -938,7 +1106,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       {view === 'candidates' && (
         <div className="mb-4 flex flex-wrap items-center gap-2 px-1">
           <span className="text-[13px] font-medium text-slate-700 tabular-nums">
-            {(geoFilterCVs ? filteredCVs.length : totalItemsForPaging).toLocaleString()} candidates
+            {((advancedResults || geoFilterCVs) ? filteredCVs.length : totalItemsForPaging).toLocaleString()} candidates
           </span>
           {Object.entries(sidebarFilters).flatMap(([group, vals]) =>
             (vals || []).map((v) => (
@@ -960,11 +1128,69 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         <AdvancedSearchModal
           initialMode={searchModalMode}
           onClose={() => setShowAdvancedSearch(false)}
-          onViewDetails={(cvId) => {
-            setShowAdvancedSearch(false);
-            setDetailCVId(cvId);
+          onSubmit={(query) => {
+            void runAdvancedSearch(query);
           }}
         />
+      )}
+
+      {view === 'candidates' && (advancedResults || advancedError) && !advancedSearching && (
+        <div className="mb-4 space-y-3 rounded-xl border border-navy-100 bg-navy-50/70 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold text-navy-900">
+                {advancedError
+                  ? 'Search failed'
+                  : `Showing ${filteredCVs.length.toLocaleString()} match${filteredCVs.length === 1 ? '' : 'es'}${
+                      advancedTotal
+                        ? ` · ${advancedTotal.estimate ? 'up to ' : ''}${advancedTotal.count.toLocaleString()} in database`
+                        : ''
+                    }`}
+              </p>
+              <p className="mt-0.5 text-[12px] text-navy-700/80">
+                {advancedError || 'Edit the boolean string below and search again, or clear to return to all candidates.'}
+              </p>
+            </div>
+            <Button type="button" variant="secondary" size="sm" onClick={clearAdvancedSearch}>
+              Clear search
+            </Button>
+          </div>
+
+          {(Boolean(advancedQuery?.boolean_query) || booleanEdit.trim().length > 0) && (
+            <div>
+              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-navy-700">
+                Boolean string
+              </label>
+              <textarea
+                value={booleanEdit}
+                onChange={(e) => setBooleanEdit(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    rerunBooleanFromTop();
+                  }
+                }}
+                rows={3}
+                spellCheck={false}
+                placeholder={'("Cloud Engineer") AND ("Azure" OR "Terraform") NOT intern'}
+                className="field-input w-full resize-y bg-white font-mono text-[12px] leading-relaxed"
+              />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  icon={<Search className="h-3.5 w-3.5" />}
+                  onClick={rerunBooleanFromTop}
+                  disabled={!booleanEdit.trim()}
+                >
+                  Search again
+                </Button>
+                <span className="text-[11px] text-navy-600/70">Ctrl+Enter to search</span>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* JD sidebar selector hint + content */}
@@ -985,7 +1211,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                   <TH className="w-14">S.No</TH>
                   <TH>Job title</TH>
                   <TH className="w-28">Uploaded</TH>
-                  <TH className="w-[280px] text-right">Actions</TH>
+                  <TH className="w-[400px] text-right">Actions</TH>
                 </TR>
               </THead>
               <TBody>
@@ -1028,7 +1254,17 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                           >
                             {isSelected ? <><Check className="h-3.5 w-3.5" /> Selected</> : <><Target className="h-3.5 w-3.5" /> Use for match</>}
                           </button>
-                          <button onClick={() => openPreview(jd.id, 'jd', d.title, jd)} title="View raw document" className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900">
+                          {canUseAgents(user?.role) && (
+                            <button
+                              type="button"
+                              onClick={() => router.push(linkedinHref({ jdId: jd.id, jdTitle: d.title }))}
+                              className="mr-1 inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-surface-strong bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:border-navy-300 hover:bg-navy-50 hover:text-navy-700"
+                              title="Open the LinkedIn post agent with this job description"
+                            >
+                              <Megaphone className="h-3.5 w-3.5" /> LinkedIn post
+                            </button>
+                          )}
+                          <button onClick={() => openPreview(jd.id, 'jd', d.title, jd)} title="View raw document"className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900">
                             <FileTextIcon className="h-4 w-4 text-indigo-600" />
                           </button>
                           <button onClick={() => setDetailJDId(jd.id)} title="View details & analysis" className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900">
@@ -1071,11 +1307,11 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         <>
           <div
             className="fixed inset-0 z-[998] bg-slate-900/40"
-            onClick={() => { setDetailCVId(null); setEditingNoteIndex(null); setNewNoteText(''); setEditNoteText(''); }}
+            onClick={() => setDetailCVId(null)}
             aria-hidden
           />
           <div
-            className="fixed inset-y-0 right-0 z-[999] flex w-full flex-col border-l border-slate-200 bg-white shadow-xl sm:w-[var(--detail-w)]"
+            className="fixed inset-y-0 right-0 z-[999] flex w-full flex-col border-l border-surface-border bg-white shadow-xl sm:w-[var(--detail-w)]"
             style={{ ['--detail-w' as string]: `${detailWidth}px` }}
           >
             <button
@@ -1083,15 +1319,15 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
               aria-label="Drag to widen details"
               title="Drag to see more"
               onPointerDown={onDetailDragStart}
-              className="absolute -left-3 top-1/2 z-10 hidden h-11 w-6 -translate-y-1/2 cursor-col-resize items-center justify-center rounded-md border border-slate-200 bg-white shadow-sm hover:border-navy-400 sm:flex"
+              className="absolute -left-3 top-1/2 z-10 hidden h-11 w-6 -translate-y-1/2 cursor-col-resize items-center justify-center rounded-md border border-surface-border bg-white shadow-sm hover:border-navy-400 sm:flex"
             >
               <GripVertical className="h-4 w-4 text-slate-400" />
             </button>
             <div className="flex items-center justify-between border-b border-surface-border px-5 py-4">
-              <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-slate-900">Candidate details &amp; notes</h2>
+              <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-slate-900">Candidate details</h2>
               <button
                 type="button"
-                onClick={() => { setDetailCVId(null); setEditingNoteIndex(null); setNewNoteText(''); setEditNoteText(''); }}
+                onClick={() => setDetailCVId(null)}
                 className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
                 aria-label="Close"
                 title="Close"
@@ -1132,11 +1368,15 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                         detailCV.structured_info?.phone ||
                         detailCV.candidate?.contact_info?.phone ||
                         null;
-                      if (!email && !phone) return null;
+                      const linkedin = detailCV.candidate?.linkedin_url || detailCV.structured_info?.linkedin_url || detailCV.structured_info?.contact_info?.linkedin || null;
+                      const github = detailCV.candidate?.github_url || detailCV.structured_info?.github_url || detailCV.structured_info?.contact_info?.github || null;
+                      if (!email && !phone && !linkedin && !github) return null;
                       return (
                         <ContactActions
                           email={email}
                           phone={phone}
+                          linkedin={linkedin}
+                          github={github}
                           privacy
                           className="mt-2"
                         />
@@ -1178,6 +1418,20 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                         );
                       })()}
                       {(() => {
+                        const certs = detailCV.candidate?.certifications || detailCV.structured_info?.certifications || [];
+                        if (!Array.isArray(certs) || certs.length === 0) return null;
+                        return (
+                          <div className="col-span-full">
+                            <dt className="section-label">Certifications</dt>
+                            <dd className="mt-1 flex flex-wrap gap-1.5">
+                              {certs.map((c: string) => (
+                                <span key={c} className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[12px] font-medium text-amber-900">{c}</span>
+                              ))}
+                            </dd>
+                          </div>
+                        );
+                      })()}
+                      {(() => {
                         const es = detailCV.job_application?.expected_salary ||
                                    detailCV.candidate?.expected_salary ||
                                    detailCV.structured_info?.expected_salary;
@@ -1193,109 +1447,46 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
 
                   <div className="rounded-xl border border-surface-border bg-white p-4 shadow-card">
                     <h4 className="mb-3 text-[13px] font-semibold text-slate-900">Skills</h4>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(() => {
-                        const skills = detailCV.candidate?.skills || detailCV.structured_info?.skills_sentences || [];
-                        return (
-                          <>
-                            {skills.slice(0, 30).map((s: string, i: number) => (
-                              <span key={i} className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                                {s}
-                              </span>
-                            ))}
-                            {skills.length > 30 && <span className="text-xs text-slate-500">+{skills.length - 30} more</span>}
-                          </>
-                        );
-                      })()}
-                    </div>
+                    {(() => {
+                      const skills = (detailCV.candidate?.skills || detailCV.structured_info?.skills_sentences || [])
+                        .filter(Boolean)
+                        .slice(0, 20);
+                      if (!skills.length) {
+                        return <p className="text-[13px] text-slate-400">No skills extracted.</p>;
+                      }
+                      return (
+                        <ol className="space-y-2">
+                          {skills.map((s: string, i: number) => (
+                            <li key={i} className="flex gap-2.5 text-[13px] text-slate-700">
+                              <span className="w-6 shrink-0 tabular-nums text-[12px] font-semibold text-navy-600">{i + 1}.</span>
+                              <span className="min-w-0 whitespace-pre-wrap break-words leading-relaxed">{s}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      );
+                    })()}
                   </div>
 
                   <div className="rounded-xl border border-surface-border bg-white p-4 shadow-card">
                     <h4 className="mb-3 text-[13px] font-semibold text-slate-900">Responsibilities</h4>
-                    <ul className="space-y-1.5">
-                      {(detailCV.candidate?.responsibilities || detailCV.structured_info?.responsibility_sentences || []).slice(0, 15).map((r: string, i: number) => (
-                        <li key={i} className="flex gap-2 text-[13px] text-slate-700">
-                          <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-navy-300" />
-                          <span className="line-clamp-2">{r}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div className="rounded-xl border border-surface-border bg-white p-4 shadow-card">
-                    <h4 className="mb-3 flex items-center gap-2 text-[13px] font-semibold text-slate-900">
-                      <MessageSquare className="h-4 w-4" /> Notes ({detailNotes.length})
-                    </h4>
-                    <div className="max-h-48 space-y-2 overflow-y-auto">
-                      {detailNotes.length === 0 ? (
-                        <p className="text-[13px] text-slate-500">No notes yet. Add one below.</p>
-                      ) : (
-                        detailNotes.map((note: any, i: number) => (
-                          <div key={i} className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                            {editingNoteIndex === i ? (
-                              <div className="space-y-2">
-                                <textarea
-                                  value={editNoteText}
-                                  onChange={(e) => setEditNoteText(e.target.value)}
-                                  className="w-full resize-none rounded-md border border-slate-300 p-2 text-[13px] focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-                                  rows={2}
-                                />
-                                <div className="flex gap-2">
-                                  <Button size="sm" onClick={handleSaveEditNote} loading={savingNote} icon={<Save />}>
-                                    Save
-                                  </Button>
-                                  <Button size="sm" variant="secondary" onClick={() => { setEditingNoteIndex(null); setEditNoteText(''); }}>Cancel</Button>
-                                </div>
-                              </div>
-                            ) : (
-                              <>
-                                <p className="text-[13px] text-slate-800">{note.note}</p>
-                                <div className="mt-2 flex items-center justify-between">
-                                  <span className="text-xs text-slate-500">{note.hr_user} • {note.updated_at ? new Date(note.updated_at).toLocaleDateString() : ''}</span>
-                                  {note.hr_user === user?.username && (
-                                    <div className="flex gap-2">
-                                      <button
-                                        type="button"
-                                        className="text-xs text-brand-600 hover:underline"
-                                        onClick={() => { setEditingNoteIndex(i); setEditNoteText(note.note || ''); }}
-                                      >
-                                        Edit
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="text-xs text-red-600 hover:underline"
-                                        onClick={() => handleDeleteNote(note.hr_user)}
-                                      >
-                                        Delete
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    <div className="mt-3 border-t border-slate-200 pt-3">
-                      <textarea
-                        value={newNoteText}
-                        onChange={(e) => setNewNoteText(e.target.value)}
-                        placeholder="Add a note..."
-                        className="w-full resize-none rounded-md border border-slate-300 p-2 text-[13px] focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-                        rows={2}
-                      />
-                      <Button
-                        size="sm"
-                        className="mt-2"
-                        onClick={handleAddNote}
-                        loading={savingNote}
-                        disabled={savingNote || !newNoteText.trim()}
-                        icon={<MessageSquare />}
-                      >
-                        Add note
-                      </Button>
-                    </div>
+                    {(() => {
+                      const resps = (detailCV.candidate?.responsibilities || detailCV.structured_info?.responsibility_sentences || [])
+                        .filter(Boolean)
+                        .slice(0, 20);
+                      if (!resps.length) {
+                        return <p className="text-[13px] text-slate-400">No responsibilities extracted.</p>;
+                      }
+                      return (
+                        <ol className="space-y-2">
+                          {resps.map((r: string, i: number) => (
+                            <li key={i} className="flex gap-2.5 text-[13px] text-slate-700">
+                              <span className="w-6 shrink-0 tabular-nums text-[12px] font-semibold text-navy-600">{i + 1}.</span>
+                              <span className="min-w-0 whitespace-pre-wrap break-words leading-relaxed">{r}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      );
+                    })()}
                   </div>
                 </>
               ) : (
@@ -1315,7 +1506,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
             aria-hidden
           />
           <div
-            className="fixed inset-y-0 right-0 z-[999] flex w-full flex-col border-l border-slate-200 bg-white shadow-xl sm:w-[var(--detail-w)]"
+            className="fixed inset-y-0 right-0 z-[999] flex w-full flex-col border-l border-surface-border bg-white shadow-xl sm:w-[var(--detail-w)]"
             style={{ ['--detail-w' as string]: `${detailWidth}px` }}
           >
             <button
@@ -1323,7 +1514,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
               aria-label="Drag to widen details"
               title="Drag to see more"
               onPointerDown={onDetailDragStart}
-              className="absolute -left-3 top-1/2 z-10 hidden h-11 w-6 -translate-y-1/2 cursor-col-resize items-center justify-center rounded-md border border-slate-200 bg-white shadow-sm hover:border-navy-400 sm:flex"
+              className="absolute -left-3 top-1/2 z-10 hidden h-11 w-6 -translate-y-1/2 cursor-col-resize items-center justify-center rounded-md border border-surface-border bg-white shadow-sm hover:border-navy-400 sm:flex"
             >
               <GripVertical className="h-4 w-4 text-slate-400" />
             </button>
@@ -1356,23 +1547,34 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                     </p>
                   </div>
 
-                  {/* Skills, clean keyword chips (e.g. AWS, Python), not the raw
-                      skill sentences used internally for embedding/matching. */}
                   <div className="rounded-xl border border-surface-border bg-white p-4 shadow-card">
                     <h4 className="mb-3 flex items-center gap-2 text-[13px] font-semibold text-slate-900">
                       <Code className="h-4 w-4 text-slate-400" /> Skills
                     </h4>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(detailJD.job_requirements?.skill_keywords || []).length > 0 ? (
-                        detailJD.job_requirements.skill_keywords.map((s: string, i: number) => (
-                          <span key={i} className="rounded-md bg-navy-50 px-2 py-0.5 text-xs font-semibold text-navy-700">
-                            {s}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-[13px] text-slate-400">No skills extracted for this JD.</span>
-                      )}
-                    </div>
+                    {(() => {
+                      const skills = (
+                        detailJD.job_requirements?.skills ||
+                        detailJD.structured_info?.skills_sentences ||
+                        detailJD.structured_info?.skills ||
+                        detailJD.job_requirements?.skill_keywords ||
+                        []
+                      )
+                        .filter(Boolean)
+                        .slice(0, 20);
+                      if (!skills.length) {
+                        return <p className="text-[13px] text-slate-400">No skills extracted for this JD.</p>;
+                      }
+                      return (
+                        <ol className="space-y-2">
+                          {skills.map((s: string, i: number) => (
+                            <li key={i} className="flex gap-2.5 text-[13px] text-slate-700">
+                              <span className="w-6 shrink-0 tabular-nums text-[12px] font-semibold text-navy-600">{i + 1}.</span>
+                              <span className="min-w-0 whitespace-pre-wrap break-words leading-relaxed">{s}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      );
+                    })()}
                   </div>
 
                   {/* Naukri Gulf boolean search string, copy straight into a job-portal search box. */}
@@ -1390,7 +1592,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                             setBooleanCopied(true);
                             setTimeout(() => setBooleanCopied(false), 2000);
                           }}
-                          className="flex shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600 transition-colors hover:border-brand-300 hover:text-brand-600"
+                          className="flex shrink-0 items-center gap-1.5 rounded-md border border-surface-border bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600 transition-colors hover:border-brand-300 hover:text-brand-600"
                         >
                           {booleanCopied ? (
                             <>
@@ -1406,21 +1608,36 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                       <p className="mb-1 text-[11px] text-slate-400">
                         Paste into Naukri Gulf (or any job portal) candidate search.
                       </p>
-                      <pre className="whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 p-2.5 font-mono text-[11.5px] leading-relaxed text-slate-700">
+                      <pre className="whitespace-pre-wrap break-words rounded-md border border-surface-border bg-slate-50 p-2.5 font-mono text-[11.5px] leading-relaxed text-slate-700">
                         {detailJD.job_requirements?.boolean_search_string || detailJD.boolean_search_string}
                       </pre>
                     </div>
                   )}
                   <div className="rounded-xl border border-surface-border bg-white p-4 shadow-card">
                     <h4 className="mb-3 text-[13px] font-semibold text-slate-900">Responsibilities</h4>
-                    <ul className="space-y-1.5">
-                      {(detailJD.job_requirements?.responsibilities || detailJD.structured_info?.responsibilities || []).slice(0, 15).map((r: string, i: number) => (
-                        <li key={i} className="flex gap-2 text-[13px] text-slate-700">
-                          <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-navy-300" />
-                          <span className="line-clamp-2">{r}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    {(() => {
+                      const resps = (
+                        detailJD.job_requirements?.responsibilities ||
+                        detailJD.structured_info?.responsibility_sentences ||
+                        detailJD.structured_info?.responsibilities ||
+                        []
+                      )
+                        .filter(Boolean)
+                        .slice(0, 20);
+                      if (!resps.length) {
+                        return <p className="text-[13px] text-slate-400">No responsibilities extracted.</p>;
+                      }
+                      return (
+                        <ol className="space-y-2">
+                          {resps.map((r: string, i: number) => (
+                            <li key={i} className="flex gap-2.5 text-[13px] text-slate-700">
+                              <span className="w-6 shrink-0 tabular-nums text-[12px] font-semibold text-navy-600">{i + 1}.</span>
+                              <span className="min-w-0 whitespace-pre-wrap break-words leading-relaxed">{r}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      );
+                    })()}
                   </div>
                 </>
               ) : (

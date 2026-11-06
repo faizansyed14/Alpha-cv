@@ -16,9 +16,9 @@ export const api = {
   getCVUploadProgress: (cvId: string) => apiClient.getCVUploadProgress(cvId),
   listCVs: (params?: { limit?: number; offset?: number; category?: string; q?: string }) =>
     RequestRetryHandler.withRetry(() => apiClient.listCVs(params)),
-  listCVIds: (params?: { limit?: number; category?: string }) =>
+  listCVIds: (params?: { limit?: number; category?: string; categories?: string[] }) =>
     RequestRetryHandler.withRetry(() => apiClient.listCVIds(params)),
-  getCVSearchFacet: (field: 'location' | 'nationality' | 'notice_period') =>
+  getCVSearchFacet: (field: 'location' | 'nationality' | 'notice_period' | 'languages') =>
     RequestRetryHandler.withRetry(() => apiClient.getCVSearchFacet(field)),
   searchCVsAdvanced: (params: CVAdvancedSearchParams) => RequestRetryHandler.withRetry(() => apiClient.searchCVsAdvanced(params)),
   // Login notice popup
@@ -74,16 +74,34 @@ export const api = {
   getUsersPresence: (token: string) => RequestRetryHandler.withRetry(() => apiClient.getUsersPresence(token)),
 
   // Careers API
-  createJobPosting: (file: File) => RequestRetryHandler.withRetry(() => apiClient.createJobPosting(file)),
   createJobPostingWithFormData: (file: File | null, formData: any) =>
     RequestRetryHandler.withRetry(() => apiClient.createJobPostingWithFormData(file, formData)),
-  createManualJobPosting: (formData: any) =>
-    RequestRetryHandler.withRetry(() => apiClient.createManualJobPosting(formData)),
   listJobPostingsPaged: (params?: { includeInactive?: boolean; limit?: number; offset?: number }) =>
     RequestRetryHandler.withRetry(() => apiClient.listJobPostingsPaged(params)),
   getPublicJob: (token: string) => RequestRetryHandler.withRetry(() => apiClient.getPublicJob(token)),
   getRecentJobPostings: (limit: number = 10) => RequestRetryHandler.withRetry(() => apiClient.getRecentJobPostings(limit)),
   searchLocations: (query: string) => RequestRetryHandler.withRetry(() => apiClient.searchLocations(query)),
+  autofillFromCV: (token: string, cvFile: File) => apiClient.autofillFromCV(token, cvFile),
+  requestAgentReset: (reason: string) => apiClient.requestAgentReset(reason),
+  getAgentResetRequests: () => RequestRetryHandler.withRetry(() => apiClient.getAgentResetRequests()),
+  answerAgentResetRequest: (id: string, decision: 'approve' | 'reject') => apiClient.answerAgentResetRequest(id, decision),
+  getAgenticCapabilities: () => RequestRetryHandler.withRetry(() => apiClient.getAgenticCapabilities()),
+  listAgenticConversations: () => RequestRetryHandler.withRetry(() => apiClient.listAgenticConversations()),
+  getAgenticConversation: (id: string) => RequestRetryHandler.withRetry(() => apiClient.getAgenticConversation(id)),
+  agenticUpload: (file: File) => apiClient.agenticUpload(file),
+  agenticChat: (body: { message: string; conversation_id?: string | null; attachment_ref?: string | null; selection?: Record<string, any> | null }) => apiClient.agenticChat(body),   // no automatic retry
+  agenticMore: (body: { tool: string; args: Record<string, any>; offset: number; cursor: string | null }) => apiClient.agenticMore(body),
+  agenticMatchStatus: (jobId: string) => apiClient.agenticMatchStatus(jobId),
+  hideAgenticConversation: (id: string) => apiClient.hideAgenticConversation(id),
+  getAgentUsage: () => RequestRetryHandler.withRetry(() => apiClient.getAgentUsage()),
+  getAgentUsageAdmin: () => RequestRetryHandler.withRetry(() => apiClient.getAgentUsageAdmin()),
+  resetAgentUsage: (username: string) => apiClient.resetAgentUsage(username),
+  getAgentInfo: (agent: string) => RequestRetryHandler.withRetry(() => apiClient.getAgentInfo(agent)),
+  listAgentConversations: (agent: string) => RequestRetryHandler.withRetry(() => apiClient.listAgentConversations(agent)),
+  getAgentConversation: (agent: string, id: string) => RequestRetryHandler.withRetry(() => apiClient.getAgentConversation(agent, id)),
+  agentChat: (agent: string, body: import('@/lib/types').AgentChatRequest) => apiClient.agentChat(agent, body),   // no automatic retry
+  agentExtractText: (file: File, kind: 'jd' | 'cv' = 'jd') => apiClient.agentExtractText(file, kind),
+  hideAgentConversation: (agent: string, id: string) => apiClient.hideAgentConversation(agent, id),
   submitJobApplication: (token: string, name: string, email: string, phone: string | undefined, expectedSalary: number, yearsOfExperience: number, cvFile: File, location?: string, noticePeriod?: string, nationality?: string) =>
     RequestRetryHandler.withRetry(() => apiClient.submitJobApplication(token, name, email, phone, expectedSalary, yearsOfExperience, cvFile, location, noticePeriod, nationality)),
   getJobApplications: (jobId: string) => RequestRetryHandler.withRetry(() => apiClient.getJobApplications(jobId)),

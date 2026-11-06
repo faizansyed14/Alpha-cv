@@ -1,5 +1,5 @@
 """
-Tests for database operations (app/db/auth_db.py)
+Tests for database operations (app/db/database.py)
 
 Tests cover:
 - Database initialization

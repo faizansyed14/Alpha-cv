@@ -1,6 +1,6 @@
 """The one way a CV enters the system, whichever door it came through.
 
-Uploads, Naukri / email applications and job-page applications all call :func:`ingest_cv`, so a CV is read, standardised,
+Uploads and job-page applications both call :func:`ingest_cv`, so a CV is read, standardised,
 embedded, stored and (when it belongs to a job) linked by exactly the same code, and is matched afterwards by the same
 queue. A submission differs only in *where it came from* (``source``) and in the extra facts that door knows about the
 candidate (``candidate``: nationality, current location, notice period, expected salary ...) and the job (``job``).
@@ -30,6 +30,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, Optional
 
 from app.config.settings import settings
+from app.ingestion.autofill import cached_standardized
 from app.ingestion.contact import resolve_name
 from app.ingestion.cv_parser import get_parsing_service
 from app.ingestion.search_index import index_cv
@@ -43,11 +44,10 @@ from app.providers.vectorstore.qdrant import get_qdrant_utils
 logger = logging.getLogger(__name__)
 
 SOURCE_UPLOAD = "upload"
-SOURCE_EMAIL = "email_application"   # Naukri / email intake (value the Applications page already filters on)
 SOURCE_JOB_PAGE = "website"          # the public job-page apply form
 
 # Facts a door can supply about the candidate. They are joined into the record; empty values never overwrite.
-CANDIDATE_FIELDS = ("name", "email", "phone", "nationality", "location", "notice_period", "expected_salary",
+CANDIDATE_FIELDS = ("name", "email", "phone", "linkedin_url", "github_url", "nationality", "location", "notice_period", "expected_salary",
                     "years_of_experience", "cover_letter", "experience_warning")
 
 MIN_TEXT_CHARS = 50
@@ -90,16 +90,15 @@ class CVSubmission:
     #: result of ``process_document`` when the caller already parsed (keeps the upload route's fast validation)
     parsed: Optional[Dict[str, Any]] = None
     cv_id: Optional[str] = None
-    #: the original is already in storage (job page / email save it before queueing)
+    #: the original is already in storage (the job page saves it before queueing)
     persisted_path: Optional[str] = None
     content_sha256: Optional[str] = None
     mime_type: Optional[str] = None
     #: facts about the candidate from this door, keys from CANDIDATE_FIELDS
     candidate: Dict[str, Any] = field(default_factory=dict)
-    #: weaker facts, used only when the CV itself gives none (e.g. the e-mail sender, which for a job-board relay such as
-    #: Naukri is not the candidate's own address)
+    #: weaker facts, used only when the CV itself gives none
     hints: Dict[str, Any] = field(default_factory=dict)
-    #: the job this CV applies to: {"job_id": ..., plus anything the door knows: job_title, email_id, ...}
+    #: the job this CV applies to: {"job_id": ..., plus anything the door knows: job_title, subject_id, ...}
     job: Optional[Dict[str, Any]] = None
     progress: Optional[Progress] = None
 
@@ -225,6 +224,8 @@ def _candidate_facts(sub: CVSubmission, standardized: Dict[str, Any], pii: Dict[
         "name": standardized.get("name"),
         "email": (pii.get("email") or [None])[0] or contact.get("email"),
         "phone": (pii.get("phone") or [None])[0] or contact.get("phone"),
+        "linkedin_url": (pii.get("linkedin") or [None])[0],
+        "github_url": (pii.get("github") or [None])[0],
         "nationality": standardized.get("nationality"),
         "location": standardized.get("location") or standardized.get("current_location"),
         "notice_period": standardized.get("notice_period"),
@@ -251,7 +252,7 @@ def _build_record(sub: CVSubmission, standardized: Dict[str, Any], pii: Dict[str
         record["content_sha256"] = sha
     if sub.job:
         record.update({"is_job_application": True, "job_posting_id": sub.job.get("job_id"),
-                       **_clean({k: v for k, v in sub.job.items() if k in ("email_id", "subject_id")})})
+                       **_clean({k: v for k, v in sub.job.items() if k in ("subject_id",)})})
     return record
 
 
@@ -359,8 +360,11 @@ def _ingest(sub: CVSubmission, step: Progress) -> IngestResult:
         return _merge_into(qdrant, existing, sub)
 
     step(25, "Standardising with AI")
-    with _llm_slots:
-        standardized = get_llm_service().standardize_cv(text, sub.filename)
+    # The public form's autofill may already have read this very CV a moment ago; reuse that answer, same prompt.
+    standardized = cached_standardized(text)
+    if standardized is None:
+        with _llm_slots:
+            standardized = get_llm_service().standardize_cv(text, sub.filename)
     contact = standardized.setdefault("contact_info", {})
     # The LLM saw [EMAIL] / [PHONE] in place of the contact details, so its name can come back empty, "Unknown" or a
     # heading; fall back to the document's header, then the e-mail address.
@@ -372,6 +376,10 @@ def _ingest(sub: CVSubmission, step: Progress) -> IngestResult:
         contact["email"] = standardized["email"] = pii["email"][0]
     if pii.get("phone"):
         contact["phone"] = standardized["phone"] = pii["phone"][0]
+    if pii.get("linkedin"):
+        contact["linkedin"] = standardized["linkedin_url"] = pii["linkedin"][0]
+    if pii.get("github"):
+        contact["github"] = standardized["github_url"] = pii["github"][0]
 
     step(50, "Generating embeddings")
     with _embed_slots:
@@ -409,7 +417,8 @@ def _ingest(sub: CVSubmission, step: Progress) -> IngestResult:
             "responsibilities_count": len(standardized.get("responsibility_sentences",
                                                            standardized.get("responsibilities", []))),
             "embeddings_generated": 32,
-            "pii_extracted": {"emails": len(pii.get("email", [])), "phones": len(pii.get("phone", []))},
+            "pii_extracted": {"emails": len(pii.get("email", [])), "phones": len(pii.get("phone", [])),
+                              "linkedin": len(pii.get("linkedin", [])), "github": len(pii.get("github", []))},
         })
 
 

@@ -6,36 +6,38 @@ const {
 /**
  * Design tokens.
  *
- * One royal-blue ramp (`navy`, aliased as `brand` and Tailwind's `blue`) for actions, selection and focus; slate
- * neutrals for everything else; white surfaces on a cool off-white canvas. Type is Plus Jakarta Sans.
+ * Deep navy from the dashboard hero (`#16204B`) for actions, selection and focus.
+ * White / near-white surfaces everywhere else. Soft tints stay cool and quiet — no bright electric blue.
+ * `brand` and Tailwind `blue` alias navy so existing classes pick this up.
  */
 const navy = {
-  50: "#EFF4FF",
-  100: "#DCE7FE",
-  200: "#C0D4FD",
-  300: "#94B5FB",
-  400: "#628FF7",
-  500: "#3D6DF2",
-  600: "#2654E3",
-  700: "#1E42C4",
-  800: "#1E389E",
-  900: "#1E337D",
+  50: "#F5F7FB",
+  100: "#E8ECF5",
+  200: "#CDD4E6",
+  300: "#A4B0CC",
+  400: "#7384AE",
+  500: "#4A5D8F",
+  600: "#2A3F72",
+  700: "#1E3260",
+  800: "#182853",
+  900: "#16204B",
+  /** Dashboard hero — keep in sync with primary actions */
   950: "#16204B",
-  DEFAULT: "#2654E3",
+  DEFAULT: "#16204B",
 };
 
 const azure = {
-  50: "#eef2fb",
-  100: "#dce5f6",
-  200: "#b9c9ec",
-  300: "#8ea6dc",
-  400: "#5f80c9",
-  500: "#2b4f9e",
-  600: "#243f7e",
-  700: "#1d3366",
-  800: "#172850",
-  900: "#101b38",
-  DEFAULT: "#2b4f9e",
+  50: "#F5F7FB",
+  100: "#E8ECF5",
+  200: "#CDD4E6",
+  300: "#A4B0CC",
+  400: "#7384AE",
+  500: "#4A5D8F",
+  600: "#2A3F72",
+  700: "#1E3260",
+  800: "#182853",
+  900: "#16204B",
+  DEFAULT: "#16204B",
 };
 
 const neutral = {
@@ -79,13 +81,14 @@ const config: Config = {
         success: { DEFAULT: "#1f7a4d", 50: "#f0faf4", 100: "#dcf3e6", 600: "#1f7a4d", 700: "#17613c" },
         warning: { DEFAULT: "#96640f", 50: "#fdf7ea", 100: "#faecc8", 500: "#b07818", 600: "#96640f", 700: "#7a500b" },
         danger: { DEFAULT: "#c0392b", 50: "#fdf2f1", 100: "#fadedb", 600: "#c0392b", 700: "#9d2d21" },
-        info: { DEFAULT: navy[600], 50: navy[50], 100: navy[100], 600: navy[600], 700: navy[700] },
+        info: { DEFAULT: navy[800], 50: navy[50], 100: navy[100], 600: navy[700], 700: navy[800] },
         surface: {
           DEFAULT: "#FFFFFF",
-          muted: "#F7F9FC",
-          card: "#F7F9FC",
-          border: "#E6EAF2",
-          strong: "#D3DAE6",
+          muted: "#FAFBFD",
+          card: "#FFFFFF",
+          /** Thin soft-navy card outline (lighter than hero fill) */
+          border: "#C5CEE0",
+          strong: "#9AA8C4",
         },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

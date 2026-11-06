@@ -23,7 +23,10 @@ import {
 import { useAppStore } from '@/stores/appStore';
 import { useRouter } from 'next/navigation';
 import { workspacePath } from '@/lib/navigation';
+import { canUseAgents, interviewHref } from '@/lib/agentLinks';
 import MatchingFullPageAnimation from '@/components/results/MatchingFullPageAnimation';
+import { MATCH_MAX_CVS } from '@/lib/matchRun';
+import { MultiSelect } from '@/components/ui/multi-select';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { motion } from 'framer-motion';
 import { rise } from '@/lib/motion';
@@ -283,13 +286,12 @@ export default function MatchingPage() {
   const [isExporting, setIsExporting] = useState(false);
 
   // --- Match launcher (JD + category + count) -------------------------------
-  const MATCH_COUNT_OPTIONS: { value: number | 'all'; label: string }[] = [
-    ...[50, 100, 150, 200, 250, 300, 500, 1000, 2500, 5000].map((n) => ({ value: n, label: n.toLocaleString() })),
-    { value: 'all', label: 'All CVs' },
-  ];
+  const MATCH_COUNT_OPTIONS: { value: number; label: string }[] = [50, 100, 150, 200, 250, 300, 500, 1000, 2500, 5000, MATCH_MAX_CVS].map(
+    (n) => ({ value: n, label: n.toLocaleString() }),
+  );
   const [launchJdId, setLaunchJdId] = useState<string>('');
-  const [launchCategory, setLaunchCategory] = useState<string>('all');
-  const [launchCount, setLaunchCount] = useState<number | 'all'>(50);
+  const [launchCats, setLaunchCats] = useState<string[]>([]);   // empty = every category
+  const [launchCount, setLaunchCount] = useState<number>(50);
   const [launchCategories, setLaunchCategories] = useState<Record<string, number>>({});
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
@@ -337,11 +339,10 @@ export default function MatchingPage() {
     }
     setLaunching(true);
     try {
-      const category = launchCategory === 'all' ? undefined : launchCategory;
-      const res = await api.listCVIds({ category, limit: launchCount === 'all' ? undefined : launchCount });
+      const res = await api.listCVIds({ categories: launchCats.length ? launchCats : undefined, limit: Math.min(launchCount, MATCH_MAX_CVS) });
       const ids: string[] = (res.ids || []).filter(Boolean);
       if (ids.length === 0) {
-        setLaunchError('No CVs found for the selected category.');
+        setLaunchError('No CVs found in the selected categories.');
         setLaunching(false);
         return;
       }
@@ -389,22 +390,23 @@ export default function MatchingPage() {
         </div>
 
         <div className="flex min-w-0 flex-col gap-1.5">
-          <label className="text-xs font-semibold text-slate-600">Category</label>
-          <select value={launchCategory} onChange={(e) => setLaunchCategory(e.target.value)} className="field-input">
-            <option value="all">All CVs</option>
-            {Object.entries(launchCategories)
+          <label className="text-xs font-semibold text-slate-600">Categories</label>
+          <MultiSelect
+            options={Object.entries(launchCategories)
               .sort((a, b) => b[1] - a[1])
-              .map(([cat, count]) => (
-                <option key={cat} value={cat}>{cat} ({count})</option>
-              ))}
-          </select>
+              .map(([cat, count]) => ({ value: cat, label: cat, count }))}
+            value={launchCats}
+            onChange={setLaunchCats}
+            allLabel="All categories"
+            noun="categories"
+          />
         </div>
 
         <div className="flex min-w-0 flex-col gap-1.5">
           <label className="text-xs font-semibold text-slate-600">Number of CVs</label>
           <select
             value={String(launchCount)}
-            onChange={(e) => setLaunchCount(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            onChange={(e) => setLaunchCount(Number(e.target.value))}
             className="field-input"
           >
             {MATCH_COUNT_OPTIONS.map((o) => (
@@ -419,8 +421,12 @@ export default function MatchingPage() {
       </div>
 
       <p className="mt-3 text-xs text-slate-500">
-        {launchCount === 'all' ? 'Scores every CV' : `Scores the most recent ${launchCount.toLocaleString()} CVs`}
-        {launchCategory === 'all' ? ' across all categories.' : ` in the ${launchCategory} category.`}
+        {`Scores the most recent ${launchCount.toLocaleString()} CVs (at most ${MATCH_MAX_CVS.toLocaleString()} per match)`}
+        {launchCats.length === 0
+          ? ' across all categories.'
+          : launchCats.length === 1
+            ? ` in the ${launchCats[0]} category.`
+            : ` across the ${launchCats.length} selected categories, newest first.`}
       </p>
       {launchError && <p className="mt-2 text-xs font-medium text-red-600">{launchError}</p>}
     </motion.div>
@@ -919,7 +925,7 @@ export default function MatchingPage() {
               return (
                 <div
                   key={candidate.cv_id}
-                  className={`relative overflow-hidden rounded-2xl border bg-white transition-shadow ${isOpen ? 'border-navy-200 shadow-[0_0_0_3px_rgba(38,84,227,0.08)]' : 'border-surface-border shadow-card hover:shadow-[0_4px_12px_-4px_rgba(16,24,40,0.10)]'}`}
+                  className={`relative overflow-hidden rounded-2xl border bg-white transition-shadow ${isOpen ? 'border-navy-400 shadow-[0_0_0_3px_rgba(22,32,75,0.10)]' : 'border-surface-border shadow-card hover:shadow-[0_4px_12px_-4px_rgba(16,24,40,0.10)]'}`}
                 >
                     {/* OUTER WRAPPER FIXED: now a <div> with role="button" */}
                     <div
@@ -971,11 +977,38 @@ export default function MatchingPage() {
 
                       {isOpen && (
                       <>
-                      {(candidate.cv_email || candidate.cv_phone) && (
+                      {(candidate.requirements?.length ?? 0) > 0 && (
+                        <div className="mt-3 flex flex-wrap items-center gap-1.5 pl-[84px]" onClick={(e) => e.stopPropagation()}>
+                          {candidate.requirements!.map((r: { type: string; name: string; mandatory: boolean; status: string }) => {
+                            const tone =
+                              r.status === 'met'
+                                ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                                : r.status === 'missing'
+                                  ? 'bg-red-50 text-red-700 ring-red-200'
+                                  : 'bg-slate-50 text-slate-500 ring-slate-200';
+                            const note =
+                              r.status === 'met' ? 'listed on the CV' : r.status === 'missing' ? 'not among the CV’s listed ones' : 'the CV lists none';
+                            return (
+                              <span
+                                key={`${r.type}-${r.name}`}
+                                title={`${r.mandatory ? 'Mandatory' : 'Preferred'} ${r.type}: ${note}`}
+                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${tone}`}
+                              >
+                                {r.status === 'met' ? '✓ ' : r.status === 'missing' ? '✗ ' : '? '}
+                                {r.name}
+                                {!r.mandatory && ' (preferred)'}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {(candidate.cv_email || candidate.cv_phone || candidate.cv_linkedin || candidate.cv_github) && (
                         <div className="mt-3 pl-[84px]" onClick={(e) => e.stopPropagation()}>
                           <ContactActions
                             email={candidate.cv_email}
                             phone={candidate.cv_phone}
+                            linkedin={candidate.cv_linkedin}
+                            github={candidate.cv_github}
                             privacy
                           />
                         </div>
@@ -1225,6 +1258,25 @@ export default function MatchingPage() {
                               </>
                             )}
                           </Button>
+
+                          {canUseAgents(user?.role) && matchResult?.jd_id && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(interviewHref({
+                                  jdId: matchResult.jd_id, cvId: candidate.cv_id,
+                                  jdTitle: matchResult.jd_job_title, cvTitle: displayName,
+                                }));
+                              }}
+                              title="Open the Interview questions agent with this candidate and this job"
+                              className="flex items-center gap-1"
+                            >
+                              <MessageSquare className="w-4 h-4" />
+                              <span>Interview questions</span>
+                            </Button>
+                          )}
                         </div>
                       </div>
                       </>
@@ -1341,17 +1393,6 @@ export default function MatchingPage() {
                                         <p className="text-[13px] leading-relaxed text-slate-700">{v}</p>
                                       </div>
                                     ))}
-                                  </div>
-                                )}
-
-                                {(candidate.llm_analysis.transferable_skills || []).length > 0 && (
-                                  <div className="pt-3 border-t border-slate-100">
-                                    <h5 className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">Transferable skills</h5>
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {(candidate.llm_analysis.transferable_skills as string[]).map((t, i) => (
-                                        <span key={i} className="inline-flex items-center rounded-full border border-surface-border bg-white px-2.5 py-1 text-xs font-medium text-slate-700">{t}</span>
-                                      ))}
-                                    </div>
                                   </div>
                                 )}
 

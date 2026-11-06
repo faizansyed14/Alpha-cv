@@ -13,8 +13,8 @@ collections = {
     "jd_documents": 1,       # Dummy vector for document storage  
     "cv_structured": 1,      # Dummy vector for structured data
     "jd_structured": 1,      # Dummy vector for structured data
-    "cv_embeddings": 768,    # all-mpnet-base-v2 dimension
-    "jd_embeddings": 768,    # all-mpnet-base-v2 dimension
+    "cv_embeddings": 384,    # multilingual-e5-small dimension
+    "jd_embeddings": 384,    # multilingual-e5-small dimension
 }
 
 print("Initializing Qdrant collections for development...")

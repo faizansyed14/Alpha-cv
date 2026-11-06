@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class RemoteEmbedder:
-    def __init__(self, base_url: str, *, token: str = "", dim: int = 768, request_size: int = 128,
+    def __init__(self, base_url: str, *, token: str = "", dim: int = 384, request_size: int = 128,
                  timeout_s: float = 120.0, retries: int = 3, model_name: str = "embedding-model"):
         self._dim = dim
         self._model_name = model_name

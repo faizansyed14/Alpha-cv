@@ -11,11 +11,9 @@ import time
 
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("OPENAI_API_KEY", "stub-key-for-smoke-test")
-os.environ.setdefault("AUTH_DB_URL", "sqlite:///./smoke2_auth.db")
+os.environ.setdefault("DATABASE_URL", "sqlite:///./smoke2_auth.db")
 os.environ.setdefault("ENABLE_CANDIDATE_TRACKER", "true")
-os.environ.setdefault("TRACKER_DB_URL", "sqlite:///./smoke2_tracker.db")
 os.environ.setdefault("ENABLE_APPLICATION_QUEUE", "false")  # inline/background apply path
-os.environ.setdefault("LLM_CACHE_DIR", "/tmp/llm_cache_smoke2")
 os.environ.setdefault("LOCAL_STORAGE_DIR", "/tmp/smoke2_uploads")
 os.environ.setdefault("CV_UPLOAD_DIR", "/tmp/smoke2_uploads/cv")
 os.environ.setdefault("OTP_DISABLE_EMAIL", "true")
@@ -26,8 +24,11 @@ import numpy as _np
 from qdrant_client import QdrantClient
 
 
+from app.config.settings import settings
+
+
 class _FakeSentenceTransformer:
-    DIM = 768
+    DIM = settings.EMBEDDING_DIM
 
     def _encode_one(self, text: str):
         vec = _np.zeros(self.DIM, dtype=_np.float32)
@@ -138,7 +139,7 @@ def main() -> int:
         # =====================================================================
         # CAREERS: post job -> public page -> public apply -> applications list
         # =====================================================================
-        r = client.post("/api/careers/admin/jobs/post-manual", headers=admin, data={
+        r = client.post("/api/careers/admin/jobs/post", headers=admin, data={
             "job_title": "DevOps Engineer",
             "company_name": "Alpha Data",
             "location": "Dubai",

@@ -65,7 +65,7 @@ export function EditJobOpeningDialog({
 
   return (
     <Dialog open={!!job} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg border-slate-200 bg-white text-slate-900 shadow-[var(--shadow-md)]">
+      <DialogContent className="sm:max-w-lg border-surface-border bg-white text-slate-900 shadow-[var(--shadow-md)]">
         <DialogHeader>
           <DialogTitle className="text-slate-900">Edit Requirement</DialogTitle>
           <DialogDescription>Update fields for this requirement.</DialogDescription>
@@ -142,7 +142,7 @@ export function EditJobOpeningDialog({
                 <textarea
                   value={comments}
                   onChange={(e) => setComments(e.target.value)}
-                  className="w-full min-h-[120px] resize-y text-[13px] text-slate-900 border border-slate-200 rounded-lg p-3 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+                  className="w-full min-h-[120px] resize-y text-[13px] text-slate-900 border border-surface-border rounded-lg p-3 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
                   placeholder="Comments..."
                 />
               </FieldRow>
@@ -222,7 +222,7 @@ export function EditApplicationDialog({
 
   return (
     <Dialog open={!!app} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-xl border-slate-200 bg-white text-slate-900 shadow-[var(--shadow-md)] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-xl border-surface-border bg-white text-slate-900 shadow-[var(--shadow-md)] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-slate-900">Edit Application</DialogTitle>
           <DialogDescription>Update the candidate’s tracking fields.</DialogDescription>
@@ -360,7 +360,7 @@ export function NewJobOpeningDialog({
           <Plus className="w-4 h-4 text-white" /> New Requirement
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg border-slate-200 bg-white text-slate-900 shadow-[var(--shadow-md)]">
+      <DialogContent className="sm:max-w-lg border-surface-border bg-white text-slate-900 shadow-[var(--shadow-md)]">
         <DialogHeader>
           <DialogTitle className="text-slate-900">Create Requirement</DialogTitle>
           <DialogDescription>Add a new requirement row.</DialogDescription>
@@ -523,7 +523,7 @@ export function NewCandidateDialog({
           <Plus className="w-4 h-4 text-white" /> New Candidate
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-xl border-slate-200 bg-white text-slate-900 shadow-[var(--shadow-md)] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-xl border-surface-border bg-white text-slate-900 shadow-[var(--shadow-md)] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-slate-900">Add Candidate</DialogTitle>
           <DialogDescription>Create a candidate and tracking record.</DialogDescription>
@@ -672,7 +672,7 @@ export function FollowUpDialog({
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-2xl border-slate-200 bg-white text-slate-900 shadow-[var(--shadow-md)] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl border-surface-border bg-white text-slate-900 shadow-[var(--shadow-md)] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-slate-900">{mode === 'create' ? 'Add Follow-up' : 'Edit Follow-up'}</DialogTitle>
           <DialogDescription>Manage client and recruiter follow-up records.</DialogDescription>

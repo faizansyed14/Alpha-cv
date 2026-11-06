@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
 from app.config.settings import settings
-from app.db.tracker_db import get_tracker_session
+from app.db.database import get_session as get_tracker_session
 from app.api.deps import require_roles
 from app.models.tracker.models import (
     TrackerApplication,
@@ -87,7 +87,7 @@ def _tracker_cache_bust() -> None:
 
 def tracker_session(session: Session = Depends(get_tracker_session)) -> Session:
     # IMPORTANT: this dependency runs before route handlers. Keep the feature flag and
-    # TRACKER_DB_URL checks here so disabled tracker endpoints don't crash due to missing DB.
+    # database checks here so disabled tracker endpoints don't crash due to missing DB.
     _require_tracker_enabled()
     return session
 
@@ -95,8 +95,6 @@ def tracker_session(session: Session = Depends(get_tracker_session)) -> Session:
 def _require_tracker_enabled():
     if not settings.ENABLE_CANDIDATE_TRACKER:
         raise HTTPException(status_code=404, detail="Candidate Tracker is disabled")
-    if not settings.TRACKER_DB_URL:
-        raise HTTPException(status_code=500, detail="TRACKER_DB_URL not configured")
 
 
 def _touch_updated_at(obj):
@@ -797,8 +795,6 @@ def list_candidates(
             name=r.name,
             email=r.email,
             phone=r.phone,
-            current_company=r.current_company,
-            experience_years=r.experience_years,
             created_at=r.created_at,
             updated_at=r.updated_at,
         )
@@ -819,8 +815,6 @@ def create_candidate(
         name=data.name,
         email=data.email,
         phone=data.phone,
-        current_company=data.current_company,
-        experience_years=data.experience_years,
     )
     session.add(row)
     session.commit()
@@ -831,8 +825,6 @@ def create_candidate(
         name=row.name,
         email=row.email,
         phone=row.phone,
-        current_company=row.current_company,
-        experience_years=row.experience_years,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -863,8 +855,6 @@ def update_candidate(
         name=row.name,
         email=row.email,
         phone=row.phone,
-        current_company=row.current_company,
-        experience_years=row.experience_years,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -1045,8 +1035,6 @@ def list_candidate_rows(
                     name=c.name,
                     email=c.email,
                     phone=c.phone,
-                    current_company=c.current_company,
-                    experience_years=c.experience_years,
                     created_at=c.created_at,
                     updated_at=c.updated_at,
                 ),

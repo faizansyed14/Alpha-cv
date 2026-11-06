@@ -30,15 +30,17 @@ from app.schemas.careers import (
 from app.ingestion.cv_parser import get_parsing_service
 from app.providers.llm.service import get_llm_service  
 from app.providers.embeddings.service import get_embedding_service
-from app.providers.vectorstore.qdrant import get_qdrant_utils, get_decompressed_content
+from app.providers.vectorstore.qdrant import get_qdrant_utils, get_decompressed_content, resolve_candidate_contact
 from app.providers.storage import get_storage_service
 from app.services import locations_service
 from app.api.deps import require_admin, require_core_app
 from app.models.user import User
 from app.config.settings import settings
+from app.security.uploads import PUBLIC_CV_EXTENSIONS, secure_upload
 from app.ingestion.pipeline import claim_application
 from app.services.careers_helpers import (
     generate_public_token,
+    generate_public_slug,
     validate_file_upload,
     now_iso,
     get_safe_applicant_name,
@@ -244,6 +246,57 @@ async def search_locations(q: str = "", limit: int = 10) -> JSONResponse:
     return JSONResponse({"results": results})
 
 
+@router.post("/jobs/{public_token}/autofill")
+async def autofill_from_cv(public_token: str, cv_file: UploadFile = File(...)) -> dict:
+    """Public endpoint: read a dropped CV and return the form values that can be filled with certainty.
+
+    Same parsers, same contact extraction and the same `standardize_cv` prompt as the application itself; nothing is
+    stored (the file is read from a temp file that is deleted), and the AI reading is parked in Redis for 30 minutes so
+    submitting the form does not call the model again. Rate-limited like an application."""
+    from app.ingestion.autofill import build_autofill, cached_standardized, park_standardized
+    from app.ingestion.pipeline import _llm_slots
+
+    qdrant = get_qdrant_utils()
+    job_data = await asyncio.to_thread(qdrant.get_job_posting_by_token, public_token, True)
+    if not job_data or not job_data.get("is_active", True):
+        raise HTTPException(status_code=404, detail="Job posting not found or no longer active")
+    content, _name, _kind = await secure_upload(cv_file, PUBLIC_CV_EXTENSIONS)   # size, real type, bombs, macros, scripts, virus scan
+    ext = os.path.splitext(cv_file.filename or "")[1].lower() or ".pdf"
+
+    def work() -> dict:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+            tmp.write(content)
+            path = tmp.name
+        try:
+            parsed = get_parsing_service().process_document(path, "cv")
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        text = parsed.get("clean_text") or ""
+        if len(text.strip()) < 50:
+            return {"fields": {}, "sources": {}, "readable": False}
+        standardized = cached_standardized(text)
+        if standardized is None:
+            try:
+                with _llm_slots:
+                    standardized = get_llm_service().standardize_cv(text, cv_file.filename or "cv")
+                park_standardized(text, standardized)
+            except Exception as exc:  # noqa: BLE001 - autofill must never block the form
+                logger.warning(f"Autofill AI reading failed, offering parser results only: {exc}")
+                standardized = None
+        result = build_autofill(parsed, standardized)
+        result["readable"] = True
+        return result
+
+    try:
+        return await asyncio.to_thread(work)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Autofill failed: {exc}")
+        return {"fields": {}, "sources": {}, "readable": False}
+
+
 @router.post("/jobs/{public_token}/apply", response_model=JobApplicationResponse)
 async def apply_to_job(
     public_token: str,
@@ -285,8 +338,8 @@ async def apply_to_job(
         if not job_data.get("is_active", True):
             raise HTTPException(status_code=400, detail="This job posting is no longer accepting applications")
         
-        # 2. Validate CV file
-        validate_file_upload(cv_file)
+        # 2. Validate the CV file: size while reading, real type, zip/PDF bombs, macros, scripts, optional virus scan
+        file_content, _name, _kind = await secure_upload(cv_file, PUBLIC_CV_EXTENSIONS)
         
         # Basic email validation
         if "@" not in applicant_email or "." not in applicant_email:
@@ -303,10 +356,6 @@ async def apply_to_job(
         if not await asyncio.to_thread(claim_application, applicant_key, job_data["id"], application_id):
             raise HTTPException(status_code=409, detail="Your application for this job is already being processed.")
 
-        # Read file content
-        file_content = await cv_file.read()
-        if len(file_content) > MAX_FILE_SIZE:
-            raise HTTPException(status_code=400, detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB")
         content_sha256 = hashlib.sha256(file_content).hexdigest()  # for duplicate-CV detection
         
         # Store CV file (local uploads folder; storage service may be S3 or local)
@@ -506,8 +555,8 @@ async def post_job(
         
         if has_file:
             logger.info(f"HR job posting upload: {file.filename}")
-            # 1. Validate file
-            validate_file_upload(file)
+            # 1. Validate file (same checks as a visitor's CV)
+            await secure_upload(file, PUBLIC_CV_EXTENSIONS)
         
         job_id = str(uuid.uuid4())
         public_token = generate_public_token()
@@ -580,6 +629,7 @@ async def post_job(
         # 4. Generate email subject ID and template
         email_subject_id = generate_email_subject_id(final_job_title)
         email_subject_template = generate_email_subject_template(final_job_title, email_subject_id)
+        public_token = generate_public_slug(final_job_title, email_subject_id)   # the readable public link
         logger.info(f"Generated email subject: {email_subject_template}")
 
         # 4b. Boolean search string (Naukri Gulf). Prefer the LLM's value, else build one
@@ -673,161 +723,6 @@ async def post_job(
     except Exception as e:
         logger.error(f"Failed to post job: {e}")
         raise HTTPException(status_code=500, detail="Failed to create job posting. Please try again later.")
-@router.post("/admin/jobs/post-manual", response_model=JobPostingResponse)
-async def post_job_manual(
-    job_title: str = Form(..., min_length=1, max_length=200),
-    job_location: Optional[str] = Form(None),
-    job_summary: Optional[str] = Form(None),
-    key_responsibilities: Optional[str] = Form(None),
-    qualifications: Optional[str] = Form(None),
-    company_name: Optional[str] = Form(None),
-    additional_info: Optional[str] = Form(None),
-    current_user: User = Depends(require_core_app)
-) -> JobPostingResponse:
-    """
-    HR endpoint: Create job posting manually with form data
-    
-    Pipeline:
-    1. Validate form data
-    2. Create structured text content from form inputs
-    3. Process with LLM service (extract title, requirements, etc.)
-    4. Generate public access token
-    5. Store in job_postings_* collections only (not jd_documents)
-    6. Return public link
-    """
-    try:
-        logger.info(f"Manual job posting creation: {job_title}")
-        
-        # 1. Validate required fields
-        if not job_title.strip():
-            raise HTTPException(status_code=400, detail="Job title is required")
-        
-        job_id = str(uuid.uuid4())
-        public_token = generate_public_token()
-        
-        # 2. Create structured text content from form inputs
-        # This simulates what would be extracted from a document
-        structured_text = f"""
-Job Title: {job_title}
-
-Location: {job_location or 'Not specified'}
-
-Job Summary:
-{job_summary or 'No summary provided'}
-
-Key Responsibilities:
-{key_responsibilities or 'No responsibilities specified'}
-
-Qualifications & Requirements:
-{qualifications or 'No qualifications specified'}
-
-Additional Information:
-{additional_info or 'No additional information'}
-        """.strip()
-        
-        # 3. Process with LLM service to extract structured data
-        llm_service = get_llm_service()
-        llm_result = llm_service.standardize_jd(structured_text, f"manual_job_{job_id}.txt")
-        
-        # Extract job title for response
-        final_job_title = job_title
-        if llm_result and llm_result.get("job_title"):
-            # Use LLM extracted title if available, otherwise use form title
-            final_job_title = llm_result.get("job_title")
-        
-        # 4. Generate email subject ID and template
-        email_subject_id = generate_email_subject_id(final_job_title)
-        email_subject_template = generate_email_subject_template(final_job_title, email_subject_id)
-        logger.info(f"Generated email subject: {email_subject_template}")
-
-        # 4b. Boolean search string (Naukri Gulf): prefer LLM value, else deterministic build.
-        _llm_bool = (llm_result or {}).get("boolean_search_string") or ""
-        _skills_for_bool = (
-            (llm_result or {}).get("skills_sentences")
-            or (llm_result or {}).get("structured_info", {}).get("skills")
-            or (llm_result or {}).get("skills")
-            or []
-        )
-        boolean_search_string = _llm_bool.strip() or generate_boolean_search_string(final_job_title, _skills_for_bool)
-        logger.info(f"Boolean search string: {boolean_search_string}")
-
-        # 5. Generate embeddings
-        embedding_service = get_embedding_service()
-        embeddings_data = embedding_service.generate_document_embeddings(llm_result)
-
-        # 5. Store in job_postings collections only (not jd_documents)
-        qdrant = get_qdrant_utils()
-        success_steps = []
-        
-        # Store raw document in jd_documents collection (reuse existing infrastructure)
-        success_steps.append(
-            qdrant.store_document(
-                job_id, "jd", f"manual_job_{job_id}.txt",
-                "text/plain",
-                structured_text, now_iso()
-            )
-        )
-        
-        # Store structured data in jd_structured collection (reuse existing infrastructure)
-        jd_structured_payload = {
-            **llm_result,
-            "document_type": "jd"
-        }
-        success_steps.append(
-            qdrant.store_structured_data(job_id, "jd", jd_structured_payload)
-        )
-        
-        # Store embeddings in jd_embeddings collection (reuse existing infrastructure)
-        success_steps.append(
-            qdrant.store_embeddings_exact(job_id, "jd", embeddings_data)
-        )
-        
-        # 6. Store job posting metadata for careers functionality
-        success_steps.append(
-            qdrant.store_job_posting_metadata(
-                job_id, public_token, company_name, additional_info,
-                posted_by_user=current_user.username,
-                posted_by_role=current_user.role,
-                jd_id=job_id,  # Link job posting to its JD
-                email_subject_id=email_subject_id,
-                email_subject_template=email_subject_template,
-                boolean_search_string=boolean_search_string,
-            )
-        )
-        
-        if not all(success_steps):
-            logger.error(f"Failed to store manual job posting {job_id} - some steps failed: {success_steps}")
-            raise HTTPException(status_code=500, detail="Failed to create job posting. Please try again.")
-        
-        # 7. Build public link
-        base_url = settings.FRONTEND_URL
-        public_link = f"{base_url}/careers/jobs/{public_token}"
-        
-        logger.info(f"Manual job posting created: {job_id} with public link")
-        
-        return JobPostingResponse(
-            job_id=job_id,
-            public_link=public_link,
-            public_token=public_token,
-            job_title=final_job_title,
-            upload_date=now_iso(),
-            filename=f"manual_job_{job_id}.txt",
-            is_active=True,
-            company_name=company_name,
-            posted_by_user=current_user.username,
-            posted_by_role=current_user.role,
-            email_subject_id=email_subject_id,
-            email_subject_template=email_subject_template,
-            boolean_search_string=boolean_search_string
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to create manual job posting: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create job posting. Please try again later.")
-
-
 @router.get("/admin/jobs", response_model=Union[List[JobPostingSummary], dict])
 async def list_job_postings(
     include_inactive: bool = False,
@@ -868,7 +763,9 @@ async def list_job_postings(
             # Fix missing public_token for existing jobs
             if not job.get("public_token") or job.get("public_token") == "unknown":
                 logger.warning(f"Job {job.get('id')} missing public_token, generating new one")
-                new_token = generate_public_token()
+                new_token = generate_public_slug(
+                    (job.get("email_subject_template") or "").split(" | ")[0] or (job.get("structured_info") or {}).get("job_title") or "job",
+                    job.get("email_subject_id"))
                 # Update the job metadata with the new token
                 success = qdrant.update_job_posting_public_token(job["id"], new_token)
                 if success:
@@ -959,7 +856,8 @@ async def job_application_trends(
     performance charts. Counts only: no candidate data."""
     from collections import defaultdict
     from datetime import timedelta
-    from qdrant_client.models import FieldCondition, Filter, MatchValue
+    from datetime import timezone
+    from qdrant_client.models import FieldCondition, Filter, MatchValue, Range
 
     days = max(1, min(int(days or 14), 90))
     today = datetime.utcnow().date()
@@ -969,7 +867,10 @@ async def job_application_trends(
 
     def _collect() -> None:
         client = get_qdrant_utils().client
-        flt = Filter(must=[FieldCondition(key="is_job_application", match=MatchValue(value=True))])
+        # Only the applications stored inside the window (uploaded_at is indexed), not every application ever received.
+        window_start = datetime.combine(labels[0], datetime.min.time(), tzinfo=timezone.utc).timestamp()
+        flt = Filter(must=[FieldCondition(key="is_job_application", match=MatchValue(value=True)),
+                           FieldCondition(key="uploaded_at", range=Range(gte=window_start))])
         offset = None
         while True:
             points, offset = client.scroll(
@@ -1292,6 +1193,8 @@ async def get_job_applications(
                 job_id=job_id,
                 applicant_name=safe_applicant_name,
                 applicant_email=app.get("applicant_email", "unknown@email.com"),
+                applicant_phone=app.get("applicant_phone") or (app.get("structured_info") or {}).get("phone"),
+                **{k: v for k, v in resolve_candidate_contact(app, app.get("structured_info")).items() if k in ("linkedin_url", "github_url")},
                 application_date=app.get("application_date", "Unknown"),
                 cv_filename=app.get("cv_filename", "unknown.pdf"),
                 expected_salary=app.get("expected_salary"),
@@ -1470,6 +1373,7 @@ async def unified_job_update(
             # Generate email subject ID and template
             email_subject_id = generate_email_subject_id(job_title)
             email_subject_template = generate_email_subject_template(job_title, email_subject_id)
+            public_token = generate_public_slug(job_title, email_subject_id)   # the readable public link
             logger.info(f"Generated email subject for new job: {email_subject_template}")
             
             # Boolean search string: prefer the JD's LLM-generated string, else build one

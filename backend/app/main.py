@@ -17,8 +17,11 @@ from fastapi.responses import JSONResponse
 # Routers
 from app.api.routers import careers, cvs, job_descriptions, matching, monitor, notices, storage, system
 from app.api.routers.auth import router as auth_router
+from app.api.routers.agents import router as agents_router
+from app.api.routers.agentic import router as agentic_router
+from app.api.routers.interview_agent import router as interview_agent_router
+from app.api.routers.linkedin_agent import router as linkedin_agent_router
 from app.api.routers.admin import router as admin_router
-from app.api.routers.email import router as email_router
 from app.api.routers.tracker import router as tracker_router
 from app.api.routers.features import router as features_router
 
@@ -29,8 +32,7 @@ from app.monitoring.recorder import get_recorder
 from app.providers.vectorstore.qdrant import get_qdrant_utils
 from app.providers.embeddings.service import get_embedding_service
 from app.providers.cache.memory import get_cache_service
-from app.db.auth_db import init_auth_db
-from app.db.tracker_db import init_tracker_db
+from app.db.database import init_database
 
 # --------------------
 # Logging
@@ -47,13 +49,11 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("Starting CV Analyzer API...")
 
-        # Required envs - OpenAI key is optional (warn if missing, but don't fail)
-        openai_key = os.getenv("OPENAI_API_KEY")
-        if not openai_key:
-            logger.warning("OPENAI_API_KEY environment variable not set - OpenAI features will be disabled")
-            logger.warning("Email CV processing and LLM features will not work without OpenAI key")
+        # The OpenRouter key is optional at start (warn if missing, but don't fail)
+        if not (settings.OPENROUTER_API_KEY or os.getenv("OPENROUTER_API_KEY")):
+            logger.warning("OPENROUTER_API_KEY is not set - CV extraction, matching analysis and the AI agents are disabled")
         else:
-            logger.info("OPENAI_API_KEY configured")
+            logger.info(f"OpenRouter configured (model {settings.LLM_MODEL})")
 
         logger.info(f"Qdrant: {settings.QDRANT_HOST}:{settings.QDRANT_PORT}")
 
@@ -78,30 +78,11 @@ async def lifespan(app: FastAPI):
         get_redis_cache()
         logger.info("Redis cache ready")
 
-        # One process at a time creates / migrates the tables (see app/db/startup_lock.py)
+        # One process at a time applies the migrations (see app/db/startup_lock.py)
         with schema_init_lock():
-            logger.info("Initializing auth database...")
-            init_auth_db()
-            logger.info("Auth database ready")
-
-            # Ensure email-processing tables exist (safe/additive).
-            # This prevents scheduler/pipeline from failing on first run when tables
-            # haven't been created yet.
-            try:
-                from app.integrations.email.email_database_service import email_db_service  # noqa: F401
-
-                logger.info("Email processing database tables ensured")
-            except Exception as e:
-                # Don't fail startup if email DB can't be initialized; email features will degrade.
-                logger.warning(f"Email processing DB init skipped: {e}")
-
-            # Candidate Tracker DB is isolated and only initialized when enabled
-            if settings.ENABLE_CANDIDATE_TRACKER:
-                logger.info("Initializing Candidate Tracker database...")
-                init_tracker_db()
-                logger.info("Candidate Tracker database ready")
-            else:
-                logger.info("Candidate Tracker disabled (ENABLE_CANDIDATE_TRACKER=false)")
+            logger.info("Initializing database...")
+            init_database()
+            logger.info("Database ready")
 
         # Follow-up reminder scheduler (optional, uses tracker DB)
         followup_task = None
@@ -137,46 +118,6 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("Follow-up reminder scheduler is DISABLED (SEND_EMAIL_REMINDER_FOLLOWUP!=true or tracker disabled)")
 
-        # Email scheduler (optional)
-        # Only start on ONE worker (not all workers) using a file lock.
-        # Enable explicitly with ENABLE_EMAIL_SCHEDULER=true
-        scheduler_task = None
-        scheduler = None
-        scheduler_lock_file = None
-
-        enable_email_scheduler = settings.ENABLE_EMAIL_SCHEDULER
-        if enable_email_scheduler:
-            try:
-                import fcntl  # type: ignore
-                import asyncio
-
-                scheduler_lock_file = open("/tmp/email_scheduler.lock", "w")
-                fcntl.flock(scheduler_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-                # We got the lock! This worker will run the scheduler
-                logger.info("Starting email scheduler (acquired lock)...")
-                from app.integrations.email.email_scheduler import get_email_scheduler
-
-                scheduler = get_email_scheduler()
-                scheduler_task = asyncio.create_task(scheduler.start_scheduler())
-                logger.info("Email scheduler started (checking every 5 minutes by default)")
-            except BlockingIOError:
-                # Another worker already has the lock and is running the scheduler
-                logger.info("Email scheduler already running on another worker")
-                if scheduler_lock_file:
-                    scheduler_lock_file.close()
-                scheduler_lock_file = None
-            except Exception as e:
-                logger.error(f"Failed to start email scheduler: {e}", exc_info=True)
-                if scheduler_lock_file:
-                    try:
-                        scheduler_lock_file.close()
-                    except Exception:
-                        pass
-                scheduler_lock_file = None
-        else:
-            logger.info("Email scheduler is DISABLED (ENABLE_EMAIL_SCHEDULER!=true)")
-
         logger.info("Startup complete")
         yield
         # Graceful shutdown
@@ -194,24 +135,6 @@ async def lifespan(app: FastAPI):
                 fcntl.flock(followup_lock_file.fileno(), fcntl.LOCK_UN)
                 followup_lock_file.close()
                 os.remove("/tmp/followup_reminder_scheduler.lock")
-            except Exception:
-                pass
-        if scheduler_task and scheduler:
-            logger.info("Stopping email scheduler...")
-            await scheduler.stop_scheduler()
-            try:
-                await asyncio.wait_for(scheduler_task, timeout=5.0)
-            except asyncio.TimeoutError:
-                scheduler_task.cancel()
-        # Release the lock file
-        if scheduler_lock_file:
-            try:
-                # fcntl is not available on Windows; this code path is only relevant when the
-                # email scheduler is enabled and a lock is acquired.
-                import fcntl  # type: ignore
-                fcntl.flock(scheduler_lock_file.fileno(), fcntl.LOCK_UN)
-                scheduler_lock_file.close()
-                os.remove("/tmp/email_scheduler.lock")
             except Exception:
                 pass
         logger.info("Shutdown complete")
@@ -312,6 +235,10 @@ async def add_security_headers(request, call_next):
 # --------------------
 # Auth routes
 app.include_router(auth_router)
+app.include_router(agents_router)
+app.include_router(agentic_router)
+app.include_router(interview_agent_router)
+app.include_router(linkedin_agent_router)
 app.include_router(admin_router)
 app.include_router(features_router)
 app.include_router(tracker_router)
@@ -329,8 +256,6 @@ app.include_router(monitor.router)
 # Careers routes (public job postings & applications)
 app.include_router(careers.router, prefix="/api/careers", tags=["Careers & Public Applications"])
 
-# Email processing routes (Azure integration)
-app.include_router(email_router, prefix="/api/email", tags=["Email Processing & Azure Integration"])
 app.include_router(storage.router, prefix="/api/storage", tags=["Local Storage"])
 
 

@@ -51,8 +51,6 @@ class TrackerCandidate(TrackerSQLModel, table=True):
     name: str = Field(index=True)
     email: Optional[str] = Field(default=None, index=True)
     phone: Optional[str] = Field(default=None, index=True)
-    current_company: Optional[str] = Field(default=None, index=True)
-    experience_years: Optional[int] = Field(default=None, index=True)
 
     is_deleted: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
@@ -162,8 +160,6 @@ class TrackerCandidateAD(TrackerSQLModel, table=True):
     name: str = Field(index=True)
     email: Optional[str] = Field(default=None, index=True)
     phone: Optional[str] = Field(default=None, index=True)
-    current_company: Optional[str] = Field(default=None, index=True)
-    experience_years: Optional[int] = Field(default=None, index=True)
 
     is_deleted: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)

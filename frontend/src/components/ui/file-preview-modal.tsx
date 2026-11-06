@@ -247,9 +247,9 @@ export function FilePreviewModal({ isOpen, onClose, fileUrl, fileName, fileId, e
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent hideClose className="flex h-[90vh] w-[90vw] max-w-5xl flex-col overflow-hidden border-slate-200 bg-white p-0">
+            <DialogContent hideClose className="flex h-[90vh] w-[90vw] max-w-5xl flex-col overflow-hidden border-surface-border bg-white p-0">
                 <DialogTitle className="sr-only">Preview: {displayName}</DialogTitle>
-                <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
+                <div className="flex items-center justify-between gap-3 border-b border-surface-border bg-white px-4 py-3">
                     <div className="flex min-w-0 items-center gap-2.5">
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-50 text-navy-600">
                             <FileText className="h-4 w-4" />
@@ -258,7 +258,7 @@ export function FilePreviewModal({ isOpen, onClose, fileUrl, fileName, fileId, e
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                         {canZoom && (
-                            <div className="mr-1 flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                            <div className="mr-1 flex items-center gap-0.5 rounded-lg border border-surface-border bg-slate-50 p-0.5">
                                 <button type="button" onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(2)))} className="rounded-md p-1.5 text-slate-500 hover:bg-white hover:text-slate-900" aria-label="Zoom out">
                                     <ZoomOut className="h-4 w-4" />
                                 </button>

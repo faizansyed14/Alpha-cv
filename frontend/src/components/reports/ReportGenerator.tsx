@@ -280,7 +280,7 @@ export default function ReportGenerator() {
                   <select
                     value={config.dateRange}
                     onChange={(e) => setConfig(prev => ({ ...prev, dateRange: e.target.value as any }))}
-                    className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-[13px] text-gray-900 shadow-card focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
+                    className="h-9 w-full rounded-md border border-surface-border bg-white px-3 text-[13px] text-gray-900 shadow-card focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
                   >
                     <option value="all">All Time</option>
                     <option value="last_week">Last Week</option>
@@ -380,7 +380,7 @@ export default function ReportGenerator() {
               <div className="space-y-3">
                 {generateInsights().length > 0 ? (
                   generateInsights().map((insight, index) => (
-                    <div key={index} className="flex items-start gap-3 rounded-lg border border-slate-200 bg-[var(--app-bg-soft)] p-4">
+                    <div key={index} className="flex items-start gap-3 rounded-lg border border-surface-border bg-[var(--app-bg-soft)] p-4">
                       {insight.type === 'warning' ? (
                         <AlertCircle className="mt-0.5 h-5 w-5 text-amber-500" />
                       ) : (

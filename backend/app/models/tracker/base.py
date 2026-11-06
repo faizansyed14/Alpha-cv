@@ -1,13 +1,11 @@
-from sqlalchemy import MetaData
 from sqlmodel import SQLModel
-
-# Tracker models must not share metadata with auth models.
-tracker_metadata = MetaData()
 
 
 class TrackerSQLModel(SQLModel):
-    """Base class for Candidate Tracker SQLModel tables (isolated metadata)."""
+    """Base class for Candidate Tracker tables. They live in the application's single database and share its metadata."""
 
     __abstract__ = True
-    metadata = tracker_metadata
 
+
+# Kept as a name for code that imports it; there is one metadata for the whole database.
+tracker_metadata = SQLModel.metadata

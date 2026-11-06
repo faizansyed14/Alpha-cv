@@ -2,14 +2,14 @@
 export type Tone = 'blue' | 'indigo' | 'violet' | 'emerald' | 'amber' | 'rose' | 'cyan' | 'sky';
 
 export const TONE: Record<Tone, { tile: string; solid: string }> = {
-  blue: { tile: 'bg-slate-50 text-slate-600 ring-slate-200', solid: 'bg-navy-600 text-white ring-navy-600' },
-  indigo: { tile: 'bg-slate-50 text-slate-600 ring-slate-200', solid: 'bg-navy-600 text-white ring-navy-600' },
-  violet: { tile: 'bg-slate-50 text-slate-600 ring-slate-200', solid: 'bg-navy-600 text-white ring-navy-600' },
-  emerald: { tile: 'bg-slate-50 text-slate-600 ring-slate-200', solid: 'bg-navy-600 text-white ring-navy-600' },
-  amber: { tile: 'bg-slate-50 text-slate-600 ring-slate-200', solid: 'bg-navy-600 text-white ring-navy-600' },
-  rose: { tile: 'bg-slate-50 text-slate-600 ring-slate-200', solid: 'bg-navy-600 text-white ring-navy-600' },
-  cyan: { tile: 'bg-slate-50 text-slate-600 ring-slate-200', solid: 'bg-navy-600 text-white ring-navy-600' },
-  sky: { tile: 'bg-slate-50 text-slate-600 ring-slate-200', solid: 'bg-navy-600 text-white ring-navy-600' },
+  blue: { tile: 'bg-navy-50 text-navy-800 ring-navy-100', solid: 'bg-navy-900 text-white ring-navy-900' },
+  indigo: { tile: 'bg-navy-50 text-navy-800 ring-navy-100', solid: 'bg-navy-900 text-white ring-navy-900' },
+  violet: { tile: 'bg-navy-50 text-navy-800 ring-navy-100', solid: 'bg-navy-900 text-white ring-navy-900' },
+  emerald: { tile: 'bg-navy-50 text-navy-800 ring-navy-100', solid: 'bg-navy-900 text-white ring-navy-900' },
+  amber: { tile: 'bg-navy-50 text-navy-800 ring-navy-100', solid: 'bg-navy-900 text-white ring-navy-900' },
+  rose: { tile: 'bg-navy-50 text-navy-800 ring-navy-100', solid: 'bg-navy-900 text-white ring-navy-900' },
+  cyan: { tile: 'bg-navy-50 text-navy-800 ring-navy-100', solid: 'bg-navy-900 text-white ring-navy-900' },
+  sky: { tile: 'bg-navy-50 text-navy-800 ring-navy-100', solid: 'bg-navy-900 text-white ring-navy-900' },
 };
 
 /** One colour per sidebar destination. */

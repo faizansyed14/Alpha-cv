@@ -88,8 +88,8 @@ def test_progress_counts_every_cv(harness):
     assert seen[-1]["status"] == "completed" and seen[-1]["processed_candidates"] == 180
 
 
-def test_no_ceiling_by_default():
-    assert settings.MATCH_MAX_CVS == 0
+def test_one_match_is_capped_at_ten_thousand_cvs_by_default():
+    assert settings.MATCH_MAX_CVS == 10_000
 
 
 def test_ranked_results_keep_the_best_in_the_detailed_head():

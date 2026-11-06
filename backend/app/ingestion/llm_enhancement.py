@@ -2,7 +2,7 @@
 Enhanced Matching with LLM Analysis
 
 This module adds LLM contextual analysis to semantic matching results.
-The top candidates (LLM_MATCH_TOP_N, default 50) are analysed in batches of LLM_MATCH_BATCH_SIZE CVs per request.
+The top candidates (LLM_MATCH_TOP_N, default 30) are analysed in batches of LLM_MATCH_BATCH_SIZE CVs per request.
 Batches run concurrently, bounded process-wide by LLM_MATCH_CONCURRENCY so many simultaneous matches queue for the
 API instead of bursting past its rate limits. One failed batch falls back to semantic scores for its own CVs only;
 it neither loses the other batches nor gets cached.
@@ -101,7 +101,7 @@ async def enhance_with_llm_analysis_batched(
 ) -> List[dict]:
     """
     Enhance top candidates with LLM contextual analysis.
-    Analyses the top LLM_MATCH_TOP_N (50) candidates in concurrent batches with GPT-4.1-mini.
+    Analyses the top LLM_MATCH_TOP_N (30) candidates in concurrent batches with GPT-4.1-mini.
 
     Per-(jd_id, cv_id) analyses are cached so the refined score is deterministic and
     identical across the Careers / Match / Database matching entry points.
@@ -113,7 +113,7 @@ async def enhance_with_llm_analysis_batched(
         on_batch: optional ``(done, total)`` callback fired as each LLM batch finishes
 
     Returns:
-        Enhanced results with LLM analysis for top min(50, len(results)) candidates
+        Enhanced results with LLM analysis for top min(30, len(results)) candidates
     """
     try:
         total_candidates = len(semantic_results)
@@ -174,6 +174,7 @@ async def enhance_with_llm_analysis_batched(
                     "cv_id": cv_id,
                     "cv_raw_text": cv_raw,
                     "semantic_score": float(r.get("overall_score", 0)) * 100,
+                    "requirements_note": r.get("requirements_note", ""),
                 })
 
             # Batched LLM calls (only for the cache misses), run concurrently

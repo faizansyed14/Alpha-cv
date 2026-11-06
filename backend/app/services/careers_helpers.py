@@ -23,8 +23,40 @@ os.makedirs(STORAGE_DIR, exist_ok=True)
 
 
 def generate_public_token() -> str:
-    """Generate secure random token for public job links"""
+    """A long random token. Only used as a placeholder before the job's readable link is built (see generate_public_slug)."""
     return secrets.token_urlsafe(32)
+
+
+_SLUG_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def slugify(text: str, max_len: int = 48) -> str:
+    """"Asset Coordinator (Dubai)" -> "asset-coordinator-dubai": lower-case ASCII words joined by hyphens."""
+    import unicodedata
+
+    ascii_text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode("ascii").lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_text).strip("-")
+    return slug[:max_len].strip("-")
+
+
+def generate_public_slug(job_title: str, subject_id: Optional[str] = None) -> str:
+    """The public job link: title, the job's code and a short random part, e.g. asset-coordinator-ac-2026-001-k3x9m2.
+
+    Readable and carrying the code recruiters know, but the random tail keeps it unguessable, so the next job's link
+    cannot be worked out from this one."""
+    parts = [slugify(job_title) or "job"]
+    if subject_id:
+        code = slugify(subject_id, 24)
+        if code:
+            parts.append(code)
+    parts.append("".join(secrets.choice(_SLUG_ALPHABET) for _ in range(6)))
+    return "-".join(parts)
+
+
+def is_public_slug(token: Optional[str]) -> bool:
+    """True for the readable links (lower-case words and digits); the old random tokens contain capitals or _ ."""
+    return bool(token) and bool(_SLUG_RE.match(token)) and len(token) <= 90
 
 
 def validate_file_upload(file: UploadFile) -> None:
@@ -130,7 +162,7 @@ def generate_email_subject_id(job_title: str) -> str:
 
 def generate_email_subject_template(job_title: str, subject_id: str) -> str:
     """
-    Generate full email subject template for Naukri
+    Generate the full subject line for a job
     Format: "{Job Title} | {Subject ID}"
     Example: "Software Engineer | SE-2025-001"
     """

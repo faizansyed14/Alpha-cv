@@ -13,11 +13,9 @@ import os
 
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("OPENAI_API_KEY", "stub-key-for-demo")
-os.environ.setdefault("AUTH_DB_URL", "sqlite:///./demo_auth.db")
+os.environ.setdefault("DATABASE_URL", "sqlite:///./demo_auth.db")
 os.environ.setdefault("ENABLE_CANDIDATE_TRACKER", "true")
-os.environ.setdefault("TRACKER_DB_URL", "sqlite:///./demo_tracker.db")
 os.environ.setdefault("ENABLE_APPLICATION_QUEUE", "false")
-os.environ.setdefault("LLM_CACHE_DIR", "/tmp/llm_cache_demo")
 os.environ.setdefault("LOCAL_STORAGE_DIR", "/tmp/demo_uploads")
 os.environ.setdefault("CV_UPLOAD_DIR", "/tmp/demo_uploads/cv")
 os.environ.setdefault("OTP_DISABLE_EMAIL", "true")
@@ -28,8 +26,11 @@ import numpy as _np
 from qdrant_client import QdrantClient
 
 
+from app.config.settings import settings
+
+
 class _FakeSentenceTransformer:
-    DIM = 768
+    DIM = settings.EMBEDDING_DIM
 
     def _encode_one(self, text: str):
         vec = _np.zeros(self.DIM, dtype=_np.float32)
@@ -149,7 +150,7 @@ def seed():
         client.post("/api/jd/upload-jd", data={"jd_text": "Hiring a python developer (FastAPI, PostgreSQL, Docker)"}, headers=admin)
         client.post("/api/jd/upload-jd", data={"jd_text": "Hiring a devops engineer (Kubernetes, Terraform, AWS)"}, headers=admin)
 
-        r = client.post("/api/careers/admin/jobs/post-manual", headers=admin, data={
+        r = client.post("/api/careers/admin/jobs/post", headers=admin, data={
             "job_title": "Python Backend Engineer", "company_name": "Alpha Data",
             "location": "Dubai", "years_of_experience": "4",
             "job_description": "We are hiring a python developer with FastAPI and PostgreSQL.",

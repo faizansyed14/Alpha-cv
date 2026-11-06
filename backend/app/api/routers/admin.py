@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from sqlmodel import Session, select
-from app.db.auth_db import get_session
+from app.db.database import get_session
 from app.models.user import User
 from app.schemas.auth import UserCreate, UserRead, UserUpdate
 from app.security.auth import hash_password

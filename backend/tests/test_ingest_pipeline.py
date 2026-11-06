@@ -1,4 +1,4 @@
-"""One ingestion flow for uploads, Naukri/email and job-page CVs, with candidate data joined into the record."""
+"""One ingestion flow for uploads and job-page CVs, with candidate data joined into the record."""
 
 import asyncio
 from types import SimpleNamespace
@@ -7,10 +7,21 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.ingestion import pipeline
-from app.ingestion.pipeline import (SOURCE_EMAIL, SOURCE_JOB_PAGE, SOURCE_UPLOAD, CVSubmission, IngestError,
-                                    ingest_cv)
+from app.ingestion.pipeline import SOURCE_JOB_PAGE, SOURCE_UPLOAD, CVSubmission, IngestError, ingest_cv
 
 CV_TEXT = "Jane Smith - Senior Python Developer with seven years building FastAPI services on PostgreSQL and Redis."
+
+
+
+def _real_pdf() -> bytes:
+    """A genuine (tiny) PDF: the upload checks open the file, so a made-up "%PDF" string is rightly refused."""
+    import fitz
+
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 72), "Jane Doe, Python developer")
+    out = doc.tobytes()
+    doc.close()
+    return out
 
 
 class FakeQdrant:
@@ -107,24 +118,14 @@ def test_blank_candidate_values_never_overwrite_what_the_cv_says(world, tmp_path
     assert rec["nationality"] == "Unknown-from-llm" and rec["location"] == "Somewhere"
 
 
-def test_email_applications_use_the_same_flow_and_keep_the_naukri_source(world, tmp_path):
-    ingest_cv(CVSubmission(source=SOURCE_EMAIL, filename="cv.pdf", file_path=_file(tmp_path), cv_id="m-1",
-                           candidate={"email": "jane@naukri.com", "expected_salary": 15000},
-                           job={"job_id": "job-3", "job_title": "Dev", "email_id": "E1", "subject_id": "S1"}))
-    rec = world.q.structured["m-1"]
-    assert rec["source"] == "email_application" and rec["email_id"] == "E1" and rec["expected_salary"] == 15000
-    assert world.q.links[0][1] == "job-3"
-
-
 def test_every_door_produces_the_same_record_shape(world, tmp_path):
     shapes = []
-    for i, (source, job) in enumerate(((SOURCE_UPLOAD, None), (SOURCE_JOB_PAGE, {"job_id": "j"}),
-                                       (SOURCE_EMAIL, {"job_id": "j"}))):
+    for i, (source, job) in enumerate(((SOURCE_UPLOAD, None), (SOURCE_JOB_PAGE, {"job_id": "j"}))):
         world.q.existing = None
         r = ingest_cv(CVSubmission(source=source, filename="cv.pdf", file_path=_file(tmp_path), cv_id=f"c{i}",
                                    content_sha256=f"sha{i}", job=job))
         shapes.append(set(world.q.structured[r.cv_id]) - {"is_job_application", "job_posting_id"})
-    assert shapes[0] == shapes[1] == shapes[2]
+    assert shapes[0] == shapes[1]
 
 
 def test_the_same_file_again_is_joined_not_stored_twice(world, tmp_path):
@@ -198,7 +199,7 @@ def test_job_page_worker_function_feeds_the_form_fields_into_the_shared_pipeline
 def test_same_person_same_job_is_refused_by_the_pipeline_whichever_door(world, tmp_path):
     world.q.check_existing_application = lambda email, job: {"id": "first", "application_date": "2026-10-01"}
     with pytest.raises(pipeline.DuplicateApplication) as exc:
-        ingest_cv(CVSubmission(source=SOURCE_EMAIL, filename="cv.pdf", file_path=_file(tmp_path), cv_id="second",
+        ingest_cv(CVSubmission(source=SOURCE_JOB_PAGE, filename="cv.pdf", file_path=_file(tmp_path), cv_id="second",
                                candidate={"email": "Jane@X.com"}, job={"job_id": "job-1"}))
     assert exc.value.status == 409 and exc.value.existing_id == "first" and "2026-10-01" in str(exc.value)
     assert not world.q.structured and not world.llm.standardize_cv.called       # nothing stored, no AI spend
@@ -285,7 +286,7 @@ def _memory_qdrant():
     return utils
 
 
-def test_the_real_check_finds_job_page_and_email_records_but_not_other_jobs_or_plain_uploads():
+def test_the_real_check_finds_job_page_records_but_not_other_jobs_or_plain_uploads():
     q = _memory_qdrant()
     assert q.check_existing_application("jane@x.com", "job-1")["id"] == 1                  # job_posting_id record
     assert q.check_existing_application("JANE@x.com", "job-1") is not None                 # case-insensitive input
@@ -299,7 +300,7 @@ def _apply(client, email="Jane@x.com"):
     return client.post("/api/careers/jobs/tok123/apply", data={
         "applicant_name": "Jane Smith", "applicant_email": email, "expected_salary": "9000",
         "years_of_experience": "5", "location": "Dubai", "nationality": "Indian", "notice_period": "30 days",
-        "background_processing": "true"}, files={"cv_file": ("cv.pdf", b"%PDF-1.4 " + b"x" * 500, "application/pdf")})
+        "background_processing": "true"}, files={"cv_file": ("cv.pdf", _real_pdf(), "application/pdf")})
 
 
 def test_applying_to_the_same_job_twice_gets_a_clear_409_before_anything_is_stored(monkeypatch):

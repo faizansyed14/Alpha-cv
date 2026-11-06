@@ -38,6 +38,8 @@ class CandidateBreakdown(BaseModel):
     cv_years: int = 0
     cv_email: Optional[str] = Field(None, description="Candidate email (for recruiter contact)")
     cv_phone: Optional[str] = Field(None, description="Candidate phone (for call / WhatsApp)")
+    cv_linkedin: Optional[str] = Field(None, description="Candidate LinkedIn profile link")
+    cv_github: Optional[str] = Field(None, description="Candidate GitHub profile link")
     expected_salary: Optional[float] = Field(None, description="Expected salary in AED (from application or CV)")
     skills_score: float = 0.0
     responsibilities_score: float = 0.0
@@ -54,6 +56,9 @@ class CandidateBreakdown(BaseModel):
     llm_analysis: Optional[Dict] = None
     unmatched_jd_skills: List[str] = []
     unmatched_jd_responsibilities: List[str] = []
+    # Mandatory / preferred languages and certifications of the job vs this CV: [{type, name, mandatory, status}], status is
+    # met | missing | unknown (see app/matching/requirements.py). Empty when the job states none.
+    requirements: List[Dict] = []
 
 class MatchResponse(BaseModel):
     jd_id: Optional[str] = None

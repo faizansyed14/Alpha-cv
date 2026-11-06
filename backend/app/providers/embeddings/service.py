@@ -1,14 +1,12 @@
 # embedding_service.py
 """Sentence-embedding service.
 
-The model runs in the separate model-server container (EMBEDDING_SERVICE_URL); without that setting it is loaded
-in-process with sentence-transformers (local development / tests), which then needs torch installed.
+The model (multilingual-e5-small, ONNX) runs in the separate model-server container (EMBEDDING_SERVICE_URL); this
+process carries no ML runtime.
 
 Generates the fixed 32-vector document representation (20 skills, 10
 responsibilities, 1 experience, 1 job title) and provides vectorized cosine
-similarity used by the matching service. This deployment is CPU-only; the
-math libraries are thread-bounded (see TORCH_NUM_THREADS) so multiple
-containers sharing a host don't oversubscribe the CPUs.
+similarity used by the matching service. This deployment is CPU-only.
 """
 
 import hashlib
@@ -36,21 +34,24 @@ _IN_MEMORY_CACHE_MAX = 5000
 class EmbeddingService:
     """
     Consolidated service for all embedding operations.
-    Uses the configured sentence-transformer model (768 dimensions by default).
+    Uses the configured embedding model (multilingual-e5-small, 384 dimensions by default).
     """
 
+    # Tuned for multilingual-e5-small, whose cosines sit in a high band (unrelated skill pairs already score about 0.8), so a
+    # "match" only starts around 0.85. Swept 0.80-0.92 against the old model's ranking quality: 0.84-0.88 is a stable plateau,
+    # 0.86 / 0.85 its centre. Re-tune these if the embedding model changes.
     SIMILARITY_THRESHOLDS = {
         "skills": {
-            "excellent": 0.80,
-            "good": 0.70,
-            "moderate": 0.60,
-            "minimum": 0.50
+            "excellent": 0.92,
+            "good": 0.90,
+            "moderate": 0.88,
+            "minimum": 0.86
         },
         "responsibilities": {
-            "excellent": 0.75,
-            "good": 0.65,
-            "moderate": 0.55,
-            "minimum": 0.45
+            "excellent": 0.91,
+            "good": 0.89,
+            "moderate": 0.87,
+            "minimum": 0.85
         }
     }
 
@@ -89,24 +90,18 @@ class EmbeddingService:
             _model_device = self.device
 
     def _build_model(self) -> Any:
-        """Remote model-server client when configured, otherwise the model loaded in this process."""
+        """Client for the model-server container."""
         url = (getattr(settings, "EMBEDDING_SERVICE_URL", "") or "").strip()
-        if url:
-            from app.providers.embeddings.remote import RemoteEmbedder
+        if not url:
+            raise RuntimeError("EMBEDDING_SERVICE_URL is not set: the embedding model runs in the model-server container")
+        from app.providers.embeddings.remote import RemoteEmbedder
 
-            logger.info(f"Using embedding model server at {url} ({self.model_name})")
-            return RemoteEmbedder(
-                url, token=getattr(settings, "EMBEDDING_SERVICE_TOKEN", ""), dim=settings.EMBEDDING_DIM,
-                request_size=settings.EMBEDDING_REQUEST_SIZE, timeout_s=settings.EMBEDDING_SERVICE_TIMEOUT_SECONDS,
-                model_name=self.model_name,
-            )
-
-        import torch
-        from sentence_transformers import SentenceTransformer
-
-        torch.set_num_threads(max(1, int(getattr(settings, "TORCH_NUM_THREADS", 1))))
-        logger.info(f"Loading in-process embedding model: {self.model_name} on {self.device}")
-        return SentenceTransformer(self.model_name, device=self.device)
+        logger.info(f"Using embedding model server at {url} ({self.model_name})")
+        return RemoteEmbedder(
+            url, token=getattr(settings, "EMBEDDING_SERVICE_TOKEN", ""), dim=settings.EMBEDDING_DIM,
+            request_size=settings.EMBEDDING_REQUEST_SIZE, timeout_s=settings.EMBEDDING_SERVICE_TIMEOUT_SECONDS,
+            model_name=self.model_name,
+        )
 
     # ------------------------------------------------------------------
     # Caching helpers
@@ -309,12 +304,12 @@ class EmbeddingService:
         return "unmatched"
 
     def _prepare_text(self, text: str) -> str:
-        """Clean and prepare text for embedding."""
+        """Clean and prepare text for embedding: truncate the text, then add the model's task prefix (e5: "query: ")."""
         clean_text = " ".join(str(text).split())
         max_length = 512
         if len(clean_text) > max_length:
             clean_text = clean_text[:max_length]
-        return clean_text
+        return (getattr(settings, "EMBEDDING_TEXT_PREFIX", "") or "") + clean_text
 
     def get_embedding_dimension(self) -> int:
         if self.model:

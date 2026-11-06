@@ -14,10 +14,13 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /src
 # Dependencies first so this layer is cached until requirements.txt changes; the pip cache mount keeps downloaded
 # wheels between builds, so even a changed requirements.txt only fetches what is new.
-COPY requirements.txt requirements-ocr.txt ./
+COPY requirements.txt ./
+# rapidocr-onnxruntime declares the GUI "opencv-python" (needs libGL, clashes with the headless build pinned in
+# requirements.txt): drop it and put the headless build back.
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt \
-    && pip install --no-deps -r requirements-ocr.txt
+    && pip uninstall -y opencv-python \
+    && pip install --force-reinstall --no-deps "$(grep -i '^opencv-python-headless' requirements.txt | cut -d' ' -f1)"
 
 # ---- runtime -------------------------------------------------------------------------------------------------------
 FROM ${PYTHON_IMAGE} AS runtime
@@ -45,11 +48,11 @@ COPY --from=build /opt/venv /opt/venv
 WORKDIR /app
 COPY . .
 
-# Non-root user. The data dirs are created and owned so the app can write uploads / the LLM cache whether or not a
-# named volume is mounted there.
+# Non-root user. The data dir is created and owned so the app can write uploads whether or not a named volume is
+# mounted there.
 RUN groupadd --system --gid 1001 appuser \
     && useradd --system --uid 1001 --gid 1001 --home-dir /app appuser \
-    && mkdir -p /data/uploads/cv /data/llm_cache \
+    && mkdir -p /data/uploads/cv \
     && chown -R appuser:appuser /app /data
 USER appuser
 

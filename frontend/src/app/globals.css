@@ -2,8 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Design tokens: a pure white canvas, white surfaces with hairline borders and soft shadows, slate neutrals and
-   one royal-blue accent for actions, selection and focus. Type: Plus Jakarta Sans, with Inter as the fallback. */
+/* Design tokens: white canvas + white surfaces; deep hero navy (#16204B) for actions and focus.
+   Soft navy tints stay quiet — no bright electric blue. Type: Plus Jakarta Sans. */
 @layer base {
   :root {
     --font-sans: "Plus Jakarta Sans Variable", "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -16,25 +16,27 @@
     --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
-    --primary: 226 77% 52%;
+    /* Deep navy from dashboard hero (#16204B) */
+    --primary: 226 54% 19%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96%;
+    --secondary: 220 20% 97%;
     --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
+    --muted: 220 20% 97%;
     --muted-foreground: 215 16% 47%;
-    --accent: 210 40% 96%;
+    --accent: 220 20% 97%;
     --accent-foreground: 222 47% 11%;
     --destructive: 6 63% 46%;
     --destructive-foreground: 0 0% 100%;
-    --border: 220 27% 93%;
-    --input: 220 27% 93%;
-    --ring: 226 77% 52%;
+    /* Soft navy hairline borders */
+    --border: 222 28% 82%;
+    --input: 222 22% 70%;
+    --ring: 226 54% 19%;
 
     --success: 153 59% 30%;
     --warning: 38 73% 34%;
     --error: 6 63% 46%;
 
-    /* App surfaces */
+    /* App surfaces — white first */
     --app-bg: #FFFFFF;
     --app-bg-soft: #FAFBFD;
     --app-surface: #ffffff;
@@ -52,7 +54,7 @@
     --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.03);
     --shadow-md: 0 12px 32px -10px rgba(15, 23, 42, 0.18), 0 2px 6px rgba(15, 23, 42, 0.06), 0 0 0 1px rgba(15, 23, 42, 0.05);
     --shadow-lg: 0 24px 60px -16px rgba(15, 23, 42, 0.26), 0 6px 18px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(15, 23, 42, 0.05);
-    --shadow-glow: 0 0 0 4px rgba(38, 84, 227, 0.14);
+    --shadow-glow: 0 0 0 4px rgba(22, 32, 75, 0.18);
 
     --duration-fast: 150ms;
     --duration-normal: 220ms;
@@ -111,7 +113,7 @@
     border-radius: 6px;
   }
 
-  ::selection { background: rgba(38, 84, 227, 0.16); }
+  ::selection { background: rgba(22, 32, 75, 0.16); }
   ::placeholder { color: #94a3b8; opacity: 1; }
 
   @media (prefers-reduced-motion: reduce) {
@@ -184,21 +186,23 @@
 @keyframes skeleton-shimmer { 100% { transform: translateX(100%); } }
 @media (prefers-reduced-motion: reduce) { .skeleton::after { animation: none; } }
 
-.accent-bar { @apply h-0.5 w-8 rounded-full bg-navy-600; }
-.accent-dot { @apply h-1.5 w-1.5 shrink-0 rounded-full bg-navy-500; }
+.accent-bar { @apply h-0.5 w-8 rounded-full bg-navy-900; }
+.accent-dot { @apply h-1.5 w-1.5 shrink-0 rounded-full bg-navy-800; }
 
-/* Surfaces */
+/* Surfaces — thin soft-navy outline */
 .surface-panel {
   @apply rounded-2xl border border-surface-border bg-paper;
+  border-width: 1px;
   box-shadow: var(--shadow-card);
 }
 .surface-panel-hover {
   @apply rounded-2xl border border-surface-border bg-paper transition-all;
+  border-width: 1px;
   box-shadow: var(--shadow-card);
   transition-duration: var(--duration-fast);
 }
 .surface-panel-hover:hover {
-  border-color: #cbd5e1;
+  border-color: #9AA8C4;
   box-shadow: var(--shadow-md);
 }
 .glass {
@@ -211,7 +215,7 @@
   box-shadow: var(--shadow-card);
 }
 .field-input {
-  @apply h-9 rounded-lg border border-surface-strong bg-paper px-3 text-sm text-ink placeholder:text-slate-400 transition-colors hover:border-slate-300;
+  @apply h-9 rounded-lg border border-surface-strong bg-paper px-3 text-sm text-ink placeholder:text-slate-400 transition-colors hover:border-navy-400;
   transition-duration: var(--duration-fast);
 }
 .field-input:focus {
@@ -232,7 +236,7 @@
 
 .chip { @apply inline-flex items-center rounded-full border px-2 py-0.5 text-2xs font-medium; }
 .chip-neutral { @apply border-surface-border bg-slate-50 text-slate-600; }
-.chip-brand { @apply border-navy-100 bg-navy-50 text-navy-700; }
+.chip-brand { @apply border-navy-200 bg-navy-50 text-navy-800; }
 .chip-gold { @apply border-amber-200 bg-amber-50 text-amber-800; }
 .chip-success { @apply border-green-200 bg-green-50 text-green-700; }
 .chip-warning { @apply border-amber-200 bg-amber-50 text-amber-800; }
@@ -242,7 +246,7 @@
 
 .ai-stage-rail { @apply flex items-center gap-1 overflow-x-auto rounded-full border border-surface-border bg-slate-50 p-1; }
 .ai-stage-pill { @apply inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors; transition-duration: var(--duration-fast); }
-.ai-stage-pill-active { @apply bg-navy-600 text-paper shadow-sm; }
+.ai-stage-pill-active { @apply bg-navy-900 text-paper shadow-sm; }
 .ai-stage-pill-done { @apply bg-paper text-slate-500; }
 .ai-stage-pill-todo { @apply text-slate-400; }
 
@@ -259,3 +263,18 @@
 }
 .animate-page-enter { animation: page-enter var(--duration-normal) var(--ease-out) both; }
 @media (prefers-reduced-motion: reduce) { .animate-page-enter { animation: none; } }
+
+/* Candidate search in progress: a calm indeterminate line and a slow light sweep over placeholder cards. */
+.search-track { position: relative; height: 3px; overflow: hidden; background: rgb(241 245 249); }
+.search-bar {
+  position: absolute; inset: 0 auto 0 0; width: 38%; border-radius: 9999px; background: rgb(30 58 138);
+  animation: search-run 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes search-run { 0% { transform: translateX(-100%); } 100% { transform: translateX(270%); } }
+.search-sheen::after {
+  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.75), transparent);
+  animation: search-sweep 1.8s ease-in-out infinite;
+}
+@keyframes search-sweep { to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .search-bar, .search-sheen::after { animation: none; } }

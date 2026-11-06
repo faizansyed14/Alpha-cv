@@ -24,7 +24,7 @@ class JobPostingResponse(BaseModel):
     posted_by_role: Optional[str] = Field(None, description="Role of the user who posted this job (admin/user)")
     # Email integration fields
     email_subject_id: Optional[str] = Field(None, description="Unique ID for email subject matching (e.g., SE-2025-001)")
-    email_subject_template: Optional[str] = Field(None, description="Full email subject template for Naukri (e.g., 'Software Engineer | SE-2025-001')")
+    email_subject_template: Optional[str] = Field(None, description="Unique subject line for this job (e.g., 'Software Engineer | SE-2025-001')")
     boolean_search_string: Optional[str] = Field(None, description="Naukri Gulf boolean search string generated for this job")
 
 class PublicJobView(BaseModel):
@@ -56,6 +56,9 @@ class JobApplicationSummary(BaseModel):
     job_id: str = Field(..., description="Job this application is for")
     applicant_name: str = Field(..., description="Name of the applicant")
     applicant_email: str = Field(..., description="Email of the applicant")
+    applicant_phone: Optional[str] = Field(None, description="Phone of the applicant")
+    linkedin_url: Optional[str] = Field(None, description="LinkedIn profile link read from the CV")
+    github_url: Optional[str] = Field(None, description="GitHub profile link read from the CV")
     application_date: str = Field(..., description="When the application was submitted")
     cv_filename: str = Field(..., description="Original filename of submitted CV")
     expected_salary: Optional[float] = Field(None, description="Expected salary in AED")
@@ -65,7 +68,7 @@ class JobApplicationSummary(BaseModel):
     nationality: Optional[str] = Field(None, description="Candidate's nationality")
     match_score: Optional[float] = Field(None, description="AI-calculated match score if available")
     status: str = Field("pending", description="Application status (pending, reviewed, etc.)")
-    source: Optional[str] = Field(None, description="Application source: 'email_application' for Naukri/email, 'website' for direct applications")
+    source: Optional[str] = Field(None, description="Application source: 'website' for applications made on the job page")
     
     @validator('applicant_name', pre=True)
     def validate_applicant_name(cls, v):
@@ -103,7 +106,7 @@ class JobPostingSummary(BaseModel):
     can_delete: bool = Field(False, description="Whether current user can delete this job")
     # Email integration fields
     email_subject_id: Optional[str] = Field(None, description="Unique ID for email subject matching (e.g., SE-2025-001)")
-    email_subject_template: Optional[str] = Field(None, description="Full email subject template for Naukri (e.g., 'Software Engineer | SE-2025-001')")
+    email_subject_template: Optional[str] = Field(None, description="Unique subject line for this job (e.g., 'Software Engineer | SE-2025-001')")
     # Naukri Gulf Boolean recruiter search string (LLM-generated from the JD)
     boolean_search_string: Optional[str] = Field(None, description="Recruiter Boolean search string for Naukri Gulf / job portals")
 

@@ -22,6 +22,8 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // The /api proxy gives up after 30 seconds by default, which is shorter than an AI answer can take.
+  experimental: { proxyTimeout: 180_000 },
   // The Performance page was replaced by Monitor.
   async redirects() {
     return [{ source: "/performance", destination: "/monitor", permanent: true }];

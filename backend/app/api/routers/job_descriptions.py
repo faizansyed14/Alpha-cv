@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from app.config.settings import settings
+from app.security.uploads import JD_EXTENSIONS, secure_upload
 from app.api.deps import require_core_app
 from app.models.user import User
 from app.ingestion.cv_parser import get_parsing_service
@@ -80,19 +81,9 @@ async def upload_jd(
             if not file.filename:
                 raise HTTPException(status_code=400, detail="No filename provided")
 
+            # size while reading, real type (not the name), bombs, macros, scripts, optional virus scan
+            await secure_upload(file, JD_EXTENSIONS)
             file_ext = os.path.splitext(file.filename)[1].lower()
-            if file_ext not in SUPPORTED_EXTENSIONS:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Unsupported file type: {file_ext}. Supported: {', '.join(SUPPORTED_EXTENSIONS)}"
-                )
-
-            # Size check
-            file.file.seek(0, 2)
-            size = file.file.tell()
-            file.file.seek(0)
-            if size > MAX_FILE_SIZE:
-                raise HTTPException(status_code=400, detail=f"File too large: {size} bytes (max: {MAX_FILE_SIZE})")
 
             # Save to tmp and process
             import tempfile, shutil

@@ -9,7 +9,7 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from app.config.settings import is_followup_email_reminder_enabled
-from app.db.tracker_db import get_tracker_engine
+from app.db.database import engine as _db_engine
 from app.models.tracker.models import TrackerFollowUp, TrackerFollowUpAD, TrackerOption, TrackerOptionAD
 from app.integrations.email.followup_reminder_service import render_followup_email_html, send_followup_reminder_email
 
@@ -290,7 +290,7 @@ async def followup_reminder_loop(stop_event: asyncio.Event):
             if not is_followup_email_reminder_enabled():
                 continue
 
-            engine = get_tracker_engine()
+            engine = _db_engine
             with Session(engine) as session:
                 # Evaluate each team independently so Dubai/Abu Dhabi can have different times.
                 for team in ("dubai", "abudhabi"):

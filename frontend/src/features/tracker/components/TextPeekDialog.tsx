@@ -19,7 +19,7 @@ export function TextPeekDialog({ textPeek, textPeekDraft, textPeekSaving, onClos
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-lg border-slate-200 bg-white text-slate-900 shadow-[var(--shadow-md)]">
+      <DialogContent className="sm:max-w-lg border-surface-border bg-white text-slate-900 shadow-[var(--shadow-md)]">
         <DialogHeader>
           <DialogTitle className="text-slate-900">{textPeek.title}</DialogTitle>
           <DialogDescription>{textPeek.canEdit ? 'View & edit' : 'Full text'}</DialogDescription>
@@ -28,11 +28,11 @@ export function TextPeekDialog({ textPeek, textPeekDraft, textPeekSaving, onClos
           <textarea
             value={textPeekDraft}
             onChange={(e) => onDraftChange(e.target.value)}
-            className="w-full min-h-[220px] max-h-[55vh] resize-y text-[13px] text-slate-900 border border-slate-200 rounded-lg p-3 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+            className="w-full min-h-[220px] max-h-[55vh] resize-y text-[13px] text-slate-900 border border-surface-border rounded-lg p-3 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
             placeholder="Type here…"
           />
         ) : (
-          <div className="whitespace-pre-wrap text-[13px] text-slate-800 border border-slate-200 rounded-lg p-3 bg-slate-50 max-h-[55vh] overflow-auto">
+          <div className="whitespace-pre-wrap text-[13px] text-slate-800 border border-surface-border rounded-lg p-3 bg-slate-50 max-h-[55vh] overflow-auto">
             {textPeek.text}
           </div>
         )}

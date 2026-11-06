@@ -40,13 +40,13 @@ export function RasterPreview({ docId, docType = 'cv', onUnavailable }: { docId:
             <div className="flex-1 overflow-auto bg-slate-100 p-4">
                 {src ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={src} alt={`Page ${page} of ${pages}`} className={`mx-auto max-w-full rounded border border-slate-200 bg-white shadow-sm transition-opacity ${loading ? 'opacity-60' : ''}`} />
+                    <img src={src} alt={`Page ${page} of ${pages}`} className={`mx-auto max-w-full rounded border border-surface-border bg-white shadow-sm transition-opacity ${loading ? 'opacity-60' : ''}`} />
                 ) : (
                     <p className="py-16 text-center text-sm text-slate-500">{loading ? 'Rendering preview…' : 'No preview'}</p>
                 )}
             </div>
             {pages > 1 ? (
-                <div className="flex items-center justify-center gap-3 border-t border-slate-200 bg-white py-2 text-sm">
+                <div className="flex items-center justify-center gap-3 border-t border-surface-border bg-white py-2 text-sm">
                     <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft className="h-4 w-4" /></Button>
                     <span className="tabular-nums text-slate-600">Page {page} of {pages}</span>
                     <Button variant="secondary" size="sm" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-4 w-4" /></Button>

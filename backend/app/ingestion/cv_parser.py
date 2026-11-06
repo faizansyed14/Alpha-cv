@@ -97,8 +97,8 @@ class ParsingService:
             if not raw_text or len(raw_text.strip()) < 50:
                 raise ValueError(f"Insufficient text extracted: {len(raw_text)} characters")
             
-            # Remove PII data
-            clean_text, extracted_pii = self.remove_pii_data(raw_text)
+            # Remove PII data (the links behind clickable words are read from the original file too)
+            clean_text, extracted_pii = self.remove_pii_data(raw_text, self.extract_hyperlinks(file_path, file_ext))
             
             result = {
         "raw_text": raw_text,
@@ -193,6 +193,30 @@ class ParsingService:
             self.logger.error(f"PDF extraction failed: {str(e)}")
             raise Exception(f"PDF extraction failed: {str(e)}")
     
+    def extract_hyperlinks(self, file_path: str, file_ext: str) -> str:
+        """The web addresses behind clickable words in a PDF or Word file, one per line ('' when there are none).
+
+        A CV often shows only the word "LinkedIn" or "GitHub" with the address attached to it as a link, so the address is not in
+        the visible text. This reads those links so the profile can still be found. A failure here never stops the CV."""
+        urls: list[str] = []
+        try:
+            if file_ext == '.pdf':
+                doc = fitz.open(file_path)
+                try:
+                    for page_num in range(min(len(doc), 20)):
+                        urls += [str(link.get("uri")) for link in doc.load_page(page_num).get_links() if link.get("uri")]
+                finally:
+                    doc.close()
+            elif file_ext in ('.docx', '.doc') and zipfile.is_zipfile(file_path):
+                document = docx.Document(file_path)
+                parts = [document.part] + [p for s in document.sections for p in (s.header.part, s.footer.part)]
+                for part in parts:
+                    urls += [rel.target_ref for rel in part.rels.values()
+                             if rel.is_external and str(rel.reltype).endswith("/hyperlink")]
+        except Exception as e:  # noqa: BLE001
+            self.logger.debug(f"Could not read hyperlinks from {file_path}: {e}")
+        return chr(10).join(dict.fromkeys(u for u in urls if u))[:20000]
+
     def extract_text_from_word(self, file_path: str) -> str:
         """.docx (zip) goes through python-docx. A genuine legacy .doc (OLE) is read with antiword; a .docx that was
         saved with a .doc extension is detected by its zip header and read as .docx."""
@@ -346,20 +370,25 @@ class ParsingService:
             self.logger.warning(f"OCR failed for an image: {e}")
             return ""
 
-    def remove_pii_data(self, text: str) -> tuple[str, dict]:
+    def remove_pii_data(self, text: str, link_text: str = "") -> tuple[str, dict]:
         """Replace e-mails and phone numbers with [EMAIL] / [PHONE] and return (clean_text, extracted_pii).
+        ``extracted_pii`` also lists the candidate's LinkedIn and GitHub links (``link_text`` adds the addresses behind clickable
+        words in the original file); those are blanked out of the returned text as [LINKEDIN] / [GITHUB] too.
 
         ``extracted_pii`` lists the addresses and numbers found, the candidate's own first (header before body, referees
         last, IDs and date ranges excluded). Everything numeric-looking is redacted regardless. See contact.py."""
         # Ranked, candidate-first lists (see app/ingestion/contact.py); every match is still redacted from the text.
-        found = extract_contacts(text)
-        extracted_pii = {"email": found["emails"], "phone": found["phones"]}
+        found = extract_contacts(text, link_text)
+        extracted_pii = {"email": found["emails"], "phone": found["phones"],
+                         "linkedin": found["linkedin"], "github": found["github"]}
         email_spans = found["email_spans"]
         phone_spans = found["redact"]
+        link_placeholders = {s: placeholder for s, _, placeholder in found["link_spans"]}
+        link_spans = [(s, e) for s, e, _ in found["link_spans"]]
 
         # ---- Build clean_text by merging all spans (email + phone) and ----
         # ---- replacing each with a single placeholder, left to right. ----
-        all_spans = sorted(email_spans + phone_spans)
+        all_spans = sorted(email_spans + phone_spans + link_spans)
         merged: list[list[int]] = []
         for start, end in all_spans:
             if merged and start <= merged[-1][1]:
@@ -374,9 +403,9 @@ class ParsingService:
             pieces.append(text[cursor:start])
             # A merged span that grew from overlapping email+phone matches is
             # still just one PII item, tag it using whichever type it started as.
-            placeholder = '[EMAIL]' if (start, end) in email_span_set or any(
+            placeholder = link_placeholders.get(start) or ('[EMAIL]' if (start, end) in email_span_set or any(
                 s == start for s, _ in email_spans
-            ) else '[PHONE]'
+            ) else '[PHONE]')
             pieces.append(placeholder)
             cursor = end
         pieces.append(text[cursor:])

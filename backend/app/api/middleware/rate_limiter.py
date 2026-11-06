@@ -175,7 +175,7 @@ class ProductionRateLimiter:
             return "file_upload"
         
         # Job applications (most critical to protect)
-        if "/apply" in path_lower and method == "POST":
+        if ("/apply" in path_lower or path_lower.endswith("/autofill")) and method == "POST":
             return "job_application"
         
         # Job viewing

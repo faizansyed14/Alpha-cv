@@ -67,22 +67,12 @@ class Settings(BaseSettings):
     # request within this many seconds (logout clears it immediately).
     PRESENCE_TTL_SECONDS: int = 120
 
-    # ---- Relational databases ----
-    # POSTGRES_* feed the email-processing tables and compose; AUTH_DB_URL /
-    # TRACKER_DB_URL are full SQLAlchemy URLs. Point all of these at an AWS
-    # RDS endpoint to move auth + tracker + email data off-box (no code change).
-    POSTGRES_HOST: str = "postgres"
-    POSTGRES_PORT: int = 5432
-    POSTGRES_USER: str = "cv_user"
-    POSTGRES_PASSWORD: str = ""
-    POSTGRES_DB: str = "cv_database"
-    # "prefer" matches the local docker Postgres (which has no TLS cert configured);
-    # set to "require" in production against RDS. AUTH_DB_URL/TRACKER_DB_URL are full
-    # URLs so they take sslmode as a query param instead (?sslmode=require).
-    POSTGRES_SSLMODE: str = "prefer"
-    AUTH_DB_URL: str = "sqlite:///./auth.db"
+    # ---- Relational database ----
+    # ONE PostgreSQL database holds everything relational: users, the candidate tracker and email-intake tables.
+    # A full SQLAlchemy URL; point it at an AWS RDS endpoint to move it off-box (add ?sslmode=require for RDS).
+    # The default is a local SQLite file, for tests and quick tries only.
+    DATABASE_URL: str = "sqlite:///./app.db"
     ENABLE_CANDIDATE_TRACKER: bool = False
-    TRACKER_DB_URL: str = ""
     ALLOW_PROD_DATA_ACCESS: bool = False
     TRACKER_PROD_URL_HINTS: str = ""  # comma-separated substrings treated as prod
 
@@ -131,20 +121,41 @@ class Settings(BaseSettings):
 
     GRAPH_SEND_RETRIES: int = 2
     GRAPH_SEND_RETRY_DELAY: float = 1.5
-    # Shared secret for the public email webhook (/api/email/webhook/email-received).
-    # When empty the webhook is DISABLED (returns 404) so it can't be abused
-    # anonymously; set it and have Microsoft Graph send it as ?token= or the
-    # X-Webhook-Secret header.
-    EMAIL_WEBHOOK_SECRET: str = ""
 
-    # ---- OpenAI / LLM ----
-    OPENAI_API_KEY: str = ""
-    OPENAI_API_BASE: str = "https://api.openai.com/v1"
-    OPENAI_MODEL: str = "gpt-4.1-mini-2025-04-14"
-    OPENAI_MAX_RETRIES: int = 2
-    OPENAI_RETRY_BASE_DELAY: float = 0.5
-    OPENAI_SEED: int = 1337
-    LLM_CACHE_DIR: str = ".llm_cache"
+    # ---- LLM: every model call goes through OpenRouter (one key, one OpenAI-style API, many models) ----
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    LLM_MODEL: str = "anthropic/claude-haiku-5.5"      # CV / JD extraction, match analysis and the agents
+    LLM_MAX_RETRIES: int = 2
+    LLM_RETRY_BASE_DELAY: float = 0.5
+    # true = only route to providers that keep no prompts or completions (OpenRouter zero-data-retention); CVs are personal data
+    OPENROUTER_ZDR: bool = False
+    OPENROUTER_SITE_URL: str = ""                        # optional: shown on OpenRouter's dashboard
+    OPENROUTER_APP_NAME: str = "Alpha CV"
+
+    # ---- AI agents (interview questions, LinkedIn posts) ----
+    # What the agents may spend. Tokens (input + output of every answered call) are the only meter: there are no call counts.
+    AGENT_TOKENS_PER_USER_PER_DAY: int = 500_000     # per person, per UTC day; an admin can reset one person's count (or approve their request)
+    AGENT_TOKENS_GLOBAL_PER_DAY: int = 5_000_000     # circuit breaker across everyone, so a bug or many accounts cannot run up the bill
+    AGENT_OUTPUT_CEILING_TOKENS: int = 32_000        # the model's own output limit, NOT a policy cap: an answer is only ever shortened by it or by the tokens left today
+    AGENT_MIN_OUTPUT_TOKENS: int = 600               # a call is not started unless at least this much room is left for the answer
+    AGENT_MAX_CV_CHARS: int = 8_000                  # candidate CV text sent with every call of a CV-aware conversation (about 2,000 tokens)
+    AGENT_MAX_JD_CHARS: int = 12_000                 # job text sent with every call (about 3,000 tokens)
+    AGENT_HISTORY_TURNS: int = 1                     # earlier answered turns sent back to the model (each one costs tokens again)
+    AGENT_TIMEOUT_SECONDS: int = 90
+
+    # ---- Agentic mode: one assistant that uses the app's own features through specialists (see app/agentic) ----
+    # Models are chosen per ROLE, each one OpenRouter model id; an empty value means "use LLM_MODEL".
+    AGENTIC_ENABLED: bool = True
+    AGENTIC_MODEL_ROUTER: str = ""        # picks the specialist when the keyword rules are unsure (a few hundred tokens a call)
+    AGENTIC_MODEL_ACT: str = ""           # the specialists' tool-using model
+    AGENTIC_MODEL_WRITE: str = ""         # long-form writing inside tools (interview questions, LinkedIn posts)
+    AGENTIC_MODEL_FALLBACK: str = ""      # tried once when the model above fails with a transport error; empty = none
+    AGENTIC_MAX_STEPS: int = 5            # model calls per turn that may ask for tools
+    AGENTIC_MAX_TOOLS_PER_STEP: int = 3
+    AGENTIC_TOOL_RESULT_CHARS: int = 6000  # a tool's answer is cut to this before the model sees it
+    AGENTIC_MATCH_WAIT_SECONDS: int = 40   # how long the matching tool waits for a result before saying "still running"
+    AGENTIC_HISTORY_MESSAGES: int = 8      # earlier messages the model sees
     LLM_TIMEOUT_SECONDS: int = 60
     LLM_BULK_TIMEOUT_SECONDS: int = 300
 
@@ -156,6 +167,10 @@ class Settings(BaseSettings):
     S3_REGION: str = ""
     S3_PREFIX: str = ""             # optional key prefix inside the bucket
     MAX_FILE_SIZE_MB: int = 10
+    # Optional antivirus for uploaded files: tcp://host:3310 of a ClamAV daemon. Empty = off. With CLAMAV_REQUIRED an
+    # unreachable scanner rejects the upload instead of letting it through unscanned.
+    CLAMAV_URL: str = ""
+    CLAMAV_REQUIRED: bool = False
     MAX_TEXT_INPUT_CHARS: int = 50000
     # Data retention: raw CV files/text + embeddings older than this can be
     # purged by db/cleanup_old_cvs.py (0 = keep forever). Structured data,
@@ -163,10 +178,15 @@ class Settings(BaseSettings):
     CV_RETENTION_DAYS: int = 0
 
     # ---- Embeddings / matching ----
-    EMBEDDING_MODEL_NAME: str = "all-mpnet-base-v2"
-    EMBEDDING_DIM: int = 768
+    # multilingual-e5-small: 384-d vectors. Changing the model or EMBEDDING_DIM means recreating the Qdrant collections and
+    # re-uploading the CVs / JDs (the stored vectors are not comparable between models).
+    EMBEDDING_MODEL_NAME: str = "intfloat/multilingual-e5-small"
+    EMBEDDING_DIM: int = 384
+    # e5 models expect a task prefix on every text ("query: " for symmetric similarity, which is what CV-vs-JD matching is).
+    # Set it to "" when EMBEDDING_MODEL_NAME is not an e5 model.
+    EMBEDDING_TEXT_PREFIX: str = "query: "
     EMBEDDING_BATCH_SIZE: int = 64
-    # URL of the model-server container (e.g. http://model-server:8080). Empty = load the model in this process.
+    # URL of the model-server container (e.g. http://model-server:8080). Required: the backend image carries no ML runtime.
     EMBEDDING_SERVICE_URL: str = ""
     EMBEDDING_SERVICE_TOKEN: str = ""
     EMBEDDING_SERVICE_TIMEOUT_SECONDS: float = 120.0
@@ -184,10 +204,9 @@ class Settings(BaseSettings):
     OCR_MAX_PAGES: int = 8           # scanned pages OCR'd per PDF (CVs are short; guards against huge scans)
     OCR_MIN_IMAGE_PX: int = 150      # embedded images smaller than this (logos, icons) are not OCR'd
     # Upper safety ceiling for a single matching job. There is no longer a small
-    # hard cap: the match worker streams candidates in bounded chunks, so any
-    # realistic number of CVs is fine. This only rejects absurd requests so one
-    # job can't monopolise a worker forever. 0 disables the ceiling entirely.
-    MATCH_MAX_CVS: int = 0   # 0 = no ceiling: matches stream in chunks, memory does not grow with the CV count
+    # Maximum CVs in ONE match (picked by hand or "newest N"). A request above it is refused, and a match that names
+    # no CVs scores only the newest MATCH_MAX_CVS. Raise it deliberately if you need more.
+    MATCH_MAX_CVS: int = 10_000
     MATCHING_TIMEOUT_SECONDS: int = 3600
     # Threads used for per-candidate scoring inside a single match job. Keep this
     # small on a 4 vCPU host so matching never starves the API.
@@ -216,9 +235,21 @@ class Settings(BaseSettings):
     LIST_CACHE_TTL_SECONDS: int = 60
 
     # ---- LLM re-scoring of the best semantic matches ----
-    LLM_MATCH_TOP_N: int = 50          # top candidates re-scored by the LLM
+    LLM_MATCH_TOP_N: int = 30          # top candidates re-scored by the LLM (the semantic stage only filters; the LLM decides)
     LLM_MATCH_BATCH_SIZE: int = 10     # CVs per LLM request (smaller = faster first results, isolated failures)
     LLM_MATCH_CONCURRENCY: int = 3     # parallel LLM requests per process, across all running matches
+    # Candidates whose semantic overall score (0-100) is below this are not sent to the LLM; they keep their semantic score.
+    # 0 (default) = off: every candidate in the top LLM_MATCH_TOP_N is sent, even when only a few CVs were matched.
+    LLM_MATCH_MIN_SCORE: float = 0.0
+
+    # ---- Mandatory languages / certifications (app/matching/requirements.py) ----
+    # A small adjustment to the semantic score before the LLM step: + bonus per met mandatory CERTIFICATE (a language match earns
+    # nothing), x factor per mandatory requirement the CV is known to lack (it lists other languages / certificates but not this one). A CV that lists nothing of
+    # that kind is never penalised. Set REQUIREMENTS_MATCHING_ENABLED=false to switch the whole thing off.
+    REQUIREMENTS_MATCHING_ENABLED: bool = True
+    REQUIREMENT_MET_BONUS: float = 8.0
+    REQUIREMENT_MISSING_FACTOR: float = 0.75
+    REQUIREMENT_PREFERRED_BONUS: float = 3.0
 
     # ---- Match job queue (Redis-backed, consumed by the match-worker container) ----
     # When enabled, POST /api/match enqueues a job and returns immediately instead
@@ -285,11 +316,7 @@ class Settings(BaseSettings):
     CPU_THRESHOLD_PERCENT: int = 85
 
     # ---- Feature flags ----
-    ENABLE_EMAIL_SCHEDULER: bool = False
     SEND_EMAIL_REMINDER_FOLLOWUP: bool = False
-    EMAIL_CHECK_INTERVAL_MINUTES: int = 5
-    EMAIL_MAX_BATCH_SIZE: int = 10
-    EMAIL_SCHEDULE_UTC: str = ""
     FOLLOWUP_REMINDER_TZ: str = "Asia/Dubai"
 
     # ---------------- Derived helpers ----------------

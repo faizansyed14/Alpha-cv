@@ -11,6 +11,7 @@ import time
 from qdrant_client import QdrantClient
 
 from app.config.settings import settings
+from app.ingestion.profile_links import normalize_github, normalize_linkedin
 from qdrant_client.http.models import (
     HnswConfigDiff,
     VectorParamsDiff,
@@ -38,7 +39,10 @@ logger = logging.getLogger(__name__)
 
 # cv_structured payload without the advanced-search text (the whole CV, see app/ingestion/search_index.py):
 # what every read-only reader wants. A reader that writes the whole payload back must NOT use it.
-CV_PAYLOAD = PayloadSelectorExclude(exclude=["search_text"])
+# The CV content that is stored inside structured_info only (see store_structured_data). Readers take it from there.
+CV_CONTENT_KEYS = ("doc_type", "name", "job_title", "category", "gender", "languages", "certifications", "skills_sentences",
+                   "responsibility_sentences", "keywords", "contact_info", "processing_metadata")
+CV_PAYLOAD = PayloadSelectorExclude(exclude=["search_text", "search_literal"])
 
 _CAREERS_LIST_CACHE: dict[str, tuple[float, tuple[list[dict[str, Any]], int]]] = {}
 _CAREERS_LIST_CACHE_LOCK = threading.Lock()
@@ -99,7 +103,16 @@ def resolve_candidate_contact(
     )
     email_s = str(email).strip() if email and str(email).strip() else None
     phone_s = str(phone).strip() if phone and str(phone).strip() else None
-    return {"email": email_s, "phone": phone_s}
+    # Profile links are rebuilt from what was stored, so only a plain https link to LinkedIn or GitHub is ever returned.
+    linkedin = normalize_linkedin(payload.get("linkedin_url") or structured.get("linkedin_url") or contact.get("linkedin"))
+    github = normalize_github(payload.get("github_url") or structured.get("github_url") or contact.get("github"))
+    return {"email": email_s, "phone": phone_s, "linkedin_url": linkedin, "github_url": github}
+
+
+def _profile_links(payload: Optional[Dict[str, Any]], structured: Optional[Dict[str, Any]]) -> Dict[str, Optional[str]]:
+    """{"linkedin_url", "github_url"} for a CV (clean https links, or None)."""
+    found = resolve_candidate_contact(payload, structured)
+    return {"linkedin_url": found["linkedin_url"], "github_url": found["github_url"]}
 
 
 def _careers_cache_get(key: str, ttl_seconds: float) -> Optional[tuple[list[dict[str, Any]], int]]:
@@ -247,6 +260,7 @@ class QdrantUtils:
             ("cv_structured", "nationality", PayloadSchemaType.KEYWORD),
             ("cv_structured", "notice_period", PayloadSchemaType.KEYWORD),
             ("cv_structured", "structured_info.keywords", PayloadSchemaType.KEYWORD),
+            ("cv_structured", "structured_info.languages", PayloadSchemaType.KEYWORD),
             ("cv_structured", "structured_info.years_of_experience", PayloadSchemaType.FLOAT),
             ("cv_structured", "is_job_application", PayloadSchemaType.BOOL),
             # Advanced search fields (app/ingestion/search_index.py). The full-text index lives on disk so it stays
@@ -260,6 +274,10 @@ class QdrantUtils:
             # Candidates list: newest-first paging, and category counts, done by Qdrant (see list_cv_page / facet).
             ("cv_structured", "uploaded_at", PayloadSchemaType.FLOAT),
             ("cv_structured", "structured_info.category", PayloadSchemaType.KEYWORD),
+            ("job_postings_structured", "public_token", PayloadSchemaType.KEYWORD),   # public job links
+            # Applicant ranking inside a job ("#3 for this job"): counted by Qdrant per candidate, never by a scan.
+            ("cv_structured", "job_id", PayloadSchemaType.KEYWORD),
+            ("cv_structured", "applied_job_match.overall_score", PayloadSchemaType.FLOAT),
         ]
         for collection, field, schema in index_specs:
             try:
@@ -299,7 +317,7 @@ class QdrantUtils:
     ) -> bool:
         try:
             collection_name = f"{doc_type}_documents"
-            dummy_vector = [0.0] * 768
+            dummy_vector = [0.0] * settings.EMBEDDING_DIM
             payload = {
                 "id": doc_id,
                 "filename": filename,
@@ -327,7 +345,7 @@ class QdrantUtils:
 
     def store_structured_data(self, doc_id: str, doc_type: str, structured_data: Dict[str, Any]) -> bool:
         """
-        Store standardized JSON into {doc_type}_structured with a dummy 768 vector.
+        Store standardized JSON into {doc_type}_structured with a dummy zero vector (EMBEDDING_DIM wide).
         structured_data expected to include "structured_info".
         
         PRESERVES ALL FIELDS from structured_data including:
@@ -337,7 +355,7 @@ class QdrantUtils:
         """
         try:
             collection_name = f"{doc_type}_structured"
-            dummy_vector = [0.0] * 768
+            dummy_vector = [0.0] * settings.EMBEDDING_DIM
             
             # CRITICAL: Preserve ALL fields from structured_data
             # This ensures job application metadata is not lost
@@ -347,9 +365,14 @@ class QdrantUtils:
                 "stored_at": datetime.utcnow().isoformat(),  # Update timestamp
             }
             
-            # Ensure structured_info is properly nested
+            # Ensure structured_info is properly nested. The CV's content (name, title, skills, keywords, ...) lives ONLY
+            # there; the top level keeps the facts about the person and the application (contact, location, years, job
+            # link, ...), so nothing is stored twice.
             if "structured_info" not in payload:
                 payload["structured_info"] = structured_data
+                if doc_type == "cv":
+                    for key in CV_CONTENT_KEYS:
+                        payload.pop(key, None)
 
             # The Candidates list is paged newest-first on this field, so a CV has it from the moment it exists.
             if doc_type == "cv" and "uploaded_at" not in payload:
@@ -394,7 +417,7 @@ class QdrantUtils:
             
             # Create a dummy vector for the point (Qdrant requires a vector field)
             # We'll store the actual vectors in the payload
-            dummy_vector = [0.0] * 768  # 768-dimensional zero vector
+            dummy_vector = [0.0] * settings.EMBEDDING_DIM
             
             # Create single point with all vectors in payload
             point = PointStruct(
@@ -634,10 +657,13 @@ class QdrantUtils:
         experience_max: Optional[float] = None,
         locations: Optional[List[str]] = None,
         nationalities: Optional[List[str]] = None,
+        languages: Optional[List[str]] = None,
         limit: int = 50,
         cursor: Optional[str] = None,
         with_total: bool = False,
         boolean_query: Optional[str] = None,
+        added_after: Optional[float] = None,
+        added_before: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         The CV database's advanced search, over the WHOLE cv_structured collection through the indexed search
@@ -648,6 +674,7 @@ class QdrantUtils:
           so "Java" never returns a JavaScript-only CV and "project management" never matches "managed a project".
         - match_all=True: every keyword must match. False: any keyword; CVs matching all of them come first.
         - Locations / nationalities: any of the selected values, matched by words ("Dubai" finds "Dubai, UAE").
+        - Languages: any of the selected values, exact match on structured_info.languages.
         - Experience: numeric range on the years of experience; CVs without a readable number are left out.
 
         Paged with an opaque cursor ("<tier>:<point id>"): pass next_cursor back to continue exactly where the
@@ -673,6 +700,14 @@ class QdrantUtils:
             wanted = [w for w in dict.fromkeys(wanted) if w]
             if wanted:
                 base.append(Filter(should=[FieldCondition(key=field, match=MatchText(text=w)) for w in wanted]))
+        lang_wanted = [str(v).strip() for v in languages or [] if str(v).strip()]
+        lang_wanted = list(dict.fromkeys(lang_wanted))
+        if lang_wanted:
+            # Exact values from the Languages facet (structured_info.languages is a keyword array).
+            base.append(FieldCondition(key="structured_info.languages", match=MatchAny(any=lang_wanted)))
+        if added_after is not None or added_before is not None:
+            # Freshness: when the CV was stored (cv_documents.upload_date, mirrored into uploaded_at as epoch seconds).
+            base.append(FieldCondition(key="uploaded_at", range=Range(gte=added_after, lte=added_before)))
         if experience_min is not None or experience_max is not None:
             base.append(FieldCondition(key="search_experience", range=Range(gte=experience_min, lte=experience_max)))
 
@@ -702,7 +737,7 @@ class QdrantUtils:
             else:
                 offset = cursor
 
-        payload = True if (term_list or bool_node is not None) else PayloadSelectorExclude(exclude=["search_text"])
+        payload = True if (term_list or bool_node is not None) else PayloadSelectorExclude(exclude=["search_text", "search_literal"])
         page = max(32, min(limit, 256))
         results: List[tuple] = []
         scanned = 0
@@ -715,7 +750,8 @@ class QdrantUtils:
                 )
                 for i, p in enumerate(points):
                     scanned += 1
-                    text = (p.payload or {}).get("search_text", "")
+                    pl = p.payload or {}
+                    text = pl.get("search_literal") or pl.get("search_text", "")
                     hits = matched_terms(text, term_list) if term_list else []
                     if keep == "bool":
                         if not bq.evaluate(bool_node, text):
@@ -766,6 +802,7 @@ class QdrantUtils:
         "nationality": "nationality",
         "notice_period": "notice_period",
         "keywords": "structured_info.keywords",
+        "languages": "structured_info.languages",
     }
 
     def get_cv_facet(self, field: str, limit: int = 200) -> List[Dict[str, Any]]:
@@ -778,12 +815,30 @@ class QdrantUtils:
         qdrant_field = self.CV_FACET_FIELDS.get(field)
         if not qdrant_field:
             raise ValueError(f"Facet not allowed for field: {field}")
+        # An exact facet walks the index of every CV; the filter panels ask for it on every page load, so it is kept
+        # for a few seconds (at most that stale) instead of being recounted per request.
+        cache, key = self._facet_cache(), f"facet:{field}:{limit}"
+        cached = cache.get(key, namespace="cv_data") if cache else None
+        if cached is not None:
+            return cached
         try:
             resp = self.client.facet(collection_name="cv_structured", key=qdrant_field, limit=limit, exact=True)
-            return [{"value": hit.value, "count": hit.count} for hit in resp.hits if hit.value]
+            values = [{"value": hit.value, "count": hit.count} for hit in resp.hits if hit.value]
+            if cache:
+                cache.set(key, values, ttl_seconds=20, namespace="cv_data")
+            return values
         except Exception as e:
             logger.error(f"get_cv_facet({field}) failed: {e}")
             return []
+
+    @staticmethod
+    def _facet_cache():
+        try:
+            from app.providers.cache.memory import get_cache_service
+
+            return get_cache_service()
+        except Exception:  # noqa: BLE001
+            return None
 
     def list_cvs_by_category(self, category: str) -> List[Dict[str, Any]]:
         """
@@ -875,10 +930,13 @@ class QdrantUtils:
     # ---------- Candidates list: counts and paging done by Qdrant ----------
 
     @staticmethod
-    def _category_filter(category: Optional[str]) -> Optional[Filter]:
-        """Filter for one category. "General" is also what a CV without a category counts as."""
+    def _category_filter(category) -> Optional[Filter]:
+        """Filter for one category, or for ANY of several (a list). "General" is also what a CV without a category counts as."""
         if not category:
             return None
+        if isinstance(category, (list, tuple, set)):
+            parts = [QdrantUtils._category_filter(c) for c in category if c]
+            return Filter(should=parts) if parts else None
         if category == "General":
             return Filter(should=[
                 FieldCondition(key="structured_info.category", match=MatchValue(value="General")),
@@ -895,6 +953,10 @@ class QdrantUtils:
 
         CVs without a category are counted under "General", so the counts always add up to count_cvs().
         """
+        cache = self._facet_cache()
+        cached = cache.get("categories", namespace="cv_data") if cache else None
+        if cached is not None:
+            return cached
         try:
             total = self.count_cvs()
             hits = self.client.facet("cv_structured", key="structured_info.category", limit=1000, exact=True).hits
@@ -902,6 +964,8 @@ class QdrantUtils:
             missing = total - sum(categories.values())
             if missing > 0:
                 categories["General"] = categories.get("General", 0) + missing
+            if cache:
+                cache.set("categories", categories, ttl_seconds=20, namespace="cv_data")
             return categories
         except Exception as e:
             logger.error(f"get_categories_with_counts failed: {e}")
@@ -930,16 +994,51 @@ class QdrantUtils:
     def list_cv_ids_newest_first(self, offset: int, limit: int, category: Optional[str] = None) -> List[str]:
         """The ids of one page of CVs, newest upload first, from Qdrant's own sorted index.
 
-        Qdrant cannot skip rows when sorting, so rows before ``offset`` are read as ids + one number each (a few
-        bytes per CV; 30,000 CVs is about a megabyte) and dropped; only the page itself is read in full afterwards.
+        Qdrant cannot skip rows when sorting, so a page reached by number alone has to read every id before it. To keep
+        browsing fast however many CVs there are, each page remembers where it ended (its uploaded_at, unique per CV,
+        and its id) for a few minutes; the next page then starts right there instead of at the top. A page reached
+        some other way (a jump, an expired cursor) falls back to reading the ids before it: a few bytes per CV.
         """
         if limit <= 0:
             return []
-        points, _ = self.client.scroll(
-            "cv_structured", scroll_filter=self._category_filter(category), limit=offset + limit,
-            order_by=OrderBy(key="uploaded_at", direction=Direction.DESC),
-            with_payload=False, with_vectors=False)
-        return [str(pt.id) for pt in points[offset: offset + limit]]
+        cursor = self._cv_cursor_get(category, offset) if offset > 0 else None
+        if cursor:
+            points, _ = self.client.scroll(
+                "cv_structured", scroll_filter=self._category_filter(category), limit=limit + 1,
+                order_by=OrderBy(key="uploaded_at", direction=Direction.DESC, start_from=cursor[0]),
+                with_payload=["uploaded_at"], with_vectors=False)
+            page = [pt for pt in points if str(pt.id) != cursor[1]][:limit]   # start_from is inclusive: drop the last row of the previous page
+        else:
+            points, _ = self.client.scroll(
+                "cv_structured", scroll_filter=self._category_filter(category), limit=offset + limit,
+                order_by=OrderBy(key="uploaded_at", direction=Direction.DESC),
+                with_payload=["uploaded_at"], with_vectors=False)
+            page = points[offset: offset + limit]
+        if page and (page[-1].payload or {}).get("uploaded_at") is not None:
+            self._cv_cursor_set(category, offset + len(page), ((page[-1].payload or {})["uploaded_at"], str(page[-1].id)))
+        return [str(pt.id) for pt in page]
+
+    @staticmethod
+    def _cv_cursor_key(category, position: int) -> str:
+        name = "|".join(sorted(category)) if isinstance(category, (list, tuple, set)) else category
+        return f"{name or '*'}:{position}"
+
+    def _cv_cursor_get(self, category: Optional[str], position: int):
+        try:
+            from app.providers.cache.redis import get_redis_cache
+
+            value = get_redis_cache().get(self._cv_cursor_key(category, position), namespace="cv_cursor")
+            return (float(value[0]), str(value[1])) if value else None
+        except Exception:  # noqa: BLE001 - a missing cursor only costs speed
+            return None
+
+    def _cv_cursor_set(self, category: Optional[str], position: int, value) -> None:
+        try:
+            from app.providers.cache.redis import get_redis_cache
+
+            get_redis_cache().set(self._cv_cursor_key(category, position), [value[0], value[1]], ttl_seconds=600, namespace="cv_cursor")
+        except Exception:  # noqa: BLE001
+            pass
 
     def get_structured_cv(self, cv_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -961,8 +1060,11 @@ class QdrantUtils:
                 "skills_sentences": (s.get("skills_sentences", []) or s.get("skills", []) or [])[:20],
                 "responsibility_sentences": (s.get("responsibilities", []) or s.get("responsibility_sentences", []) or [])[:10],
                 "expected_salary": s.get("expected_salary") or doc.get("expected_salary"),
+                "languages": s.get("languages") or [],
+                "certifications": s.get("certifications") or [],
                 "email": s.get("email") or contact.get("email") or s.get("applicant_email") or doc.get("applicant_email") or "",
                 "phone": s.get("phone") or contact.get("phone") or s.get("applicant_phone") or doc.get("applicant_phone") or "",
+                **_profile_links(doc, s),
             }
             return result
         except Exception as e:
@@ -1019,8 +1121,11 @@ class QdrantUtils:
                     "skills_sentences": (s.get("skills_sentences", []) or s.get("skills", []) or [])[:20],
                     "responsibility_sentences": (s.get("responsibilities", []) or s.get("responsibility_sentences", []) or [])[:10],
                     "expected_salary": s.get("expected_salary") or struct_payload.get("expected_salary"),
+                    "languages": s.get("languages") or [],
+                    "certifications": s.get("certifications") or [],
                     "email": email,
                     "phone": phone,
+                    **_profile_links(struct_payload or doc_payload, s),
                 }
                 results.append(result)
             
@@ -1137,7 +1242,7 @@ class QdrantUtils:
         """
         try:
             collection_name = "job_postings_structured"
-            dummy_vector = [0.0] * 768
+            dummy_vector = [0.0] * settings.EMBEDDING_DIM
             payload = {
                 "id": job_id,
                 "public_token": public_token,
@@ -1184,7 +1289,7 @@ class QdrantUtils:
         """
         try:
             collection_name = "job_postings_structured"
-            dummy_vector = [0.0] * 768  # Not used for matching
+            dummy_vector = [0.0] * settings.EMBEDDING_DIM  # Not used for matching
             
             payload = {
                 "id": job_id,
@@ -1402,7 +1507,7 @@ class QdrantUtils:
             vector = results[0][0].vector
             if vector is None:
                 logger.warning(f"Vector is None for job {job_id}, using dummy vector")
-                vector = [0.0] * 768  # Use dummy vector
+                vector = [0.0] * settings.EMBEDDING_DIM  # Use dummy vector
             
             # Update the point
             point = PointStruct(id=job_id, vector=vector, payload=current_payload)

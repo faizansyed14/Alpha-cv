@@ -8,12 +8,12 @@ from app.db import startup_lock
 
 
 def _postgres(monkeypatch, engine):
-    monkeypatch.setattr(startup_lock.settings, "AUTH_DB_URL", "postgresql+psycopg2://u:p@db/auth_db")
-    monkeypatch.setattr("app.db.auth_db.engine", engine)
+    monkeypatch.setattr(startup_lock.settings, "DATABASE_URL", "postgresql+psycopg2://u:p@db/auth_db")
+    monkeypatch.setattr("app.db.database.engine", engine)
 
 
 def test_sqlite_needs_no_lock(monkeypatch):
-    monkeypatch.setattr(startup_lock.settings, "AUTH_DB_URL", "sqlite:///x.db")
+    monkeypatch.setattr(startup_lock.settings, "DATABASE_URL", "sqlite:///x.db")
     with startup_lock.schema_init_lock():
         pass
 

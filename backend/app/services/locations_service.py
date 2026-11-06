@@ -54,6 +54,48 @@ def _ensure_loaded() -> None:
         _loaded = True
 
 
+_COUNTRY_ALIASES = {
+    "uae": "United Arab Emirates", "u.a.e": "United Arab Emirates", "u.a.e.": "United Arab Emirates",
+    "emirates": "United Arab Emirates", "uk": "United Kingdom", "u.k": "United Kingdom", "u.k.": "United Kingdom",
+    "england": "United Kingdom", "usa": "United States", "u.s.a": "United States", "u.s.a.": "United States",
+    "us": "United States", "ksa": "Saudi Arabia", "korea": "South Korea",
+}
+
+
+def country_of(location: str) -> str:
+    """The country a stored location belongs to: "Dubai, UAE" and "Dubai" and "Dubai, United Arab Emirates" all give
+    "United Arab Emirates". Empty when it cannot be told with certainty (an unknown city, free text)."""
+    _ensure_loaded()
+    raw = (location or "").strip()
+    if not raw:
+        return ""
+    countries = {c["country"].lower(): c["country"] for c in _cities}
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    tail = parts[-1].lower() if parts else ""
+    if len(parts) > 1:
+        return _COUNTRY_ALIASES.get(tail) or countries.get(tail) or ""
+    if tail in _COUNTRY_ALIASES:
+        return _COUNTRY_ALIASES[tail]
+    if tail in countries:
+        return countries[tail]
+    hits = [c for c in _cities if c["city"].lower() == tail]
+    return hits[0]["country"] if hits else ""   # the list is ordered by population: the best-known city wins
+
+
+def group_by_country(values):
+    """[{value: raw location, count}] -> [{value: country, count, members: [raw locations]}], biggest first.
+    Locations that cannot be placed in a country are left out."""
+    grouped = {}
+    for v in values:
+        country = country_of(v["value"])
+        if not country:
+            continue
+        g = grouped.setdefault(country, {"value": country, "count": 0, "members": []})
+        g["count"] += int(v["count"])
+        g["members"].append(v["value"])
+    return sorted(grouped.values(), key=lambda g: (-g["count"], g["value"]))
+
+
 def search_locations(query: str, limit: int = 10) -> List[Dict[str, str]]:
     """Return up to `limit` "City, Country" matches for `query`.
 

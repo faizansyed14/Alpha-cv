@@ -33,7 +33,7 @@ export function ImportSelectionsModal({
 }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg border-slate-200 bg-white text-slate-900 shadow-[var(--shadow-md)]">
+      <DialogContent className="sm:max-w-lg border-surface-border bg-white text-slate-900 shadow-[var(--shadow-md)]">
         <DialogHeader>
           <DialogTitle className="text-slate-900">Upload Selections & Joinings Excel</DialogTitle>
           <DialogDescription>
@@ -44,7 +44,7 @@ export function ImportSelectionsModal({
           <div className="space-y-1">
             <div className="text-xs font-semibold text-slate-600">Team</div>
             <Select value={importTeam} onValueChange={(v) => onImportTeamChange(v as TrackerTeam)}>
-              <SelectTrigger className="h-9 bg-white border-slate-200 text-slate-900">
+              <SelectTrigger className="h-9 bg-white border-surface-border text-slate-900">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

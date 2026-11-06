@@ -22,7 +22,7 @@ CLEAN="${2:-}"
 case "$MODE" in
   local) COMPOSE_FILE="docker-compose.local.yml"; ENV_FILE=".env.local"; SERVICE="frontend-local"; NGINX="nginx-local" ;;
   dev)   COMPOSE_FILE="docker-compose.dev.yml";   ENV_FILE=".env.dev";   SERVICE="frontend-dev";   NGINX="nginx-dev" ;;
-  prod)  COMPOSE_FILE="docker-compose.prod.yml";  ENV_FILE=".env";       SERVICE="frontend";       NGINX="nginx" ;;
+  prod)  COMPOSE_FILE="docker-compose.prod.yml";  ENV_FILE=".env.prod"; SERVICE="frontend";       NGINX="nginx" ;;
   *) echo -e "${RED}Usage: $0 [local|dev|prod] [clean]${NC}" >&2; exit 1 ;;
 esac
 

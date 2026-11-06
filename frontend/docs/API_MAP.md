@@ -29,7 +29,6 @@ Source of truth: existing `src/lib/api.ts` + `src/lib/trackerApi.ts`. No invente
 | Admin users | adminService | `/api/admin/users` | CRUD |
 | Careers admin | careersService | `/api/careers/admin/jobs*` | * |
 | Public careers | careersService | `/api/careers/jobs/*` | GET/POST |
-| Email | emailService | `/api/email/*` | GET/POST |
 | Monitor | systemService | `/api/monitor/*` | GET |
 | Tracker | trackerApi | `/api/tracker/*` | * |
 | Notice | api | `/api/notice`, `/api/admin/notice` | GET/PUT/DELETE |

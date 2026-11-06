@@ -7,19 +7,20 @@ frontend, Postgres + Qdrant + Redis, nginx in front.
 
 ```bash
 # Production
-cp .env.example .env            # fill in every CHANGE_ME + your domain/keys
+# first run creates .env.prod from .env.prod.example: fill in every CHANGE_ME + your domain/keys, run again
 ./scripts/start.sh prod         # always rebuilds every image; add `clean` for a --no-cache build
 ./scripts/stop.sh prod          # never deletes volumes
 
 # Development
-cp .env.development.example .env.dev
+# first run creates .env.dev from .env.dev.example (S3 + RDS): fill it in, run again
 ./scripts/start.sh dev          # frontend :3000, api :8000, nginx :80
 ./scripts/start.sh local        # same as dev, but Postgres + raw files live in Docker volumes (no S3 / RDS)
 ./scripts/stop.sh dev
 ```
 
-All configuration lives in `.env` / `.env.dev`, see the example files for
-every variable with comments. The backend refuses to start in production with
+All configuration lives in `.env.local` / `.env.dev` / `.env.prod` (git-ignored, they hold secrets). The committed `.env.local.example`, `.env.dev.example` and
+`.env.prod.example` are their templates: `start.sh` copies the right one on first run, and every
+variable is documented with comments in it. The backend refuses to start in production with
 default secrets, and `start.sh prod` refuses to run while `CHANGE_ME`
 placeholders remain.
 
@@ -31,8 +32,8 @@ placeholders remain.
 | `frontend/` | Next.js 15 app (zustand stores, axios client in `src/lib/api.ts`) |
 | `docker-compose.prod.yml` / `docker-compose.dev.yml` | The two deployment stacks (CPU-only) |
 | `scripts/` | `start.sh` / `stop.sh` / `clean.sh` (+ `system/setup-ssl.sh`, `testing/`, `utils/` helpers) |
-| `db/` | Postgres init (creates `auth_db`), Qdrant collection init, guarded data reset, `cleanup_old_cvs.py` retention tool |
-| `backend/migrations/` | Alembic migrations (`alembic -n auth ...` / `alembic -n tracker ...`) |
+| `db/` | RDS bootstrap SQL, Qdrant collection init, guarded data reset, `cleanup_old_cvs.py` retention tool |
+| `backend/migrations/` | Alembic: one migration history for the whole database (`alembic upgrade head`; the app applies it at startup) |
 | `nginx/` | `nginx.conf.template` (domain via `DOMAIN` env) + dev config |
 | `docs/` | Documentation, including `docs/AUDIT_REPORT.md` (full audit + refactor log) |
 
@@ -63,13 +64,13 @@ running services. Set `E2E_REAL_MODEL=1` to use the real embedding model.
   (default 5000, `0`=off) is only an absurd-request ceiling. Caches: per-text
   embedding cache (Redis), in-process TTL cache for Qdrant documents, a Redis
   result cache keyed by (cv, jd, weights), and a per-`(jd,cv)` LLM-analysis
-  cache. Knobs live in `.env` under "Matching performance" / "Match job queue".
+  cache. Knobs live in `.env.prod` / `.env.dev` under "Matching performance" / "Match job queue".
   See `docs/MATCHING_SCALABILITY.md` for the bottleneck analysis and the
   (negative) vector-sharding assessment.
 - **File storage** is pluggable: `STORAGE_BACKEND=local` (default, docker
   volume) or `s3` (AWS S3 + `S3_BUCKET`; uses the EC2 instance role). Relational
-  data (auth, tracker, email) moves to AWS RDS by changing `AUTH_DB_URL`,
-  `TRACKER_DB_URL` and `POSTGRES_*` in `.env`, no code changes.
+  data (users, tracker, email) lives in ONE PostgreSQL database and moves to AWS RDS by changing
+  `DATABASE_URL` in `.env.prod`, no code changes.
 - **Retention**: `python3 db/cleanup_old_cvs.py --days 365 --dry-run` purges
   raw files + embeddings of old CVs while keeping searchable structured data,
   notes, dedup hashes, tracker/auth/email records. Embeddings regenerate
@@ -77,6 +78,6 @@ running services. Set `E2E_REAL_MODEL=1` to use the real embedding model.
 - **Email dedup**: processed email ids persist in Postgres, and each extracted
   CV stores a `content_sha256`, the same CV file arriving in another email is
   skipped, and applicant+job duplicates are rejected.
-- **Schema migrations**: Alembic is wired for both relational DBs
-  (`cd backend && alembic -n auth upgrade head`). Baseline revisions are
-  included; the app still bootstraps tables on first run.
+- **Schema migrations**: one Alembic history (`backend/migrations`) covers the single
+  PostgreSQL database; the app runs `alembic upgrade head` at startup under a lock, and
+  `cd backend && alembic revision --autogenerate -m "..."` creates the next one.

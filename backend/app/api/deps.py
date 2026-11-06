@@ -9,7 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session, select
 
 from app.config.settings import settings
-from app.db.auth_db import get_session
+from app.db.database import get_session
 from app.models.user import User
 from app.security.auth import decode_token
 import app.services.presence as presence

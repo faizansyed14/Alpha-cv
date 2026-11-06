@@ -1,35 +1,38 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Search, Loader2, ChevronDown, ChevronUp, Tag, Eye, MapPin, Globe, Clock } from '@/components/icons';
+
+import { useEffect, useMemo, useState } from 'react';
+import { X, Search, Loader2, ChevronDown, ChevronUp, Tag } from '@/components/icons';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
-import type { CVAdvancedSearchParams, CVAdvancedSearchResponse, CVSearchResult } from '@/lib/types';
+import type { CVAdvancedSearchParams } from '@/lib/types';
 
 interface AdvancedSearchModalProps {
   onClose: () => void;
-  onViewDetails: (cvId: string) => void;
-  /** Open straight on the boolean-string box. */
+  /** Run search on the candidates page with these filters. */
+  onSubmit: (query: CVAdvancedSearchParams) => void;
   initialMode?: 'keywords' | 'boolean';
 }
 
 interface FacetValue {
+  members?: string[];
   value: string;
   count: number;
 }
 
-const PAGE_SIZE = 50;
-
-/** Searchable, checkbox multi-select over a facet (distinct values + counts
- * fetched once from the whole CV database, see /api/cv/search/facets/:field). */
+/** Searchable checkbox multi-select over a facet. */
 function FacetCheckboxList({
   field,
+  label,
   selected,
   onToggle,
+  onLoaded,
 }: {
-  field: 'location' | 'nationality';
+  field: 'location' | 'nationality' | 'languages';
+  label: string;
   selected: string[];
   onToggle: (value: string) => void;
+  onLoaded?: (values: FacetValue[]) => void;
 }) {
   const [values, setValues] = useState<FacetValue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,9 +42,12 @@ function FacetCheckboxList({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    api.getCVSearchFacet(field)
+    api
+      .getCVSearchFacet(field)
       .then((res) => {
-        if (!cancelled) setValues(res.values || []);
+        if (cancelled) return;
+        setValues(res.values || []);
+        onLoaded?.(res.values || []);
       })
       .catch(() => {
         if (!cancelled) setValues([]);
@@ -62,17 +68,11 @@ function FacetCheckboxList({
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => setCollapsed((c) => !c)}
-        className="flex w-full items-center justify-between text-left"
-      >
+      <button type="button" onClick={() => setCollapsed((c) => !c)} className="flex w-full items-center justify-between text-left">
         <span className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-800">
-          {field === 'location' ? 'Current location' : 'Nationality'}
+          {label}
           {selected.length > 0 && (
-            <span className="rounded-full bg-brand-50 px-1.5 py-0.5 text-[11px] font-semibold text-brand-700">
-              {selected.length}
-            </span>
+            <span className="rounded-full bg-brand-50 px-1.5 py-0.5 text-[11px] font-semibold text-brand-700">{selected.length}</span>
           )}
         </span>
         {collapsed ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronUp className="h-4 w-4 text-slate-400" />}
@@ -83,10 +83,10 @@ function FacetCheckboxList({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Search ${field === 'location' ? 'locations' : 'nationalities'}…`}
+            placeholder={`Search ${label.toLowerCase()}…`}
             className="field-input mb-2 w-full"
           />
-          <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
+          <div className="max-h-40 space-y-1 overflow-y-auto pr-1">
             {loading ? (
               <div className="flex items-center gap-2 py-2 text-[12px] text-slate-400">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
@@ -119,7 +119,14 @@ function FacetCheckboxList({
   );
 }
 
-export default function AdvancedSearchModal({ onClose, onViewDetails, initialMode = 'keywords' }: AdvancedSearchModalProps) {
+/**
+ * Centered search form. Results are shown on the candidates list after submit —
+ * not in a side panel inside this overlay.
+ */
+export default function AdvancedSearchModal({ onClose, onSubmit, initialMode = 'keywords' }: AdvancedSearchModalProps) {
+  const [freshness, setFreshness] = useState<'any' | '1' | '7' | '30' | '90' | 'custom'>('any');
+  const [addedFrom, setAddedFrom] = useState('');
+  const [addedTo, setAddedTo] = useState('');
   const [mode, setMode] = useState<'keywords' | 'boolean'>(initialMode);
   const [booleanInput, setBooleanInput] = useState('');
   const [keywordInput, setKeywordInput] = useState('');
@@ -129,21 +136,10 @@ export default function AdvancedSearchModal({ onClose, onViewDetails, initialMod
   const [experienceMax, setExperienceMax] = useState('');
   const [locations, setLocations] = useState<string[]>([]);
   const [nationalities, setNationalities] = useState<string[]>([]);
+  const [languages, setLanguages] = useState<string[]>([]);
+  // The location filter lists countries; the search itself looks for the locations stored behind them.
+  const [countryMembers, setCountryMembers] = useState<Record<string, string[]>>({});
 
-  const [results, setResults] = useState<CVSearchResult[]>([]);
-  const [total, setTotal] = useState<{ count: number; estimate: boolean } | null>(null);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  // The query the shown results belong to: scrolling pages through it even if the filters are edited meanwhile.
-  const [activeQuery, setActiveQuery] = useState<CVAdvancedSearchParams | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-
-  /** "python, aws; sql" -> three keywords, skipping ones already added. */
   const withTyped = (current: string[], typed: string) => {
     const seen = new Set(current.map((k) => k.toLowerCase()));
     const added: string[] = [];
@@ -156,152 +152,99 @@ export default function AdvancedSearchModal({ onClose, onViewDetails, initialMod
     }
     return [...current, ...added];
   };
+
   const addKeyword = () => {
     setKeywords((prev) => withTyped(prev, keywordInput));
     setKeywordInput('');
   };
   const removeKeyword = (k: string) => setKeywords((prev) => prev.filter((x) => x !== k));
+  const toggle = (list: string[], v: string, set: (n: string[]) => void) =>
+    set(list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
 
-  const toggleLocation = (v: string) =>
-    setLocations((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
-  const toggleNationality = (v: string) =>
-    setNationalities((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
-
-  /** One page of results; asks again while a page comes back short but the search is not finished. */
-  const fetchPage = async (query: CVAdvancedSearchParams, cursor: string | null) => {
-    let rows: CVSearchResult[] = [];
-    let next: string | null = cursor;
-    let first: CVAdvancedSearchResponse | null = null;
-    for (let round = 0; round < 10; round += 1) {
-      const res = await api.searchCVsAdvanced({ ...query, cursor: next });
-      first = first ?? res;
-      rows = rows.concat(res.results || []);
-      next = res.next_cursor;
-      if (!next || rows.length >= PAGE_SIZE) break;
-    }
-    return { rows, next, first };
-  };
-
-  const runSearch = async () => {
-    // A keyword still in the box counts too: the search never silently drops what was typed.
+  const handleSearch = () => {
     const allKeywords = withTyped(keywords, keywordInput);
     setKeywords(allKeywords);
     setKeywordInput('');
     const num = (v: string) => (v.trim() && Number.isFinite(Number(v)) ? Number(v) : undefined);
     const booleanText = mode === 'boolean' ? booleanInput.trim() : '';
     const query: CVAdvancedSearchParams = {
-      keywords: allKeywords.length ? allKeywords : undefined,
+      keywords: mode === 'keywords' && allKeywords.length ? allKeywords : undefined,
       boolean_query: booleanText || undefined,
+      added_within_days: freshness !== 'any' && freshness !== 'custom' ? Number(freshness) : undefined,
+      added_from: freshness === 'custom' && addedFrom ? addedFrom : undefined,
+      added_to: freshness === 'custom' && addedTo ? addedTo : undefined,
       match_all: matchMode === 'all',
       experience_min: num(experienceMin),
       experience_max: num(experienceMax),
-      locations: locations.length ? locations : undefined,
+      locations: locations.length ? locations.flatMap((c) => countryMembers[c] || [c]) : undefined,
       nationalities: nationalities.length ? nationalities : undefined,
-      limit: PAGE_SIZE,
+      languages: languages.length ? languages : undefined,
+      limit: 100,
     };
-    setActiveQuery(query);
-    setSearching(true);
-    setError(null);
-    setHasSearched(true);
-    try {
-      const { rows, next, first } = await fetchPage(query, null);
-      setResults(rows);
-      setNextCursor(next);
-      setTotal(first?.total != null ? { count: first.total, estimate: !!first.total_is_estimate } : null);
-    } catch (e: any) {
-      setError(e?.message || 'Search failed');
-      setResults([]);
-      setNextCursor(null);
-      setTotal(null);
-    } finally {
-      setSearching(false);
-    }
+    onSubmit(query);
   };
 
-  const loadMore = useCallback(async () => {
-    if (!nextCursor || !activeQuery || loadingMore || searching) return;
-    setLoadingMore(true);
-    try {
-      const { rows, next } = await fetchPage(activeQuery, nextCursor);
-      setResults((prev) => [...prev, ...rows]);
-      setNextCursor(next);
-    } catch {
-      // A failed "load more" shouldn't blow away results already on screen;
-      // the user can scroll again to retry once nextCursor is still set.
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [nextCursor, activeQuery, loadingMore, searching]);
-
-  // Infinite scroll: fetch the next page as the sentinel at the bottom of the
-  // results list comes into view, instead of a "load more" click.
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    const root = scrollRef.current;
-    if (!sentinel || !root) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) loadMore();
-      },
-      { root, rootMargin: '200px' }
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [loadMore]);
-
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col bg-white">
-      <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5 sm:px-8">
-        <h2 className="text-[17px] font-semibold text-slate-900">{mode === 'boolean' ? 'Boolean search' : 'Advanced search'}</h2>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
-          aria-label="Close"
-        >
-          <X className="h-5 w-5" />
-        </button>
-      </div>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4">
+      <div
+        className="flex max-h-[min(92vh,880px)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-surface-border bg-white shadow-xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label={mode === 'boolean' ? 'Boolean search' : 'Advanced search'}
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-surface-border px-5 py-3.5">
+          <div>
+            <h2 className="text-[17px] font-semibold text-slate-900">
+              {mode === 'boolean' ? 'Boolean search' : 'Advanced search'}
+            </h2>
+            <p className="mt-0.5 text-[12px] text-slate-500">
+              Results replace the candidate list on this page
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
 
-      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 overflow-y-auto p-5 sm:flex-row sm:overflow-visible sm:p-8">
-          {/* Filters */}
-          <div className="space-y-4 sm:w-72 sm:shrink-0">
-            <Segmented
-              size="sm"
-              value={mode}
-              onChange={setMode}
-              items={[
-                { value: 'keywords', label: 'Keywords' },
-                { value: 'boolean', label: 'Boolean string' },
-              ]}
-            />
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          <Segmented
+            size="sm"
+            value={mode}
+            onChange={setMode}
+            items={[
+              { value: 'keywords', label: 'Keywords' },
+              { value: 'boolean', label: 'Boolean string' },
+            ]}
+          />
 
-            {mode === 'boolean' && (
-              <div>
-                <label className="section-label mb-1.5 block">Paste a boolean string</label>
-                <textarea
-                  value={booleanInput}
-                  onChange={(e) => setBooleanInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                      e.preventDefault();
-                      runSearch();
-                    }
-                  }}
-                  rows={6}
-                  spellCheck={false}
-                  placeholder={'("Cloud Engineer") AND ("Azure" OR "Terraform") NOT intern'}
-                  className="field-input w-full resize-y font-mono text-[12px] leading-relaxed"
-                />
-                <p className="mt-1 text-[11px] text-slate-400">
-                  Use AND, OR, NOT (capitals) and brackets; put phrases in quotes. Two terms side by side mean AND. Every CV in the
-                  database is checked and only exact matches are returned. Ctrl+Enter to search.
-                </p>
-              </div>
-            )}
-
-            {/* Keywords */}
-            <div className={mode === 'boolean' ? 'hidden' : undefined}>
+          {mode === 'boolean' ? (
+            <div>
+              <label className="section-label mb-1.5 block">Boolean string</label>
+              <textarea
+                value={booleanInput}
+                onChange={(e) => setBooleanInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSearch();
+                  }
+                }}
+                rows={5}
+                spellCheck={false}
+                placeholder={'("Cloud Engineer") AND ("Azure" OR "Terraform") NOT intern'}
+                className="field-input w-full resize-y font-mono text-[12px] leading-relaxed"
+              />
+              <p className="mt-1 text-[11px] text-slate-400">
+                Use AND, OR, NOT and brackets. Phrases in quotes. Ctrl+Enter to search.
+              </p>
+            </div>
+          ) : (
+            <div>
               <label className="section-label mb-1.5 block">Keywords / skills</label>
               <div className="flex gap-1.5">
                 <input
@@ -349,120 +292,85 @@ export default function AdvancedSearchModal({ onClose, onViewDetails, initialMod
                   ]}
                 />
               )}
-              <p className="mt-1 text-[11px] text-slate-400">
-                Searches the whole CV, ignoring case. Separate keywords with commas; a phrase like project management matches as written.
-              </p>
             </div>
+          )}
 
-            {/* Experience range */}
-            <div>
-              <label className="section-label mb-1.5 block">Work experience (years)</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={0}
-                  value={experienceMin}
-                  onChange={(e) => setExperienceMin(e.target.value)}
-                  placeholder="Min"
-                  className="field-input w-full"
-                />
-                <span className="text-slate-400">–</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={experienceMax}
-                  onChange={(e) => setExperienceMax(e.target.value)}
-                  placeholder="Max"
-                  className="field-input w-full"
-                />
-              </div>
+          <div>
+            <label className="section-label mb-1.5 block">Work experience (years)</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                value={experienceMin}
+                onChange={(e) => setExperienceMin(e.target.value)}
+                placeholder="Min"
+                className="field-input w-full"
+              />
+              <span className="text-slate-400">–</span>
+              <input
+                type="number"
+                min={0}
+                value={experienceMax}
+                onChange={(e) => setExperienceMax(e.target.value)}
+                placeholder="Max"
+                className="field-input w-full"
+              />
             </div>
-
-            <FacetCheckboxList field="location" selected={locations} onToggle={toggleLocation} />
-            <FacetCheckboxList field="nationality" selected={nationalities} onToggle={toggleNationality} />
-
-            <Button type="button" variant="primary" className="w-full" icon={<Search className="h-4 w-4" />} loading={searching} onClick={runSearch}>
-              Search
-            </Button>
           </div>
 
-          {/* Results */}
-          <div ref={scrollRef} className="min-w-0 flex-1 overflow-y-auto">
-            {error && <p className="mb-3 text-[13px] text-red-600">{error}</p>}
-            {!hasSearched ? (
-              <div className="flex h-full min-h-[200px] items-center justify-center text-center text-[13px] text-slate-400">
-                Set your filters and press Search, this searches every CV in the database, not just what's currently loaded.
+          <div>
+            <label className="section-label mb-1.5 block">Freshness (date added)</label>
+            <select
+              value={freshness}
+              onChange={(e) => setFreshness(e.target.value as typeof freshness)}
+              className="field-input w-full"
+            >
+              <option value="any">Any time</option>
+              <option value="1">Last 24 hours</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="custom">Custom range</option>
+            </select>
+            {freshness === 'custom' && (
+              <div className="mt-2 flex items-center gap-2">
+                <input type="date" value={addedFrom} onChange={(e) => setAddedFrom(e.target.value)} className="field-input w-full" aria-label="Added from" />
+                <span className="text-slate-400">to</span>
+                <input type="date" value={addedTo} onChange={(e) => setAddedTo(e.target.value)} className="field-input w-full" aria-label="Added to" />
               </div>
-            ) : searching ? (
-              <div className="flex h-full min-h-[200px] items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-brand-600" />
-              </div>
-            ) : results.length === 0 ? (
-              <div className="flex h-full min-h-[200px] items-center justify-center text-[13px] text-slate-400">
-                No candidates match these filters.
-              </div>
-            ) : (
-              <>
-                <p className="mb-2 text-[12px] text-slate-500">
-                  {total
-                    ? `${total.estimate ? 'Up to ' : ''}${total.count.toLocaleString()} matching CV${total.count !== 1 ? 's' : ''}, ${results.length.toLocaleString()} shown`
-                    : `${results.length.toLocaleString()} result${results.length !== 1 ? 's' : ''} loaded`}
-                  {nextCursor ? ', scroll for more' : ''}
-                </p>
-                <div className="space-y-2">
-                  {results.map((cv) => (
-                    <div
-                      key={cv.id}
-                      className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 p-3 hover:border-slate-300"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[14px] font-semibold text-slate-900">{cv.full_name}</p>
-                        <p className="truncate text-[12px] text-slate-600">{cv.job_title} · {String(cv.years_of_experience)} yrs</p>
-                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
-                          {cv.location && <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{cv.location}</span>}
-                          {cv.nationality && <span className="inline-flex items-center gap-1"><Globe className="h-3 w-3" />{cv.nationality}</span>}
-                          {cv.notice_period && <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{cv.notice_period}</span>}
-                        </div>
-                        {(cv.matched_keywords?.length ?? 0) > 0 && (
-                          <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                            <span className="text-[10px] text-slate-400">Matched:</span>
-                            {(cv.matched_keywords || []).map((k) => (
-                              <span key={k} className="rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700">{k}</span>
-                            ))}
-                          </div>
-                        )}
-                        {(cv.skill_keywords?.length ?? 0) > 0 && (
-                          <div className="mt-1.5 flex flex-wrap gap-1">
-                            {(cv.skill_keywords || []).slice(0, 8).map((k) => (
-                              <span key={k} className="chip chip-neutral text-[10px]">{k}</span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        icon={<Eye className="h-3.5 w-3.5" />}
-                        onClick={() => onViewDetails(cv.id)}
-                      >
-                        View
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-                {/* Infinite-scroll trigger */}
-                <div ref={sentinelRef} className="h-px w-full" />
-                {loadingMore && (
-                  <div className="flex items-center justify-center gap-2 py-3 text-[12px] text-slate-400">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading more…
-                  </div>
-                )}
-              </>
             )}
           </div>
+
+          <FacetCheckboxList
+            field="location"
+            label="Country"
+            onLoaded={(vals) => setCountryMembers(Object.fromEntries(vals.map((v) => [v.value, v.members || [v.value]])))}
+            selected={locations}
+            onToggle={(v) => toggle(locations, v, setLocations)}
+          />
+          <FacetCheckboxList
+            field="nationality"
+            label="Nationality"
+            selected={nationalities}
+            onToggle={(v) => toggle(nationalities, v, setNationalities)}
+          />
+          <FacetCheckboxList
+            field="languages"
+            label="Language"
+            selected={languages}
+            onToggle={(v) => toggle(languages, v, setLanguages)}
+          />
         </div>
+
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-surface-border bg-slate-50/80 px-5 py-3">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="button" variant="primary" icon={<Search className="h-4 w-4" />} onClick={handleSearch}>
+            Search candidates
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
-

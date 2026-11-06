@@ -16,7 +16,7 @@ MODE="${1:-}"
 case "$MODE" in
   dev)   COMPOSE_FILE="docker-compose.dev.yml"; ENV_FILE=".env.dev" ;;
   local) COMPOSE_FILE="docker-compose.local.yml"; ENV_FILE=".env.local" ;;
-  prod)  COMPOSE_FILE="docker-compose.prod.yml"; ENV_FILE=".env" ;;
+  prod)  COMPOSE_FILE="docker-compose.prod.yml"; ENV_FILE=".env.prod" ;;
   *) echo "Usage: $0 dev|local|prod" >&2; exit 1 ;;
 esac
 

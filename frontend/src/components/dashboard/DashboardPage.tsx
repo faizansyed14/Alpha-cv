@@ -1,16 +1,15 @@
 'use client';
-import { useEffect, useMemo } from 'react';
+
+import { useEffect } from 'react';
 import {
   Upload,
   Users,
   Award,
   Briefcase,
   Target,
-  FileText,
   Globe2,
   KanbanSquare,
   ArrowRight,
-  Check,
 } from '@/components/icons';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -21,11 +20,14 @@ import { DashboardSkeleton } from '@/components/skeletons';
 import { cn } from '@/lib/utils';
 import { TONE, type Tone } from '@/lib/tones';
 
-function formatDate(value?: string) {
-  if (!value || value === 'Unknown') return '';
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-}
+type WorkspaceLink = {
+  id: string;
+  title: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  tone: Tone;
+  onClick: () => void;
+};
 
 export default function DashboardPage() {
   const { go } = useWorkspaceNav();
@@ -38,8 +40,6 @@ export default function DashboardPage() {
     matchResult,
     selectedCVs,
     selectedJD,
-    selectJD,
-    setDatabaseActiveTab,
     loadCVs,
     loadJDs,
     loadingStates,
@@ -48,20 +48,12 @@ export default function DashboardPage() {
   const cvCount = totalCVs ?? cvs.length;
   const jdCount = totalJDs ?? jds.length;
   const totalMatches = matchResult?.candidates.length || 0;
+  const hasSelection = selectedCVs.length > 0 || !!selectedJD;
 
   useEffect(() => {
     loadCVs();
     loadJDs();
   }, [loadCVs, loadJDs]);
-
-  const recentJDs = useMemo(
-    () =>
-      [...jds]
-        .sort((a, b) => (Date.parse(b.upload_date || '') || 0) - (Date.parse(a.upload_date || '') || 0))
-        .slice(0, 6),
-    [jds],
-  );
-  const selectedJDItem = selectedJD ? jds.find((j) => j.id === selectedJD) : null;
 
   const bootstrapping =
     cvs.length === 0 &&
@@ -72,62 +64,102 @@ export default function DashboardPage() {
     return <DashboardSkeleton />;
   }
 
-  const steps = [
+  const workspace: WorkspaceLink[] = [
     {
-      n: 1,
-      title: 'Select candidates',
-      detail: selectedCVs.length ? `${selectedCVs.length.toLocaleString()} selected` : 'Pick the CVs you want to rank',
-      done: selectedCVs.length > 0,
-      action: () => { setDatabaseActiveTab('cvs'); go('candidates'); },
-      cta: selectedCVs.length ? 'Change' : 'Browse candidates',
+      id: 'candidates',
+      title: 'Candidates',
+      description: 'Search, filter, and review CVs',
+      icon: Users,
+      tone: 'indigo',
+      onClick: () => go('candidates'),
     },
     {
-      n: 2,
-      title: 'Choose a job description',
-      detail: selectedJDItem ? selectedJDItem.job_title || selectedJDItem.filename : 'The role to match against',
-      done: !!selectedJD,
-      action: () => go('jobs'),
-      cta: selectedJD ? 'Change' : 'Browse jobs',
+      id: 'jobs',
+      title: 'Job descriptions',
+      description: 'Manage roles ready to match',
+      icon: Briefcase,
+      tone: 'sky',
+      onClick: () => go('jobs'),
     },
     {
-      n: 3,
-      title: 'Run the match',
-      detail: 'Ranked results with an AI review of the best fits',
-      done: false,
-      action: () => go('match'),
-      cta: 'Open matching',
+      id: 'match',
+      title: 'AI matching',
+      description: 'Rank candidates against a role',
+      icon: Target,
+      tone: 'violet',
+      onClick: () => go('match'),
     },
-  ];
-
-  const quickActions = [
-    { icon: Upload, title: 'Upload documents', description: 'Add CVs and job descriptions', tone: 'cyan' as Tone, onClick: () => go('upload') },
-    { icon: Globe2, title: 'Careers', description: 'Post openings and review applicants', tone: 'emerald' as Tone, onClick: () => go('careers') },
-    { icon: KanbanSquare, title: 'Tracker', description: 'Follow candidates through hiring', tone: 'violet' as Tone, onClick: () => go('tracker') },
+    {
+      id: 'upload',
+      title: 'Upload',
+      description: 'Add CVs and job descriptions',
+      icon: Upload,
+      tone: 'cyan',
+      onClick: () => go('upload'),
+    },
+    {
+      id: 'careers',
+      title: 'Careers portal',
+      description: 'Openings and incoming applicants',
+      icon: Globe2,
+      tone: 'emerald',
+      onClick: () => go('careers'),
+    },
+    {
+      id: 'tracker',
+      title: 'Hiring tracker',
+      description: 'Move candidates through stages',
+      icon: KanbanSquare,
+      tone: 'amber',
+      onClick: () => go('tracker'),
+    },
   ];
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-[-0.025em] text-slate-900">
-            Welcome back{user?.username ? `, ${user.username}` : ''}
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">Here is what is happening in your recruitment workspace.</p>
+      {/* Hero */}
+      <section className="relative overflow-hidden rounded-2xl border border-navy-800 bg-navy-950 px-6 py-7 text-white shadow-card sm:px-8 sm:py-8">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-16 -top-20 h-64 w-64 rounded-full bg-[#4A6BC8]/30 blur-3xl"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -bottom-24 left-1/3 h-56 w-56 rounded-full bg-[#6B86C8]/20 blur-3xl"
+        />
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-xl">
+            <h1 className="text-[28px] font-bold leading-tight tracking-[-0.03em] sm:text-[32px]">
+              Welcome back{user?.username ? `, ${user.username}` : ''}
+            </h1>
+            <p className="mt-2 text-[14px] leading-relaxed text-navy-100/80">
+              AI screening for recruiters. Find the best fits, review ranked results, and keep hiring moving.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              icon={<Upload />}
+              onClick={() => go('upload')}
+              className="border-white/15 bg-white/10 text-white hover:bg-white/15"
+            >
+              Upload
+            </Button>
+            <Button variant="primary" icon={<Target />} onClick={() => go('match')} className="bg-white text-navy-900 hover:bg-navy-50">
+              New match
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" icon={<Upload />} onClick={() => go('upload')}>Upload</Button>
-          <Button variant="primary" icon={<Target />} onClick={() => go('match')}>New match</Button>
-        </div>
-      </div>
+      </section>
 
       {/* KPIs */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Candidates"
           tone="indigo"
           value={loadingStates.cvs.isLoading && !cvCount ? '-' : cvCount.toLocaleString()}
           icon={Users}
-          hint="CVs in your database"
+          hint="In your talent database"
           onClick={() => go('candidates')}
           className="cursor-pointer transition-shadow hover:shadow-[0_4px_12px_-4px_rgba(16,24,40,0.12)]"
         />
@@ -136,7 +168,7 @@ export default function DashboardPage() {
           tone="sky"
           value={loadingStates.jds.isLoading && !jdCount ? '-' : jdCount.toLocaleString()}
           icon={Briefcase}
-          hint="Ready to match against"
+          hint="Roles ready to match"
           onClick={() => go('jobs')}
           className="cursor-pointer transition-shadow hover:shadow-[0_4px_12px_-4px_rgba(16,24,40,0.12)]"
         />
@@ -145,115 +177,68 @@ export default function DashboardPage() {
           tone="amber"
           value={totalMatches.toLocaleString()}
           icon={Award}
-          hint={totalMatches ? 'Candidates ranked in the last run' : 'No match run yet'}
+          hint={totalMatches ? 'Ranked in the last run' : 'No match run yet'}
           onClick={() => go('match')}
+          className="cursor-pointer transition-shadow hover:shadow-[0_4px_12px_-4px_rgba(16,24,40,0.12)]"
+        />
+        <StatCard
+          label="Ready to match"
+          tone="violet"
+          value={selectedCVs.length.toLocaleString()}
+          icon={Target}
+          hint={selectedJD ? 'Job selected' : selectedCVs.length ? 'Pick a job next' : 'Select CVs to begin'}
+          onClick={() => go(selectedCVs.length ? 'jobs' : 'candidates')}
           className="cursor-pointer transition-shadow hover:shadow-[0_4px_12px_-4px_rgba(16,24,40,0.12)]"
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-        {/* Start a match */}
-        <section className="rounded-2xl border border-surface-border bg-white p-5 shadow-card">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-slate-900">Start a match</h2>
-              <p className="text-xs text-slate-500">Three steps. Your selection follows you across pages.</p>
-            </div>
+      {hasSelection && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-navy-100 bg-navy-50/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-[13px] font-semibold text-navy-900">Selection carried across pages</p>
+            <p className="mt-0.5 truncate text-xs text-navy-700/80">
+              {selectedCVs.length} candidate{selectedCVs.length === 1 ? '' : 's'}
+              {selectedJD ? ' · 1 job description' : ' · no job yet'}
+            </p>
           </div>
-          <ol className="space-y-2">
-            {steps.map((st) => (
-              <li
-                key={st.n}
-                className={cn(
-                  'flex items-center gap-3 rounded-xl border p-3 transition-colors',
-                  st.done ? 'border-navy-200 bg-navy-50/50' : 'border-surface-border bg-white',
-                )}
+          <Button size="sm" variant="primary" icon={<Target />} onClick={() => go('match')} disabled={!selectedCVs.length || !selectedJD}>
+            Continue to match
+          </Button>
+        </div>
+      )}
+
+      {/* Workspace */}
+      <div>
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <div>
+            <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-slate-900">Workspace</h2>
+            <p className="text-xs text-slate-500">Jump into the tools you use every day</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {workspace.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={item.onClick}
+                className="group flex items-start gap-3.5 rounded-2xl border border-surface-border bg-white p-4 text-left shadow-card transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-navy-300 hover:shadow-[0_8px_24px_-12px_rgba(16,24,40,0.18)]"
               >
-                <span
-                  className={cn(
-                    'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-bold',
-                    st.done ? 'bg-navy-600 text-white' : 'bg-slate-100 text-slate-500',
-                  )}
-                >
-                  {st.done ? <Check className="h-4 w-4" /> : st.n}
+                <span className={cn('mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset', TONE[item.tone].tile)}>
+                  <Icon className="h-5 w-5" />
                 </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-semibold text-slate-900">{st.title}</p>
-                  <p className="truncate text-xs text-slate-500">{st.detail}</p>
-                </div>
-                <Button size="sm" variant={st.n === 3 ? 'primary' : 'secondary'} onClick={st.action}>
-                  {st.cta}
-                </Button>
-              </li>
-            ))}
-          </ol>
-        </section>
-
-        {/* Recent job descriptions */}
-        <section className="rounded-2xl border border-surface-border bg-white shadow-card">
-          <div className="flex items-center justify-between border-b border-surface-border px-5 py-4">
-            <div>
-              <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-slate-900">Recent job descriptions</h2>
-              <p className="text-xs text-slate-500">Pick one to match against</p>
-            </div>
-            <button type="button" onClick={() => go('jobs')} className="inline-flex items-center gap-1 text-xs font-semibold text-navy-600 hover:underline">
-              View all <ArrowRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          {recentJDs.length === 0 ? (
-            <p className="px-5 py-10 text-center text-[13px] text-slate-500">No job descriptions yet.</p>
-          ) : (
-            <ul className="divide-y divide-surface-border">
-              {recentJDs.map((jd) => {
-                const active = selectedJD === jd.id;
-                return (
-                  <li key={jd.id} className="flex items-center gap-3 px-5 py-2.5">
-                    <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', active ? 'bg-navy-600 text-white' : 'bg-slate-100 text-slate-500')}>
-                      {active ? <Check className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-semibold text-slate-900">{jd.job_title || jd.filename || 'Untitled'}</p>
-                      <p className="truncate text-xs text-slate-400">{formatDate(jd.upload_date)}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => selectJD(active ? null : jd.id)}
-                      className={cn(
-                        'shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors',
-                        active ? 'bg-navy-600 text-white hover:bg-navy-700' : 'text-navy-600 hover:bg-navy-50',
-                      )}
-                    >
-                      {active ? 'Selected' : 'Select'}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-      </div>
-
-      {/* Quick actions */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {quickActions.map((a) => {
-          const Icon = a.icon;
-          return (
-            <button
-              key={a.title}
-              onClick={a.onClick}
-              className="group flex items-center gap-3.5 rounded-2xl border border-surface-border bg-white p-4 text-left shadow-card transition-[border-color,box-shadow] hover:border-navy-200 hover:shadow-[0_4px_12px_-4px_rgba(16,24,40,0.10)]"
-            >
-              <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset', TONE[a.tone].tile)}>
-                <Icon className="h-5 w-5" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[13px] font-semibold text-slate-900">{a.title}</span>
-                <span className="block truncate text-xs text-slate-500">{a.description}</span>
-              </span>
-              <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition-colors group-hover:text-navy-600" />
-            </button>
-          );
-        })}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="text-[13px] font-semibold text-slate-900">{item.title}</span>
+                    <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition-colors group-hover:text-navy-600" />
+                  </span>
+                  <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">{item.description}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

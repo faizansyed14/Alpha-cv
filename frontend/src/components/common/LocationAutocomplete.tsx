@@ -143,7 +143,7 @@ export default function LocationAutocomplete({
       </div>
 
       {isOpen && suggestions.length > 0 && (
-        <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-[var(--shadow-md)]">
+        <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-surface-border bg-white py-1 shadow-[var(--shadow-md)]">
           {suggestions.map((s, i) => (
             <li key={`${s.city}-${s.country}-${i}`}>
               <button

@@ -1,13 +1,18 @@
 'use client';
 import React, { useState, useRef } from 'react';
+import { motion } from 'framer-motion';
 import {
   Upload,
   UploadCloud,
   FileText,
   CheckCircle2,
   AlertCircle,
+  Loader2,
+  Sparkles,
   X,
 } from '@/components/icons';
+import { api } from '@/lib/api';
+import { countryFromNationality } from '@/lib/nationality';
 import { useCareersStore } from '@/stores/careersStore';
 import { Button } from '@/components/ui/button';
 import LocationAutocomplete from '@/components/common/LocationAutocomplete';
@@ -46,6 +51,12 @@ export default function JobApplicationForm({
   });
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const formRef = useRef(formData);
+  formRef.current = formData;
+  // Autofill from the dropped CV: which fields it filled (and where the value came from), and its status line.
+  const [autofillState, setAutofillState] = useState<'idle' | 'reading' | 'done' | 'unreadable'>('idle');
+  const [autofilled, setAutofilled] = useState<Record<string, string>>({});
+  const [stillToFill, setStillToFill] = useState<string[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [success, setSuccess] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -212,6 +223,12 @@ export default function JobApplicationForm({
   const handleInputChange = (field: string, value: string) => {
     const next = sanitizeFieldValue(field, value);
     setFormData(prev => ({ ...prev, [field]: next }));
+    // Once the applicant edits a field themselves it is theirs, no longer "from your CV".
+    setAutofilled(prev => {
+      if (!(field in prev)) return prev;
+      const { [field]: _gone, ...rest } = prev;
+      return rest;
+    });
     if (formErrors[field]) {
       setFormErrors(prev => ({ ...prev, [field]: '' }));
     }
@@ -279,7 +296,65 @@ export default function JobApplicationForm({
 
     setSelectedFile(file);
     setFormErrors(prev => ({ ...prev, file: '' }));
+    void runAutofill(file);
   };
+
+  const FIELD_LABELS: Record<string, string> = {
+    name: 'Full name', email: 'Email', phone: 'Phone', yearsOfExperience: 'Years of experience',
+    location: 'Current location', noticePeriod: 'Notice period', nationality: 'Nationality', expectedSalary: 'Expected salary',
+  };
+
+  /** Read the CV on the server and fill ONLY empty inputs with values the server is certain about. Never blocks the form. */
+  const runAutofill = async (file: File) => {
+    setAutofillState('reading');
+    setAutofilled({});
+    setStillToFill([]);
+    try {
+      const res = await api.autofillFromCV(jobToken, file);
+      if (!res.readable) {
+        setAutofillState('unreadable');
+        return;
+      }
+      const accepted: Record<string, string> = {};
+      const values: Record<string, string> = {};
+      for (const [field, raw] of Object.entries(res.fields || {})) {
+        let value = String(raw || '').trim();
+        if (field === 'nationality') value = countryFromNationality(value) || '';      // must be a country the picker knows
+        if (field === 'noticePeriod' && !NOTICE_PERIOD_OPTIONS.includes(value)) value = '';
+        if (value) values[field] = value;
+      }
+      // Decide from the latest form values (the applicant may have typed while the CV was being read).
+      const current = formRef.current as Record<string, string>;
+      for (const [field, value] of Object.entries(values)) {
+        if (!(field in current) || current[field].trim() !== '') continue;   // never overwrite what was typed
+        accepted[field] = res.sources?.[field] || 'your CV';
+      }
+      setFormData(prev => {
+        const next = { ...prev } as Record<string, string>;
+        for (const field of Object.keys(accepted)) {
+          if ((prev as Record<string, string>)[field].trim() === '') next[field] = values[field];
+        }
+        return next as typeof prev;
+      });
+      setAutofilled(accepted);
+      const wanted = ['name', 'email', 'phone', 'yearsOfExperience', 'location', 'noticePeriod', 'nationality', 'expectedSalary'];
+      setStillToFill(wanted.filter((f) => !(f in accepted)));
+      setAutofillState('done');
+      if ('yearsOfExperience' in accepted && jobData?.years_of_experience) {
+        checkExperienceRequirements(values.yearsOfExperience);
+      }
+    } catch {
+      setAutofillState('unreadable');
+    }
+  };
+
+  /** Small marker next to a label when its value came from the CV. */
+  const fromCv = (field: string) =>
+    field in autofilled ? (
+      <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10.5px] font-medium normal-case tracking-normal text-brand-700" title={autofilled[field]}>
+        <Sparkles className="h-3 w-3" /> from your CV, please check
+      </span>
+    ) : null;
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -334,36 +409,236 @@ export default function JobApplicationForm({
 
   if (success) {
     return (
-      <div className="surface-panel p-6 text-center">
-        <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-success-50">
-          <CheckCircle2 className="h-5 w-5 text-success-600" />
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+        className="relative overflow-hidden rounded-2xl border border-emerald-100 bg-white px-6 py-10 text-center shadow-card"
+      >
+        <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-emerald-400/15 blur-3xl" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-14 left-1/4 h-36 w-36 rounded-full bg-navy-400/10 blur-3xl" />
+
+        <div className="relative mx-auto mb-5 flex h-20 w-20 items-center justify-center">
+          <motion.span
+            aria-hidden
+            className="absolute inset-0 rounded-full bg-emerald-100"
+            initial={{ scale: 0.4, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 260, damping: 18 }}
+          />
+          <motion.span
+            aria-hidden
+            className="absolute inset-[-6px] rounded-full border-2 border-emerald-200/80"
+            initial={{ scale: 0.7, opacity: 0 }}
+            animate={{ scale: 1.08, opacity: [0, 0.9, 0] }}
+            transition={{ duration: 1.1, ease: 'easeOut', delay: 0.15 }}
+          />
+          <svg viewBox="0 0 52 52" className="relative h-12 w-12" aria-hidden>
+            <motion.path
+              d="M14 27.5 L22.5 35.5 L38 17.5"
+              fill="none"
+              stroke="#059669"
+              strokeWidth="3.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              initial={{ pathLength: 0, opacity: 0 }}
+              animate={{ pathLength: 1, opacity: 1 }}
+              transition={{ duration: 0.55, ease: 'easeOut', delay: 0.22 }}
+            />
+          </svg>
         </div>
-        <h3 className="text-[15px] font-semibold text-slate-900">Application received</h3>
-        <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-relaxed text-slate-500">
-          Thank you for applying. Our recruitment team will review your CV and reach out by email
-          if your profile matches the role.
-        </p>
-        <Button variant="primary" className="mt-4" onClick={onSuccess}>
-          Done
-        </Button>
-      </div>
+
+        <motion.h3
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35, duration: 0.3 }}
+          className="text-[18px] font-bold tracking-[-0.02em] text-slate-900"
+        >
+          CV submitted
+        </motion.h3>
+        <motion.p
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.45, duration: 0.3 }}
+          className="mx-auto mt-2 max-w-sm text-[13px] leading-relaxed text-slate-500"
+        >
+          Thank you for applying. Our team will review your CV and email you if your profile matches the role.
+        </motion.p>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.6 }}
+          className="mt-6"
+        >
+          <Button variant="primary" onClick={onSuccess}>
+            Done
+          </Button>
+        </motion.div>
+      </motion.div>
     );
   }
 
+  const clearSelectedFile = () => {
+    setSelectedFile(null);
+    setAutofillState('idle');
+    setAutofilled({});
+    setStillToFill([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      {/* Error Display */}
+      {/* Error / already-applied notice */}
       {error && (
-        <div className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 p-3 text-[13px] text-red-700">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div
+          className={`flex items-start gap-2.5 rounded-lg border p-3 text-[13px] ${
+            /already applied|already being processed|already received/i.test(error)
+              ? 'border-navy-200 bg-navy-50 text-navy-900'
+              : 'border-red-200 bg-red-50 text-red-700'
+          }`}
+        >
+          {/already applied|already being processed|already received/i.test(error) ? (
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-navy-600" />
+          ) : (
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          )}
           <span>{error}</span>
         </div>
       )}
 
+      {/* Step 1: Upload CV to auto-fill */}
+      <section className="rounded-xl border border-navy-100 bg-navy-50/40 p-4 sm:p-5">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-navy-600 text-white">
+            <Sparkles className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-[14px] font-semibold text-slate-900">Upload CV to fill info</h3>
+            <p className="mt-0.5 text-[12.5px] leading-relaxed text-slate-600">
+              We read your CV and fill the form below. You can still edit every field.
+            </p>
+          </div>
+        </div>
+
+        <input
+          type="file"
+          accept=".pdf,.doc,.docx,.txt"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFileSelect(file);
+          }}
+          className="hidden"
+          id="cv-upload"
+          ref={fileInputRef}
+        />
+
+        {selectedFile ? (
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-surface-border bg-white p-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-brand-50">
+                <FileText className="h-4 w-4 text-brand-600" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-[13px] font-medium text-slate-900">{selectedFile.name}</p>
+                <p className="text-xs text-slate-500">
+                  {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                  {autofillState === 'reading' ? ' · Reading…' : autofillState === 'done' ? ' · Attached' : ''}
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={handleFileInputClick}
+                className="rounded-md px-2 py-1 text-xs font-semibold text-navy-700 hover:bg-navy-50"
+              >
+                Replace
+              </button>
+              <button
+                type="button"
+                onClick={clearSelectedFile}
+                className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+                aria-label="Remove file"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div
+            className={`mt-4 rounded-lg border-2 border-dashed bg-white p-5 text-center transition-colors ${
+              dragActive
+                ? 'border-brand-400 bg-brand-50/40'
+                : formErrors.file
+                  ? 'border-red-300 bg-red-50/40'
+                  : 'border-slate-300 hover:border-brand-300'
+            }`}
+            onDragEnter={(e) => { e.preventDefault(); setDragActive(true); }}
+            onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+          >
+            <Button
+              type="button"
+              variant="primary"
+              icon={<UploadCloud className="h-4 w-4" />}
+              onClick={handleFileInputClick}
+            >
+              Upload CV to fill info
+            </Button>
+            <p className="mt-2 text-xs text-slate-500">PDF, DOC, DOCX or TXT · max 10MB · or drop a file here</p>
+          </div>
+        )}
+
+        {formErrors.file && (
+          <p className="mt-2 text-xs text-red-600">{formErrors.file}</p>
+        )}
+
+        {autofillState === 'reading' && (
+          <p className="mt-3 flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-[12.5px] text-slate-600 ring-1 ring-slate-200">
+            <Loader2 className="h-4 w-4 animate-spin text-navy-600" /> Reading your CV and filling the form…
+          </p>
+        )}
+        {autofillState === 'unreadable' && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800 ring-1 ring-amber-100">
+            We couldn&apos;t read this CV. Enter your details manually below.
+          </p>
+        )}
+        {autofillState === 'done' && (
+          <div className="mt-3 rounded-lg bg-white px-3 py-2.5 text-[12.5px] leading-relaxed text-slate-700 ring-1 ring-brand-100">
+            {Object.keys(autofilled).length > 0 ? (
+              <p>
+                <span className="font-semibold text-brand-700">Filled from your CV:</span>{' '}
+                {Object.keys(autofilled).map((f) => FIELD_LABELS[f] || f).join(', ')}. Please check them below.
+              </p>
+            ) : (
+              <p>Nothing was certain from this CV. Enter your details manually below.</p>
+            )}
+            {stillToFill.length > 0 && Object.keys(autofilled).length > 0 && (
+              <p className="mt-1 text-slate-500">
+                Still needed: {stillToFill.map((f) => FIELD_LABELS[f] || f).join(', ')}.
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* Step 2: Form fields — filled from CV or entered manually */}
+      <div>
+        <div className="mb-3 flex items-center gap-3">
+          <div className="h-px flex-1 bg-slate-200" />
+          <p className="shrink-0 text-[12px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+            {autofillState === 'done' && Object.keys(autofilled).length > 0
+              ? 'Review extracted info'
+              : 'Or enter details manually'}
+          </p>
+          <div className="h-px flex-1 bg-slate-200" />
+        </div>
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {/* Full name */}
         <div>
-          <label className="section-label mb-1.5 block">Full name</label>
+          <label className="section-label mb-1.5 block">Full name{fromCv('name')}</label>
           <input
             type="text"
             placeholder="John Doe"
@@ -378,7 +653,7 @@ export default function JobApplicationForm({
 
         {/* Email */}
         <div>
-          <label className="section-label mb-1.5 block">Email address</label>
+          <label className="section-label mb-1.5 block">Email address{fromCv('email')}</label>
           <input
             type="email"
             placeholder="john@company.com"
@@ -393,7 +668,7 @@ export default function JobApplicationForm({
 
         {/* Phone */}
         <div>
-          <label className="section-label mb-1.5 block">Phone number</label>
+          <label className="section-label mb-1.5 block">Phone number{fromCv('phone')}</label>
           <input
             type="tel"
             inputMode="tel"
@@ -439,7 +714,7 @@ export default function JobApplicationForm({
 
         {/* Years of experience */}
         <div>
-          <label className="section-label mb-1.5 block">Years of experience</label>
+          <label className="section-label mb-1.5 block">Years of experience{fromCv('yearsOfExperience')}</label>
           <input
             type="text"
             inputMode="decimal"
@@ -462,7 +737,7 @@ export default function JobApplicationForm({
 
         {/* Location */}
         <div>
-          <label className="section-label mb-1.5 block">Current location</label>
+          <label className="section-label mb-1.5 block">Current location{fromCv('location')}</label>
           <LocationAutocomplete
             value={formData.location}
             onChange={(value) => handleInputChange('location', value)}
@@ -477,7 +752,7 @@ export default function JobApplicationForm({
 
         {/* Notice period */}
         <div>
-          <label className="section-label mb-1.5 block">Notice period</label>
+          <label className="section-label mb-1.5 block">Notice period{fromCv('noticePeriod')}</label>
           <select
             value={formData.noticePeriod}
             onChange={(e) => handleInputChange('noticePeriod', e.target.value)}
@@ -495,7 +770,7 @@ export default function JobApplicationForm({
 
         {/* Nationality */}
         <div>
-          <label className="section-label mb-1.5 block">Nationality</label>
+          <label className="section-label mb-1.5 block">Nationality{fromCv('nationality')}</label>
           <NationalityAutocomplete
             value={formData.nationality}
             onChange={(value) => handleInputChange('nationality', value)}
@@ -508,76 +783,6 @@ export default function JobApplicationForm({
           )}
         </div>
       </div>
-
-      {/* CV Upload */}
-      <div>
-        <label className="section-label mb-1.5 block">CV / Resume</label>
-        {selectedFile ? (
-          <div className="surface-panel flex items-center justify-between gap-3 p-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-brand-50">
-                <FileText className="h-4 w-4 text-brand-600" />
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-[13px] font-medium text-slate-900">{selectedFile.name}</p>
-                <p className="text-xs text-slate-500">
-                  {(selectedFile.size / 1024 / 1024).toFixed(2)} MB · Ready to upload
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setSelectedFile(null)}
-              className="inline-flex items-center gap-1 rounded p-1 text-xs font-medium text-slate-500 transition-colors duration-200 hover:bg-slate-100 hover:text-red-600"
-              aria-label="Remove file"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ) : (
-          <div
-            className={`rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
-              dragActive
-                ? 'border-brand-400 bg-brand-50/40'
-                : formErrors.file
-                ? 'border-red-300 bg-red-50/40'
-                : 'border-slate-300 hover:border-brand-300 hover:bg-slate-50'
-            }`}
-            onDragEnter={(e) => { e.preventDefault(); setDragActive(true); }}
-            onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleDrop}
-          >
-            <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100">
-              <UploadCloud className="h-5 w-5 text-slate-400" />
-            </div>
-            <p className="text-[13px] font-medium text-slate-900">
-              Drop your CV here or{' '}
-              <button
-                type="button"
-                onClick={handleFileInputClick}
-                className="font-semibold text-brand-600 hover:underline"
-              >
-                browse files
-              </button>
-            </p>
-            <p className="mt-1 text-xs text-slate-500">PDF, DOC, DOCX or TXT · max 10MB</p>
-            <input
-              type="file"
-              accept=".pdf,.doc,.docx,.txt"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleFileSelect(file);
-              }}
-              className="hidden"
-              id="cv-upload"
-              ref={fileInputRef}
-            />
-          </div>
-        )}
-        {formErrors.file && (
-          <p className="mt-1 text-xs text-red-600">{formErrors.file}</p>
-        )}
       </div>
 
       {/* Experience warning modal */}
@@ -618,7 +823,7 @@ export default function JobApplicationForm({
       )}
 
       {/* Submit buttons */}
-      <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4">
+      <div className="flex items-center justify-end gap-2 border-t border-surface-border pt-4">
         <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>

@@ -620,20 +620,6 @@ export default function CareersPage() {
         </div>
       </AdminOnly>
 
-      {/* Analytics */}
-      <div className="mb-4 grid grid-cols-2 gap-3 sm:max-w-md">
-        {[
-          { label: 'Total jobs', value: stats.total, hint: 'All postings' },
-          { label: 'Live jobs', value: stats.active, hint: `${stats.inactive.toLocaleString()} inactive` },
-        ].map((k) => (
-          <div key={k.label} className="rounded-2xl border border-surface-border bg-white p-4 shadow-card">
-            <p className="text-xs text-slate-500">{k.label}</p>
-            <p className="mt-1 text-2xl font-semibold tracking-[-0.02em] text-slate-900 tabular-nums">{k.value.toLocaleString()}</p>
-            <p className="mt-0.5 truncate text-[11.5px] text-slate-400">{k.hint}</p>
-          </div>
-        ))}
-      </div>
-
       {/* Live / inactive tabs */}
       <div className="mb-3 flex items-center gap-5 border-b border-surface-border">
         {([['all', 'All jobs', stats.total], ['active', 'Live jobs', stats.active], ['inactive', 'Inactive', stats.inactive]] as const).map(([id, label, n]) => (
@@ -658,7 +644,7 @@ export default function CareersPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search title, poster, subject…"
-            className="field-input w-full pl-9 pr-3"
+            className="field-input w-full !pl-10 pr-3"
           />
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
@@ -736,7 +722,7 @@ export default function CareersPage() {
                             {job.email_subject_template && (
                               <button
                                 type="button"
-                                title="Naukri subject line, click to copy"
+                                title="Job subject line, click to copy"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   navigator.clipboard?.writeText(job.email_subject_template || '');
@@ -929,7 +915,7 @@ export default function CareersPage() {
           </DialogHeader>
           {booleanModal?.value ? (
             <div className="space-y-3">
-              <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-[13px] leading-relaxed text-slate-800">
+              <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-surface-border bg-slate-50 p-3 font-mono text-[13px] leading-relaxed text-slate-800">
                 {booleanModal.value}
               </pre>
               <div className="flex justify-end">

@@ -16,8 +16,7 @@ import sys
 
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("OPENAI_API_KEY", "stub")
-os.environ.setdefault("AUTH_DB_URL", "sqlite:///./sec_auth.db")
-os.environ.setdefault("LLM_CACHE_DIR", "/tmp/llm_cache_sec")
+os.environ.setdefault("DATABASE_URL", "sqlite:///./sec_auth.db")
 os.environ.setdefault("LOCAL_STORAGE_DIR", "/tmp/sec_uploads")
 os.environ.setdefault("CV_UPLOAD_DIR", "/tmp/sec_uploads/cv")
 os.environ.setdefault("OTP_DISABLE_EMAIL", "true")
@@ -34,8 +33,11 @@ import numpy as _np
 from qdrant_client import QdrantClient
 
 
+from app.config.settings import settings
+
+
 class _FakeST:
-    DIM = 768
+    DIM = settings.EMBEDDING_DIM
 
     def encode(self, texts, convert_to_tensor=False, batch_size=32, show_progress_bar=False):
         def one(t):
@@ -113,7 +115,7 @@ def main() -> int:
         check("unauth blocked: POST /api/match", r.status_code in (401, 403), f"status={r.status_code}")
 
         r = client.post("/api/email/webhook/email-received", json={})
-        check("email webhook disabled w/o secret", r.status_code == 404, f"status={r.status_code}")
+        check("the removed email webhook is gone", r.status_code == 404, f"status={r.status_code}")
 
         r = client.get("/api/storage/files/cv/..%2f..%2fetc%2fpasswd", headers=admin)
         check("storage path traversal blocked", r.status_code in (400, 404), f"status={r.status_code}")

@@ -3,7 +3,7 @@
 This is the exact pipeline that used to live inline in ``matching.match_candidates (api/routers/matching.py)``:
 resolve the JD, gather candidates, score every CV with :class:`MatchingService`
 (Hungarian assignment on the stored 32-vector representation), sort, run the
-top-50 LLM enhancement and persist the scores.
+top-30 LLM enhancement and persist the scores.
 
 The scoring algorithm, weights, thresholds, business rules and the LLM step are
 **unchanged**, this module only moves the code out of the request handler so it
@@ -32,6 +32,7 @@ from app.providers.embeddings.service import get_embedding_service  # noqa: F401
 from app.providers.llm.service import get_llm_service
 from app.matching.engine import get_matching_service
 from app.ingestion.llm_enhancement import enhance_with_llm_analysis_batched
+from app.matching import requirements as job_requirements
 from app.providers.vectorstore.qdrant import get_qdrant_utils
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,8 @@ async def process_single_candidate(
             "responsibilities": cv_resps,
             "email": candidate_data.get("email", "") or "",
             "phone": candidate_data.get("phone", "") or "",
+            "linkedin_url": candidate_data.get("linkedin_url") or None,
+            "github_url": candidate_data.get("github_url") or None,
         }
 
         loop = asyncio.get_event_loop()
@@ -200,6 +203,14 @@ async def process_candidates_chunk_parallel(
             unmatched_jd_skills = match_result.match_details.get("skills_analysis", {}).get("unmatched_jd_skills", [])
             unmatched_jd_responsibilities = match_result.match_details.get("responsibilities_analysis", {}).get("unmatched_jd_responsibilities", [])
 
+            # Mandatory languages / certifications: a small adjustment to the semantic score (never a filter).
+            checks = []
+            overall_pct = match_result.overall_score
+            jd_reqs = jd_structured.get("requirements") or {}
+            if settings.REQUIREMENTS_MATCHING_ENABLED and job_requirements.has_requirements(jd_reqs):
+                checks = job_requirements.check_candidate(jd_reqs, result["candidate_data"])
+                overall_pct = job_requirements.adjust_score(overall_pct, checks)
+
             resp_candidates.append(CandidateBreakdown(
                 cv_id=cv_structured["id"],
                 cv_name=cv_structured["name"],
@@ -207,12 +218,15 @@ async def process_candidates_chunk_parallel(
                 cv_years=cv_structured["years_of_experience"],
                 cv_email=cv_structured.get("email") or "",
                 cv_phone=cv_structured.get("phone") or "",
+                cv_linkedin=cv_structured.get("linkedin_url"),
+                cv_github=cv_structured.get("github_url"),
                 expected_salary=cv_structured.get("expected_salary"),
                 skills_score=match_result.skills_score / 100.0,
                 responsibilities_score=match_result.responsibilities_score / 100.0,
                 job_title_score=match_result.title_score / 100.0,
                 years_score=match_result.experience_score / 100.0,
-                overall_score=match_result.overall_score / 100.0,
+                overall_score=overall_pct / 100.0,
+                requirements=checks,
                 skills_assignments=skills_assignments,
                 responsibilities_assignments=responsibilities_assignments,
                 unmatched_jd_skills=unmatched_jd_skills,
@@ -232,10 +246,17 @@ async def process_candidates_chunk_parallel(
 # ---------------------------------------------------------------------------
 def _candidate_ids(qdrant, cv_ids: Optional[List[str]]) -> List[str]:
     """The CV ids to score. Only ids are held up front; the structured payloads are fetched chunk by chunk."""
+    cap = settings.MATCH_MAX_CVS or None
     if cv_ids:
-        return list(dict.fromkeys(cv_ids))  # de-dupe, preserve order
-    ids = [m["id"] for m in qdrant.list_all_cvs()]
-    logger.info(f"Matching all CVs in database: {len(ids)} CVs")
+        ids = list(dict.fromkeys(cv_ids))  # de-dupe, preserve order
+        return ids[:cap] if cap else ids   # the API already refuses more; this keeps a direct caller inside the maximum too
+    # No CVs named: the newest MATCH_MAX_CVS, read from Qdrant's own sorted index (never every CV in the database).
+    if cap and getattr(qdrant, "uploaded_at_ready", lambda: False)():
+        ids = qdrant.list_cv_ids_newest_first(0, cap)
+    else:
+        ids = [m["id"] for m in qdrant.list_all_cvs()]
+        ids = ids[:cap] if cap else ids
+    logger.info(f"Matching the newest {len(ids)} CVs in the database")
     return ids
 
 
@@ -290,6 +311,8 @@ def _resolve_jd(qdrant, jd_id: Optional[str], jd_text: Optional[str]) -> dict:
         "years_of_experience": jd_std.get("experience_years", 0),
         "skills_sentences": jd_std.get("skills", [])[:20],
         "responsibility_sentences": (jd_std.get("responsibilities", []) or jd_std.get("responsibility_sentences", []))[:10],
+        "required_languages": jd_std.get("required_languages") or [],
+        "required_certifications": jd_std.get("required_certifications") or [],
     }
 
 
@@ -344,6 +367,7 @@ async def run_match(
         "years_of_experience": jd_years,
         "skills": jd_skills,
         "responsibilities": jd_resps,
+        "requirements": job_requirements.jd_requirements(jd),
     }
 
     chunk_size = max(1, settings.MATCH_CHUNK_SIZE)
@@ -439,9 +463,15 @@ async def run_match(
     total_candidates = scored_count or total_candidates  # CVs deleted mid-run are simply not counted
     resp_candidates = ranked.ranked()
 
-    # ------- LLM enhancement for the top candidates (unchanged: top min(50, N)) -------
+    # ------- LLM enhancement for the top candidates (top min(30, N) that reach LLM_MATCH_MIN_SCORE) -------
+    llm_n = 0
     if jd_id and resp_candidates:
         llm_n = min(max(1, settings.LLM_MATCH_TOP_N), len(resp_candidates))
+        # Minimum-score filter: resp_candidates is sorted best-first, so the candidates that clear the bar are a prefix.
+        # Those below it are not sent to the LLM and keep their semantic score.
+        llm_n = sum(1 for c in resp_candidates[:llm_n] if c.overall_score >= settings.LLM_MATCH_MIN_SCORE)
+        logger.info(f"LLM minimum score {settings.LLM_MATCH_MIN_SCORE}: {llm_n} candidates qualify for AI verification")
+    if llm_n:
         _progress(
             status="llm_enhancement", phase="llm_verification", progress_percent=90,
             total_candidates=total_candidates, processed_candidates=total_candidates,
@@ -463,6 +493,7 @@ async def run_match(
                 "cv_id": c.cv_id, "cv_name": c.cv_name, "overall_score": c.overall_score,
                 "skills_score": c.skills_score, "responsibilities_score": c.responsibilities_score,
                 "job_title_score": c.job_title_score, "years_score": c.years_score,
+                "requirements_note": job_requirements.summary_line(c.requirements) if c.requirements else "",
             } for c in resp_candidates[:llm_n]]
 
             enhanced_dict = await enhance_with_llm_analysis_batched(

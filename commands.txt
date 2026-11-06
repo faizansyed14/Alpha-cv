@@ -14,8 +14,8 @@ dev and local use the same ports, so run one of them at a time.
 
 LOCAL (all data in Docker volumes - no S3, no RDS)
 --------------------------------------------------
-Start local (first run creates .env.local from .env.dev, or the example, and
-forces storage + databases to the local volumes; add your OPENAI_API_KEY to it):
+Start local (first run creates .env.local from .env.local.example and
+forces storage + databases to the local volumes; add your OPENROUTER_API_KEY to it):
   ./scripts/start.sh local
 
 Stop local (keeps the volumes):
@@ -58,7 +58,6 @@ Where the data lives (docker volume ls):
   alpha-cv-local_qdrant-local-data     CV / JD index and embeddings
   alpha-cv-local_uploads-local-data    raw CV and JD files
   alpha-cv-local_redis-local-data      queues + caches
-  alpha-cv-local_llm-cache-local       LLM response cache
 
 DEVELOPMENT
 -----------
@@ -75,8 +74,7 @@ Delete the dev stack's containers, volumes and images (asks first):
   ./scripts/clean.sh dev
 
 First-time setup (only once):
-  cp .env.development.example .env.dev
-  # then edit .env.dev and fill in the required values
+  # first run creates .env.dev from .env.dev.example; fill in the required values and run again
 
 Dev URLs:
   Frontend : http://localhost:3000
@@ -96,8 +94,7 @@ Start prod with a from-scratch build (ignores Docker's layer cache):
   ./scripts/start.sh prod clean
 
 First-time setup (only once):
-  cp .env.example .env
-  # then edit .env: fill in every CHANGE_ME, your domain, and API keys
+  # first run creates .env.prod from .env.prod.example; fill in every CHANGE_ME, your domain, and API keys
   # start.sh refuses to run while any CHANGE_ME placeholder remains
 
 
@@ -107,13 +104,13 @@ View live logs (dev):
   docker compose -f docker-compose.dev.yml --env-file .env.dev logs -f
 
 View live logs (prod):
-  docker compose -f docker-compose.prod.yml --env-file .env logs -f
+  docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f
 
 Check container status (dev):
   docker compose -f docker-compose.dev.yml --env-file .env.dev ps
 
 Check container status (prod):
-  docker compose -f docker-compose.prod.yml --env-file .env ps
+  docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 
 Wipe application data only (keeps auth users + all volumes, asks to confirm):
   ./db/reset_data.sh dev

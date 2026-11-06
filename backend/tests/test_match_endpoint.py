@@ -47,7 +47,7 @@ def test_rejects_requests_above_the_safety_ceiling(client, queue):
         cfg.MATCH_MAX_CVS = 2
         resp = client.post("/api/match", json={"jd_id": "jd_1", "cv_ids": ["a", "b", "c"]})
     assert resp.status_code == 400
-    assert "safety ceiling" in resp.json()["detail"]
+    assert "at most 2 CVs" in resp.json()["detail"]
     queue.enqueue_match.assert_not_called()
 
 

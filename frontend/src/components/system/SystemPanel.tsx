@@ -104,9 +104,9 @@ export default function SystemPanel() {
           }
         },
         embedding: {
-          model: 'all-mpnet-base-v2',
-          dimension: 768,
-          provider: 'sentence-transformers',
+          model: 'intfloat/multilingual-e5-small',
+          dimension: 384,
+          provider: 'onnxruntime',
           device: 'cpu',
           cache_size: 1000,
           avg_request_time: '120ms'
@@ -278,7 +278,7 @@ export default function SystemPanel() {
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {Object.entries(serviceDetails).map(([key, value]) => (
-                <div key={key} className="rounded-md border border-slate-200 bg-[var(--app-bg-soft)] p-3">
+                <div key={key} className="rounded-md border border-surface-border bg-[var(--app-bg-soft)] p-3">
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide capitalize text-gray-500">
                     {key.replace(/_/g, ' ')}
                   </div>

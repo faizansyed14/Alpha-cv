@@ -14,22 +14,23 @@ sys.path.insert(0, backend_dir)
 
 from app.providers.vectorstore.qdrant import QdrantUtils
 from app.matching.engine import MatchingService
+from app.config.settings import settings
 
 def create_test_embeddings():
     """Create test embeddings with known structure"""
     return {
         "skill_vectors": [
-            [0.1] * 768, [0.2] * 768, [0.3] * 768, [0.4] * 768, [0.5] * 768,
-            [0.6] * 768, [0.7] * 768, [0.8] * 768, [0.9] * 768, [1.0] * 768,
-            [1.1] * 768, [1.2] * 768, [1.3] * 768, [1.4] * 768, [1.5] * 768,
-            [1.6] * 768, [1.7] * 768, [1.8] * 768, [1.9] * 768, [2.0] * 768
+            [0.1] * settings.EMBEDDING_DIM, [0.2] * settings.EMBEDDING_DIM, [0.3] * settings.EMBEDDING_DIM, [0.4] * settings.EMBEDDING_DIM, [0.5] * settings.EMBEDDING_DIM,
+            [0.6] * settings.EMBEDDING_DIM, [0.7] * settings.EMBEDDING_DIM, [0.8] * settings.EMBEDDING_DIM, [0.9] * settings.EMBEDDING_DIM, [1.0] * settings.EMBEDDING_DIM,
+            [1.1] * settings.EMBEDDING_DIM, [1.2] * settings.EMBEDDING_DIM, [1.3] * settings.EMBEDDING_DIM, [1.4] * settings.EMBEDDING_DIM, [1.5] * settings.EMBEDDING_DIM,
+            [1.6] * settings.EMBEDDING_DIM, [1.7] * settings.EMBEDDING_DIM, [1.8] * settings.EMBEDDING_DIM, [1.9] * settings.EMBEDDING_DIM, [2.0] * settings.EMBEDDING_DIM
         ],
         "responsibility_vectors": [
-            [0.1] * 768, [0.2] * 768, [0.3] * 768, [0.4] * 768, [0.5] * 768,
-            [0.6] * 768, [0.7] * 768, [0.8] * 768, [0.9] * 768, [1.0] * 768
+            [0.1] * settings.EMBEDDING_DIM, [0.2] * settings.EMBEDDING_DIM, [0.3] * settings.EMBEDDING_DIM, [0.4] * settings.EMBEDDING_DIM, [0.5] * settings.EMBEDDING_DIM,
+            [0.6] * settings.EMBEDDING_DIM, [0.7] * settings.EMBEDDING_DIM, [0.8] * settings.EMBEDDING_DIM, [0.9] * settings.EMBEDDING_DIM, [1.0] * settings.EMBEDDING_DIM
         ],
-        "experience_vector": [[0.5] * 768],
-        "job_title_vector": [[0.3] * 768],
+        "experience_vector": [[0.5] * settings.EMBEDDING_DIM],
+        "job_title_vector": [[0.3] * settings.EMBEDDING_DIM],
         "skills": [f"skill_{i}" for i in range(20)],
         "responsibilities": [f"resp_{i}" for i in range(10)],
         "experience_years": "5",

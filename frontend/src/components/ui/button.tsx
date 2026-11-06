@@ -4,27 +4,27 @@ import { Loader2 } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
 const PRIMARY =
-  "bg-navy-600 text-white shadow-[0_1px_2px_rgba(16,24,40,0.08),inset_0_1px_0_rgba(255,255,255,0.12)] hover:bg-navy-700 active:bg-navy-800";
+  "bg-navy-900 text-white shadow-[0_1px_2px_rgba(16,24,40,0.10),inset_0_1px_0_rgba(255,255,255,0.10)] hover:bg-navy-800 active:bg-navy-950";
 const SECONDARY =
-  "border border-surface-strong bg-paper text-slate-700 shadow-soft hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900";
+  "border border-surface-border bg-paper text-slate-700 shadow-soft hover:border-navy-300 hover:bg-navy-50 hover:text-navy-900";
 
 const buttonVariants = cva(
   "inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-semibold transition-[background-color,border-color,color,opacity,box-shadow] duration-150 ease-out focus-visible:outline-none focus-visible:shadow-glow disabled:pointer-events-none disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        /** The one primary action on a screen */
+        /** The one primary action on a screen — deep hero navy */
         primary: PRIMARY,
         default: PRIMARY,
         navy: PRIMARY,
         secondary: SECONDARY,
         outline: SECONDARY,
-        /** Tinted blue, for a second positive action next to a primary one */
-        soft: "bg-navy-50 text-navy-700 hover:bg-navy-100",
-        ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+        /** Quiet tint for a secondary positive action */
+        soft: "bg-navy-50 text-navy-900 hover:bg-navy-100",
+        ghost: "text-slate-600 hover:bg-navy-50 hover:text-navy-900",
         danger: "border border-red-200 bg-paper text-red-600 shadow-soft hover:border-red-300 hover:bg-red-50",
         destructive: "border border-red-200 bg-paper text-red-600 shadow-soft hover:border-red-300 hover:bg-red-50",
-        link: "h-auto px-0 text-navy-600 underline-offset-4 hover:underline",
+        link: "h-auto px-0 text-navy-800 underline-offset-4 hover:underline",
       },
       size: {
         sm: "h-8 gap-1.5 px-3 text-xs [&_svg]:size-3.5",

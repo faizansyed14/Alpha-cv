@@ -22,7 +22,7 @@ interface JobPostingFormProps {
 const cardClass =
   'rounded-xl border border-surface-border bg-white shadow-card';
 const inputClass =
-  'w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-900 placeholder:text-slate-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30';
+  'w-full rounded-md border border-surface-border bg-white px-3 py-2 text-[13px] text-slate-900 placeholder:text-slate-400 transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30';
 
 export default function JobPostingForm({ onSuccess, jobId, publicToken, initialData }: JobPostingFormProps) {
   const { createJobPostingWithFormData, isCreatingJob, error, clearError } = useCareersStore();
@@ -344,7 +344,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
       if (copySuccess) {
         setEmailSubjectCopied(true);
         setTimeout(() => setEmailSubjectCopied(false), 2000);
-        showSuccess('Email Subject Copied!', 'Paste this subject in your Naukri job posting to enable email CV processing.');
+        showSuccess('Subject Copied!', 'The unique subject line for this job is on your clipboard.');
       } else {
         console.error('Failed to copy email subject');
         showError('Copy Failed', 'Please try again or copy the text manually.');
@@ -378,7 +378,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
       <ToastContainer toasts={toasts} onClose={removeToast} />
       <div id="job-posting-form" className={`${cardClass} scroll-mt-20 overflow-hidden`}>
         {/* Card header */}
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-5">
+        <div className="flex items-center justify-between gap-3 border-b border-surface-border px-4 py-3 sm:px-5">
           <div className="flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-50 text-brand-600">
               {jobId ? <Edit3 className="h-4 w-4" /> : <Briefcase className="h-4 w-4" />}
@@ -437,7 +437,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
 
                   {success?.emailSubjectTemplate && (
                     <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-amber-800">
-                      <p className="text-[12px] font-semibold">Naukri email subject</p>
+                      <p className="text-[12px] font-semibold">Job subject line</p>
                       <div className="mt-1.5 flex items-center gap-2">
                         <code className="min-w-0 flex-1 truncate rounded bg-white px-2 py-1 font-mono text-[12px] text-amber-900">
                           {success.emailSubjectTemplate}
@@ -445,14 +445,14 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
                         <button
                           type="button"
                           onClick={handleCopyEmailSubject}
-                          title="Copy email subject for Naukri"
+                          title="Copy the subject line"
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-amber-700 hover:bg-amber-100"
                         >
                           {emailSubjectCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                         </button>
                       </div>
                       <p className="mt-1.5 text-[12px]">
-                        Paste this exact subject in your Naukri posting so replied CVs are auto-processed.
+                        A unique reference generated for this job.
                       </p>
                     </div>
                   )}
@@ -504,7 +504,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
             <div
               className={`rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
                 jobId
-                  ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-60'
+                  ? 'cursor-not-allowed border-surface-border bg-slate-50 opacity-60'
                   : dragActive
                   ? 'border-brand-400 bg-brand-50'
                   : selectedFile
@@ -680,7 +680,7 @@ export default function JobPostingForm({ onSuccess, jobId, publicToken, initialD
         </div>
 
         {/* Footer actions */}
-        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-4 py-3 sm:px-5">
+        <div className="flex flex-wrap justify-end gap-2 border-t border-surface-border px-4 py-3 sm:px-5">
           <Button variant="secondary" onClick={onSuccess}>
             Cancel
           </Button>

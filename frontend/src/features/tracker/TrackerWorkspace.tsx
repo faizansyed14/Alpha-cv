@@ -718,7 +718,7 @@ export default function TrackerWorkspace() {
               </button>
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[13px] font-medium text-slate-600 hover:bg-slate-50 hover:text-red-600 transition-colors"
+                className="flex items-center gap-1.5 rounded-lg border border-surface-border px-2.5 py-1.5 text-[13px] font-medium text-slate-600 hover:bg-slate-50 hover:text-red-600 transition-colors"
                 title="Logout"
               >
                 <LogOut className="w-4 h-4" />
@@ -729,7 +729,7 @@ export default function TrackerWorkspace() {
         </header>
 
         {/* Page toolbar */}
-        <div className="shrink-0 border-b border-slate-200 bg-white px-5 py-3 shadow-card">
+        <div className="shrink-0 border-b border-surface-border bg-white px-5 py-3 shadow-card">
           {/* Row 1: title + actions */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -743,7 +743,7 @@ export default function TrackerWorkspace() {
                 </p>
                 {view === 'jobOpenings' && (
                   <div className="mt-2 flex items-center gap-2 flex-wrap">
-                    <div className="w-[100px] h-[62px] rounded-lg border border-slate-200 bg-slate-50 flex flex-col justify-center px-3">
+                    <div className="w-[100px] h-[62px] rounded-lg border border-surface-border bg-slate-50 flex flex-col justify-center px-3">
                       <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Total</div>
                       <div className="text-[20px] leading-none font-extrabold text-slate-900 tabular-nums">
                         {jobOpenings.length}
@@ -767,7 +767,7 @@ export default function TrackerWorkspace() {
                         {requirementCounts.hold}
                       </div>
                     </div>
-                    <div className="w-[92px] h-[62px] rounded-lg border border-slate-200 bg-slate-50 flex flex-col justify-center px-3">
+                    <div className="w-[92px] h-[62px] rounded-lg border border-surface-border bg-slate-50 flex flex-col justify-center px-3">
                       <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Closed</div>
                       <div className="text-[20px] leading-none font-extrabold text-slate-900 tabular-nums">
                         {requirementCounts.closed}
@@ -801,19 +801,19 @@ export default function TrackerWorkspace() {
                 )}
                 {view === 'followUps' && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <div className="w-[140px] h-[62px] rounded-lg border border-slate-200 bg-slate-50 flex flex-col justify-center px-3">
+                    <div className="w-[140px] h-[62px] rounded-lg border border-surface-border bg-slate-50 flex flex-col justify-center px-3">
                       <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Feedback pending</div>
                       <div className="text-[20px] leading-none font-extrabold text-slate-900 tabular-nums">
                         {followUpCounts.feedbackPending}
                       </div>
                     </div>
-                    <div className="w-[140px] h-[62px] rounded-lg border border-slate-200 bg-slate-50 flex flex-col justify-center px-3">
+                    <div className="w-[140px] h-[62px] rounded-lg border border-surface-border bg-slate-50 flex flex-col justify-center px-3">
                       <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Position closed</div>
                       <div className="text-[20px] leading-none font-extrabold text-slate-900 tabular-nums">
                         {followUpCounts.positionsClosed}
                       </div>
                     </div>
-                    <div className="w-[110px] h-[62px] rounded-lg border border-slate-200 bg-slate-50 flex flex-col justify-center px-3">
+                    <div className="w-[110px] h-[62px] rounded-lg border border-surface-border bg-slate-50 flex flex-col justify-center px-3">
                       <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Overdue</div>
                       <div className="text-[20px] leading-none font-extrabold text-slate-400 tabular-nums">
                         {followUpCounts.overdue}
@@ -840,7 +840,7 @@ export default function TrackerWorkspace() {
                 </span>
               )}
               {isRecruiterUser && view === 'jobOpenings' && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-[11px] text-slate-600 font-medium">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 border border-surface-border text-[11px] text-slate-600 font-medium">
                   Requirements: view only
                 </span>
               )}
@@ -848,7 +848,7 @@ export default function TrackerWorkspace() {
             <div className="flex items-center gap-2">
               {isAdminLike ? (
                 <Select value={teamView} onValueChange={(v) => setTeamViewPersisted(v as any)}>
-                  <SelectTrigger className="h-8 w-[170px] text-[13px] bg-white border-slate-200 text-slate-800">
+                  <SelectTrigger className="h-8 w-[170px] text-[13px] bg-white border-surface-border text-slate-800">
                     <SelectValue placeholder="Team" />
                   </SelectTrigger>
                   <SelectContent>
@@ -862,7 +862,7 @@ export default function TrackerWorkspace() {
                 <button
                   disabled={!token || loading}
                   onClick={() => setImportOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-200 bg-white text-[13px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-surface-border bg-white text-[13px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors"
                   title="Upload Selections & Joinings Excel"
                 >
                   <Upload className="w-3.5 h-3.5" /> Upload Excel
@@ -923,7 +923,7 @@ export default function TrackerWorkspace() {
                         : await trackerApi.exportFollowUpsXlsx(token, apiTeam);
                   downloadBlob(blob, view === 'jobOpenings' ? 'job_openings.xlsx' : view === 'candidateProfiles' ? 'candidates.xlsx' : 'follow_ups.xlsx');
                 }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-200 bg-white text-[13px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-surface-border bg-white text-[13px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-colors"
               >
                 <Download className="w-3.5 h-3.5" /> Export
               </button>
@@ -934,7 +934,7 @@ export default function TrackerWorkspace() {
           {view !== 'followUps' && view !== 'managerSettings' ? (
             <div className="flex flex-wrap items-center gap-2 mt-3">
               <Select value={filterStatus} onValueChange={setFilterStatus}>
-                <SelectTrigger className="h-8 w-[180px] text-[13px] bg-white border-slate-200 text-slate-800">
+                <SelectTrigger className="h-8 w-[180px] text-[13px] bg-white border-surface-border text-slate-800">
                   <SelectValue placeholder="All Status" />
                 </SelectTrigger>
                 <SelectContent className="max-h-64 overflow-y-auto">
@@ -949,7 +949,7 @@ export default function TrackerWorkspace() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={view === 'jobOpenings' ? 'Search role, client…' : 'Search name, position…'}
-                  className="w-full h-8 pl-3 pr-8 text-[13px] border border-slate-200 rounded-lg bg-white text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+                  className="w-full h-8 pl-3 pr-8 text-[13px] border border-surface-border rounded-lg bg-white text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
                 />
                 {search && (
                   <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
@@ -967,7 +967,7 @@ export default function TrackerWorkspace() {
                   value={view === 'jobOpenings' ? jobDateFrom : candDateFrom}
                   onChange={(e) => view === 'jobOpenings' ? setJobDateFrom(e.target.value) : setCandDateFrom(e.target.value)}
                   aria-label="Date from"
-                  className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 [color-scheme:light]"
+                  className="h-8 px-2 text-[12px] border border-surface-border rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 [color-scheme:light]"
                 />
                 <span className="text-[11px] text-slate-400">–</span>
                 <input
@@ -975,7 +975,7 @@ export default function TrackerWorkspace() {
                   value={view === 'jobOpenings' ? jobDateTo : candDateTo}
                   onChange={(e) => view === 'jobOpenings' ? setJobDateTo(e.target.value) : setCandDateTo(e.target.value)}
                   aria-label="Date to"
-                  className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 [color-scheme:light]"
+                  className="h-8 px-2 text-[12px] border border-surface-border rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 [color-scheme:light]"
                 />
                 {((view === 'jobOpenings' && (jobDateFrom || jobDateTo)) ||
                   (view === 'candidateProfiles' && (candDateFrom || candDateTo))) && (
@@ -984,7 +984,7 @@ export default function TrackerWorkspace() {
                         if (view === 'jobOpenings') { setJobDateFrom(''); setJobDateTo(''); }
                         else { setCandDateFrom(''); setCandDateTo(''); }
                       }}
-                      className="h-8 px-2 text-[11px] text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg bg-white"
+                      className="h-8 px-2 text-[11px] text-slate-400 hover:text-slate-600 border border-surface-border rounded-lg bg-white"
                     >
                       Clear
                     </button>
@@ -992,7 +992,7 @@ export default function TrackerWorkspace() {
               </div>
               {view === 'candidateProfiles' && (
                 <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as any)}>
-                  <SelectTrigger className="h-8 w-[100px] text-[12px] bg-white border-slate-200 text-slate-800">
+                  <SelectTrigger className="h-8 w-[100px] text-[12px] bg-white border-surface-border text-slate-800">
                     <SelectValue placeholder="Sort" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1024,7 +1024,7 @@ export default function TrackerWorkspace() {
               <SyncedXScroll>
                 <table className="table-premium w-full min-w-[1500px] text-[13px]">
                   <thead className="sticky top-0 z-10">
-                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    <tr className="bg-slate-50 border-b border-surface-border text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       <th className="px-4 py-3 text-left w-[70px]">S.no</th>
                       {isAllTeamsView ? <th className="px-4 py-3 text-left w-[110px]">Team</th> : null}
                       <th className="px-4 py-3 text-left w-[220px]">Role</th>
@@ -1145,7 +1145,7 @@ export default function TrackerWorkspace() {
                                   : ''
                               }
                               placeholder="0"
-                              className="w-[60px] h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-center"
+                              className="w-[60px] h-8 px-2 text-[12px] border border-surface-border rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-center"
                               onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }}
                               onBlur={async (e) => {
                                 if (!token) return;
@@ -1213,7 +1213,7 @@ export default function TrackerWorkspace() {
                               <>
                                 <button
                                   onClick={() => setEditJob(j)}
-                                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-100 hover:border-brand-300 hover:text-brand-700 transition-colors"
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-surface-border text-slate-600 hover:bg-slate-100 hover:border-brand-300 hover:text-brand-700 transition-colors"
                                 >
                                   <Pencil className="w-3 h-3" /> Edit
                                 </button>
@@ -1240,7 +1240,7 @@ export default function TrackerWorkspace() {
               <SyncedXScroll>
                 <table className="table-premium w-full min-w-[1100px] text-[13px]">
                   <thead className="sticky top-0 z-10">
-                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    <tr className="bg-slate-50 border-b border-surface-border text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       <th className="px-4 py-3 text-left w-[110px]">Date</th>
                       {isAllTeamsView ? <th className="px-4 py-3 text-left w-[110px]">Team</th> : null}
                       <th className="px-4 py-3 text-left w-[155px]">Candidate</th>
@@ -1277,7 +1277,7 @@ export default function TrackerWorkspace() {
                               key={`name-${cand.id}:${String(cand.updated_at || '')}`}
                               defaultValue={cand.name || ''}
                               placeholder="Name"
-                              className="w-full min-w-[120px] h-8 px-2 text-[12px] font-semibold text-slate-900 border border-transparent hover:border-slate-200 focus:border-brand-500 rounded-lg bg-transparent hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 transition-all"
+                              className="w-full min-w-[120px] h-8 px-2 text-[12px] font-semibold text-slate-900 border border-transparent hover:border-surface-border focus:border-brand-500 rounded-lg bg-transparent hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 transition-all"
                               onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }}
                               onBlur={async (e) => {
                                 if (!token) return;
@@ -1485,7 +1485,7 @@ export default function TrackerWorkspace() {
                                     }
                                     setEditApp({ app: resolvedApp, cand });
                                   }}
-                                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-brand-300 hover:text-brand-700 transition-colors"
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-surface-border text-slate-600 hover:bg-slate-50 hover:border-brand-300 hover:text-brand-700 transition-colors"
                                 >
                                   <Pencil className="w-3 h-3" /> Edit
                                 </button>
@@ -1534,7 +1534,7 @@ export default function TrackerWorkspace() {
                         value={followupSearch}
                         onChange={(e) => setFollowupSearch(e.target.value)}
                         placeholder="Search follow-ups…"
-                        className="h-8 w-full pl-3 pr-8 text-[13px] border border-slate-200 rounded-lg bg-white text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+                        className="h-8 w-full pl-3 pr-8 text-[13px] border border-surface-border rounded-lg bg-white text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
                       />
                       {followupSearch ? (
                         <button
@@ -1548,7 +1548,7 @@ export default function TrackerWorkspace() {
                     </div>
                     {/* Stage filter */}
                     <Select value={followupStageFilter} onValueChange={setFollowupStageFilter}>
-                      <SelectTrigger className="h-8 w-[170px] text-[13px] bg-white border-slate-200 text-slate-800 shrink-0">
+                      <SelectTrigger className="h-8 w-[170px] text-[13px] bg-white border-surface-border text-slate-800 shrink-0">
                         <SelectValue placeholder="Current Stage" />
                       </SelectTrigger>
                       <SelectContent className="max-h-64 overflow-y-auto pointer-events-auto">
@@ -1565,7 +1565,7 @@ export default function TrackerWorkspace() {
                         type="date"
                         value={followupNextFrom}
                         onChange={(e) => setFollowupNextFrom(e.target.value)}
-                        className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 [color-scheme:light]"
+                        className="h-8 px-2 text-[12px] border border-surface-border rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 [color-scheme:light]"
                         aria-label="Next Follow-up Date from"
                       />
                       <span className="text-[11px] text-slate-400">–</span>
@@ -1573,13 +1573,13 @@ export default function TrackerWorkspace() {
                         type="date"
                         value={followupNextTo}
                         onChange={(e) => setFollowupNextTo(e.target.value)}
-                        className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 [color-scheme:light]"
+                        className="h-8 px-2 text-[12px] border border-surface-border rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 [color-scheme:light]"
                         aria-label="Next Follow-up Date to"
                       />
                       {(followupNextFrom || followupNextTo) && (
                         <button
                           onClick={() => { setFollowupNextFrom(''); setFollowupNextTo(''); }}
-                          className="h-8 px-2 text-[11px] text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg bg-white"
+                          className="h-8 px-2 text-[11px] text-slate-400 hover:text-slate-600 border border-surface-border rounded-lg bg-white"
                         >
                           Clear
                         </button>
@@ -1592,7 +1592,7 @@ export default function TrackerWorkspace() {
               <SyncedXScroll>
                 <table className="table-premium w-full min-w-[1500px] text-[13px]">
                   <thead className="sticky top-0 z-10">
-                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    <tr className="bg-slate-50 border-b border-surface-border text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       <th className="px-4 py-3 text-left w-[160px]">Client Name</th>
                       {isAllTeamsView ? <th className="px-4 py-3 text-left w-[110px]">Team</th> : null}
                       <th className="px-4 py-3 text-left w-[160px]">Position</th>
@@ -1814,7 +1814,7 @@ export default function TrackerWorkspace() {
                                 <>
                                   <button
                                     onClick={() => setEditFollowUp({ mode: 'edit', row: r })}
-                                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-100 hover:border-brand-300 hover:text-brand-700 transition-colors"
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-surface-border text-slate-600 hover:bg-slate-100 hover:border-brand-300 hover:text-brand-700 transition-colors"
                                   >
                                     <Pencil className="w-3 h-3" /> Edit
                                   </button>
@@ -1895,7 +1895,7 @@ export default function TrackerWorkspace() {
                   </div>
 
                   <div className="grid grid-cols-1 gap-4 mt-5">
-                    <div className="rounded-lg border border-slate-200 overflow-hidden">
+                    <div className="rounded-lg border border-surface-border overflow-hidden">
                       <div className="px-4 py-3 bg-slate-50 flex items-center justify-between gap-3 flex-wrap">
                         <div>
                           <div className="text-[13px] font-bold text-slate-800">Follow-up Reminders</div>
@@ -2088,7 +2088,7 @@ export default function TrackerWorkspace() {
                       const showsReminder = sec.kind === 'account_manager';
                       const colSpan = 1 + (showsEmail ? 1 : 0) + (showsReminder ? 1 : 0) + 1 + 1;
                       return (
-                        <div key={sec.kind} className="rounded-lg border border-slate-200 overflow-hidden">
+                        <div key={sec.kind} className="rounded-lg border border-surface-border overflow-hidden">
                           <div className="px-4 py-3 bg-slate-50 flex items-center justify-between">
                             <div className="text-[13px] font-bold text-slate-800">{sec.label}</div>
                             <div className="flex items-center gap-2">
@@ -2126,7 +2126,7 @@ export default function TrackerWorkspace() {
                           <div className="overflow-x-auto">
                             <table className="table-premium w-full text-[13px]">
                               <thead>
-                                <tr className="border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                <tr className="border-b border-surface-border text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                                   <th className="px-3 py-2 text-left">Name</th>
                                   {showsEmail ? (
                                     <th className="px-3 py-2 text-left">Email</th>
@@ -2154,7 +2154,7 @@ export default function TrackerWorkspace() {
                                         <button
                                           className={`px-2 py-1 rounded-md border text-[11px] font-semibold ${(r.email_enabled ?? true)
                                               ? 'border-green-200 text-green-700 hover:bg-green-50'
-                                              : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                                              : 'border-surface-border text-slate-500 hover:bg-slate-50'
                                             }`}
                                           title="Toggle sending reminders for this Account Manager"
                                           onClick={async (e) => {
@@ -2180,7 +2180,7 @@ export default function TrackerWorkspace() {
                                             setMsEmailDraft(String(r.email || ''));
                                             setMsEmailEnabledDraft(Boolean(r.email_enabled ?? true));
                                           }}
-                                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-100 hover:border-brand-300 hover:text-brand-700 transition-colors"
+                                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-surface-border text-slate-600 hover:bg-slate-100 hover:border-brand-300 hover:text-brand-700 transition-colors"
                                         >
                                           <Pencil className="w-3 h-3" /> Edit
                                         </button>

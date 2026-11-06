@@ -14,8 +14,7 @@ import sys
 
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("OPENAI_API_KEY", "stub-key-for-smoke-test")
-os.environ.setdefault("AUTH_DB_URL", "sqlite:///./smoke_auth.db")
-os.environ.setdefault("LLM_CACHE_DIR", "/tmp/llm_cache_smoke")
+os.environ.setdefault("DATABASE_URL", "sqlite:///./smoke_auth.db")
 os.environ.setdefault("LOCAL_STORAGE_DIR", "/tmp/smoke_uploads")
 os.environ.setdefault("CV_UPLOAD_DIR", "/tmp/smoke_uploads/cv")
 
@@ -33,8 +32,11 @@ if os.getenv("E2E_REAL_MODEL", "") != "1":
 
     import numpy as _np
 
+    from app.config.settings import settings
+
+
     class _FakeSentenceTransformer:
-        DIM = 768
+        DIM = settings.EMBEDDING_DIM
 
         def _encode_one(self, text: str):
             vec = _np.zeros(self.DIM, dtype=_np.float32)

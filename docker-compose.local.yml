@@ -6,7 +6,7 @@
 #   local  : raw CV files in the `uploads-local-data` volume, Postgres in the `postgres-local` container
 # The `environment:` blocks below override .env.local, so a copy of the dev settings can never reach S3 or RDS.
 #
-# Configuration comes from ./.env.local (scripts/start.sh creates it from .env.dev, or the example, on first run).
+# Configuration comes from ./.env.local (scripts/start.sh creates it from .env.local.example on first run).
 # Start:  ./scripts/start.sh local          Stop: ./scripts/stop.sh local
 # Reset:  ./scripts/clean.sh local          (removes this stack's containers, volumes and images)
 # Resources: sized like docker-compose.prod.yml but smaller so the whole stack fits in 8 GB of Docker memory.
@@ -26,14 +26,8 @@ x-local-storage: &local-storage
   S3_BUCKET: ""
   S3_REGION: ""
   S3_PREFIX: ""
-  POSTGRES_HOST: postgres-local
-  POSTGRES_PORT: "5432"
-  POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-  POSTGRES_DB: ${POSTGRES_DB:-cv_analyzer_dev}
-  POSTGRES_SSLMODE: disable
-  AUTH_DB_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-local:5432/auth_db
-  TRACKER_DB_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-local:5432/${POSTGRES_DB:-cv_analyzer_dev}
+  # ONE database for users, tracker and email intake
+  DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-local:5432/${POSTGRES_DB:-cv_analyzer_dev}
   QDRANT_HOST: qdrant-local
   QDRANT_PORT: "6333"
   REDIS_HOST: redis-local
@@ -84,7 +78,6 @@ services:
     volumes:
       - ./backend:/app
       - uploads-local-data:/data/uploads
-      - llm-cache-local:/data/llm_cache
     networks:
       local-network:
         aliases: [backend-dev]
@@ -115,7 +108,6 @@ services:
       - .env.local
     environment:
       <<: *local-storage
-      ENABLE_EMAIL_SCHEDULER: "true"
       ENABLE_PUBLIC_CV_QUEUE: "true"
     depends_on:
       - backend-local
@@ -126,7 +118,6 @@ services:
     volumes:
       - ./backend:/app
       - uploads-local-data:/data/uploads
-      - llm-cache-local:/data/llm_cache
     networks:
       - local-network
     deploy:
@@ -168,7 +159,6 @@ services:
     volumes:
       - ./backend:/app
       - uploads-local-data:/data/uploads
-      - llm-cache-local:/data/llm_cache
     networks:
       - local-network
     deploy:
@@ -181,7 +171,7 @@ services:
           memory: 256M
     restart: unless-stopped
 
-  # Embedding model server: the only process with torch + the sentence-transformer (internal, no host port)
+  # Embedding model server: the only process with the embedding model, multilingual-e5-small on ONNX Runtime (internal, no host port)
   model-server-local:
     image: alpha-model-server:local
     build:
@@ -211,9 +201,6 @@ services:
       - "5434:5432"
     volumes:
       - postgres-local-data:/var/lib/postgresql/data
-      # only the local-Postgres bootstrap: db/init/rds-bootstrap.sql is a manual one-time script for RDS and
-      # aborts first-run initialisation here
-      - ./db/init/01-create-databases.sh:/docker-entrypoint-initdb.d/01-create-databases.sh:ro
     networks:
       - local-network
     deploy:
@@ -295,4 +282,3 @@ volumes:
   qdrant-local-data:
   redis-local-data:
   uploads-local-data:
-  llm-cache-local:

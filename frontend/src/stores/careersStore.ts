@@ -1,4 +1,4 @@
-import { runMatchJob, toMatchingProgress } from '@/lib/matchRun';
+import { finishMatchProgress, runMatchJob, toMatchingProgress } from '@/lib/matchRun';
 import { create } from 'zustand';
 import { api } from '@/lib/api';
 import {
@@ -37,9 +37,7 @@ interface CareersState {
 
 interface CareersActions {
   // Job posting management
-  createJobPosting: (file: File) => Promise<JobPostingResponse | null>;
   createJobPostingWithFormData: (file: File | null, formData: any) => Promise<JobPostingResponse | null>;
-  createManualJobPosting: (formData: any) => Promise<JobPostingResponse | null>;
   loadJobPostings: () => Promise<void>;
   loadMoreJobPostings: () => Promise<void>;
   selectJob: (job: JobPostingListItem | null) => void;
@@ -90,32 +88,6 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
   error: null,
   
   // Actions
-  createJobPosting: async (file: File) => {
-    set({ isCreatingJob: true, error: null });
-    try {
-      logger.info('Creating job posting', { filename: file.name });
-      const result = await api.createJobPosting(file);
-      
-      logger.info('Job posting created successfully', { 
-        jobId: result.job_id,
-        publicLink: result.public_link 
-      });
-      
-      // Reload job postings to include the new one
-      get().loadJobPostings();
-      
-      set({ isCreatingJob: false });
-      return result;
-    } catch (error: any) {
-      logger.error('Failed to create job posting:', error);
-      set({ 
-        isCreatingJob: false, 
-        error: error.message || 'Failed to create job posting' 
-      });
-      return null;
-    }
-  },
-
   createJobPostingWithFormData: async (file: File | null, formData: any) => {
     set({ isCreatingJob: true, error: null });
     try {
@@ -145,36 +117,6 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
     }
   },
 
-  createManualJobPosting: async (formData: any) => {
-    set({ isCreatingJob: true, error: null });
-    try {
-      logger.info('Creating manual job posting', { 
-        jobTitle: formData.jobTitle 
-      });
-      const result = await api.createManualJobPosting(formData);
-      
-      logger.info('Manual job posting created successfully', { 
-        jobId: result.job_id,
-        publicLink: result.public_link 
-      });
-      
-      // Reload job postings to include the new one
-      get().loadJobPostings();
-      
-      set({ isCreatingJob: false });
-      return result;
-    } catch (error: any) {
-      logger.error('Failed to create manual job posting:', error);
-      set({ 
-        isCreatingJob: false, 
-        error: error.message || 'Failed to create job posting' 
-      });
-      return null;
-    }
-  },
-  
-  // stores/careersStore.ts
-  // Paginated load of job postings (first page)
   loadJobPostings: async () => {
     set({ isLoading: true, error: null });
     try {
@@ -413,6 +355,7 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
         appStore.setMatchingProgress(toMatchingProgress(u));
       });
 
+      await finishMatchProgress((p) => appStore.setMatchingProgress(p as never));
       appStore.hideMatchingProgress?.();
 
       logger.info(`Matching completed for job ${jobId}`, { 
@@ -500,7 +443,7 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
   // stores/careersStore.ts
 
 loadPublicJob: async (token: string) => {
-  set({ isLoading: true, error: null });
+  set({ isLoading: true, error: null, publicJob: null });   // never show a previous link's job while this one loads
   try {
     logger.info('Loading public job', { token: token.substring(0, 8) + '...' });
     const job = await api.getPublicJob(token);
@@ -538,9 +481,13 @@ loadPublicJob: async (token: string) => {
       return result;
     } catch (error: any) {
       logger.error('Failed to submit application:', error);
-      set({ 
-        isSubmittingApplication: false, 
-        error: error.message || 'Failed to submit application' 
+      const msg =
+        (typeof error?.detail === 'string' && error.detail) ||
+        (typeof error?.message === 'string' && error.message) ||
+        'Failed to submit application';
+      set({
+        isSubmittingApplication: false,
+        error: msg,
       });
       return null;
     }

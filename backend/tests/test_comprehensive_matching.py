@@ -14,6 +14,7 @@ sys.path.insert(0, backend_dir)
 
 from app.providers.vectorstore.qdrant import QdrantUtils
 from app.matching.engine import MatchingService
+from app.config.settings import settings
 
 def create_realistic_embeddings():
     """Create realistic test embeddings"""
@@ -21,10 +22,10 @@ def create_realistic_embeddings():
     np.random.seed(42)  # For reproducible results
     
     return {
-        "skill_vectors": [np.random.rand(768).tolist() for _ in range(20)],
-        "responsibility_vectors": [np.random.rand(768).tolist() for _ in range(10)],
-        "experience_vector": [np.random.rand(768).tolist()],
-        "job_title_vector": [np.random.rand(768).tolist()],
+        "skill_vectors": [np.random.rand(settings.EMBEDDING_DIM).tolist() for _ in range(20)],
+        "responsibility_vectors": [np.random.rand(settings.EMBEDDING_DIM).tolist() for _ in range(10)],
+        "experience_vector": [np.random.rand(settings.EMBEDDING_DIM).tolist()],
+        "job_title_vector": [np.random.rand(settings.EMBEDDING_DIM).tolist()],
         "skills": [f"skill_{i}" for i in range(20)],
         "responsibilities": [f"responsibility_{i}" for i in range(10)],
         "experience_years": "5",

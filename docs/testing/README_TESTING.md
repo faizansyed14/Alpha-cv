@@ -83,7 +83,7 @@ htmlcov/index.html
 - **Critical Modules**: Must have 80%+ coverage
   - `app/utils/security.py`
   - `app/routes/auth_routes.py`
-  - `app/db/auth_db.py`
+  - `app/db/database.py`
 
 ### Check Coverage
 ```bash
@@ -186,7 +186,7 @@ pytest --cov=app --cov-report=term-missing
 ### Modules with Tests
 - `app/utils/security.py` - Comprehensive tests
 - `app/routes/auth_routes.py` - API endpoint tests
-- `app/db/auth_db.py` - Database operation tests
+- `app/db/database.py` - Database operation tests
 - `app/services/matching_service.py` - Existing tests
 
 ### Modules Needing Tests

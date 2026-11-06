@@ -10,7 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlmodel import Session, select
 
 from app.config.settings import is_otp_email_sending_disabled, settings
-from app.db.auth_db import get_session
+from app.db.database import get_session
 from app.api.deps import bearer, require_user
 from app.models.user import User
 from app.schemas.auth import (

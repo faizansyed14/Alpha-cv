@@ -1,5 +1,0 @@
-# RapidOCR (same engine as the Al-ain RAG stack). Models are bundled in the wheel.
-# Install with --no-deps: its declared dependency 'opencv-python' is the GUI build (needs libGL and clashes with
-# opencv-python-headless from requirements.txt); everything else it needs is already pinned there.
-#   pip install --no-deps -r requirements-ocr.txt
-rapidocr-onnxruntime==1.4.4

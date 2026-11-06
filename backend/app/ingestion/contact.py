@@ -1,4 +1,4 @@
-"""Reading the candidate's own e-mail, phone and name out of CV text.
+"""Reading the candidate's own e-mail, phone, LinkedIn / GitHub links and name out of CV text.
 
 A CV can hold several e-mails and numbers: the candidate's, referees', an Emirates ID, a passport number, date ranges.
 Everything found is still redacted before the text goes to the LLM, but the value stored on the record must be the
@@ -11,6 +11,8 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 import phonenumbers
+
+from app.ingestion.profile_links import find_profile_links, profile_link_spans
 
 # GCC / Levant / Egypt, South and South-East Asia, plus global anchors. Region hints only tell libphonenumber how to read
 # a number that carries no country code; numbers with '+' or '00' parse correctly under any hint.
@@ -33,6 +35,9 @@ _ID_LABEL = re.compile(r"(emirates\s*id|\bE\.?I\.?D\b|passport|visa|labou?r\s*ca
 _YEAR = r"(?:19|20)\d{2}"
 _DATE_LIKE = re.compile(rf"^\s*(?:\d{{1,2}}[\-./]\d{{1,2}}[\-./]\d{{2,4}}|{_YEAR}\s*[\-–—/]\s*(?:{_YEAR}|\d{{2}})|"
                         rf"\d{{1,2}}[\-./]{_YEAR}\s*[\-–—]\s*\d{{1,2}}[\-./]{_YEAR})\s*$")
+# "2018 - 08/2019", "08/2019 - 11/2020", and the "2018 - 08/2019" left over once a leading "06/" is split off by the matcher.
+_DATE_RANGE_ANYWHERE = re.compile(rf"{_YEAR}\s*[\-–—/]\s*(?:\d{{1,2}}\s*[\-./]\s*)?(?:{_YEAR}|\d{{2}})(?!\d)|(?<!\d)\d{{1,2}}\s*[./]\s*{_YEAR}(?!\d)")
+_MONTH_BEFORE = re.compile(r"(?<!\d)\d{1,2}\s*[./]\s*$")
 _EMIRATES_ID = re.compile(r"^784[\s\-]?\d{4}[\s\-]?\d{7}[\s\-]?\d$")
 
 _EMAIL_NOISE = re.compile(r"^(noreply|no-reply|donotreply|do-not-reply)@", re.I)
@@ -83,6 +88,9 @@ def _is_not_a_phone(raw: str, text: str, start: int) -> bool:
     if _DATE_LIKE.match(raw) or _EMIRATES_ID.match(raw.strip()):
         return True
     before = text[max(0, start - 30): start]
+    # a number made of years / month-years, or the tail of "06/2018 - 08/2019" whose "06/" sits just before it
+    if _DATE_RANGE_ANYWHERE.search(raw) or (re.match(rf"\s*{_YEAR}(?!\d)", raw) and _MONTH_BEFORE.search(before)):
+        return True
     return bool(_ID_LABEL.search(before))
 
 
@@ -151,11 +159,18 @@ def find_phones(text: str) -> Tuple[List[Tuple[int, int, str]], List[Tuple[int, 
     return [(s, e, raw) for s, e, _, raw in chosen], redact
 
 
-def extract_contacts(text: str) -> Dict[str, object]:
-    """{"emails": [...], "phones": [...], "redact": [(start, end), ...], "email_spans": [...]}; lists best first."""
+def extract_contacts(text: str, link_text: str = "") -> Dict[str, object]:
+    """{"emails", "phones", "linkedin", "github", "redact": [(start, end), ...], "email_spans": [...], "link_spans": [...]}; lists best first.
+
+    ``link_text`` is the addresses behind clickable words in the original file ("LinkedIn" linking to a profile); the visible
+    text does not contain them, and it is never part of the text sent on to the AI model."""
     emails = find_emails(text)
     phones, redact = find_phones(text)
+    links = find_profile_links(text, link_text)
     return {
+        "linkedin": links["linkedin"],
+        "github": links["github"],
+        "link_spans": profile_link_spans(text),
         "emails": _rank(text, [e for e in emails if not _EMAIL_NOISE.match(e[2])] or emails),
         "phones": _rank(text, phones, keep_order=True),
         "redact": redact,

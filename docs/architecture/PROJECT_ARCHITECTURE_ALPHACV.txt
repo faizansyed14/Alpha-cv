@@ -46,7 +46,7 @@ Notes:
   - Development compose exposes: frontend 3000, backend 8000, postgres 5434,
     qdrant 6335, redis 6380, nginx 80.
   - Backend uses CPU-only PyTorch (no CUDA). Auth DB can use SQLite or
-    PostgreSQL via AUTH_DB_URL in .env.dev.
+    PostgreSQL via DATABASE_URL in .env.dev.
   - CORS allows localhost/127.0.0.1 and dev origins. No IP/UA blocking
     in nginx-dev so tools (curl, Postman) work.
 
@@ -84,7 +84,7 @@ High-level schematic (production):
                  |                                             v
                  |                               +-----------------------------+
                  |                               | PostgreSQL (postgres)        |
-                 |                               | DBs: cv_database, auth_db    |
+                 |                               | DB: one (users+tracker+email)|
                  |                               +-----------------------------+
                  |                               | Qdrant (qdrant) :6333/:6334  |
                  |                               +-----------------------------+
@@ -167,27 +167,25 @@ System Components (What runs where)
                       match/category-based.
     - /api/performance : system, gpu, docker, summary, health.
     - /api/careers  : jobs/recent, jobs/{public_token}, jobs/{token}/apply;
-                      admin: post, post-manual, list, match-data, edit-data,
+                      admin: post, list, match-data, edit-data,
                       status, applications, extract-ui-data, unified-update, delete.
-    - /api/email    : process-emails, status, health, webhook, admin reset/counts.
     - /api/storage  : files/{doc_type}/{doc_id}.
   - Database:
-    - Auth: SQLModel + engine from AUTH_DB_URL (SQLite in dev; PostgreSQL
-      auth_db in production when AUTH_DB_URL points to postgres).
+    - Relational data: SQLModel + one engine from DATABASE_URL (SQLite for tests;
+      PostgreSQL otherwise), schema owned by Alembic (backend/migrations).
     - CV/JD/application data: Stored in Qdrant (vector store) and optionally
       file storage (local or S3). No separate “application” PostgreSQL DB for
-      CV/JD; PostgreSQL in production holds cv_database and auth_db.
-  - Embeddings: sentence-transformers (all-mpnet-base-v2, 768d). GPU when
-    available (CUDA), else CPU. Production uses connection pool to Qdrant.
+      CV/JD; PostgreSQL in production holds the single application database.
+  - Embeddings: multilingual-e5-small (384d, "query: " prefix) on ONNX Runtime in
+    the model-server container, CPU. Production uses connection pool to Qdrant.
   - File storage: Local or S3 (e.g. backend/app/services/s3_storage.py)
     when configured.
   - Startup: Qdrant collections init, embedding service warmup, cache/Redis
-    init, auth DB init, enterprise job queue. Email scheduler disabled to
-    avoid unintended OpenAI calls.
+    init, auth DB init, enterprise job queue.
 
 4) PostgreSQL
   - Image: postgres:15.
-  - Production: Databases cv_database and auth_db (POSTGRES_MULTIPLE_DATABASES).
+  - Production: one database (users, tracker, AI agents).
     Persistent volume postgres_data. Tuned via postgres-optimized.conf and
     command-line params (shared_buffers, effective_cache_size, etc.). Not
     exposed to host in main production compose.
@@ -258,17 +256,10 @@ Flow 4: Matching (deterministic, explainable)
 Flow 5: Careers (public job postings and applications)
   1. Public: GET /api/careers/jobs/recent, GET /api/careers/jobs/{public_token},
      POST /api/careers/jobs/{public_token}/apply (anonymous applications).
-  2. Admin: POST /api/careers/admin/jobs/post (or post-manual), GET/PATCH/DELETE
+  2. Admin: POST /api/careers/admin/jobs/post, GET/PATCH/DELETE
      jobs, GET applications, match-data, edit-data, unified-update, etc.
   3. Application documents/embeddings stored in job_postings_* / applications_*
      Qdrant collections.
-
-Flow 6: Email processing (optional, Azure integration)
-  1. POST /api/email/process-emails (or process-emails/background). Backend
-     can pull/process emails and extract CVs (OpenAI used when configured).
-  2. Email scheduler is disabled in code to prevent unintended OpenAI usage.
-  3. Webhook: POST /api/email/webhook/email-received. Admin: reset processed
-     counts, GET processed-emails-count.
 
 Flow 7: Admin and system
   - GET /api/admin/users, POST/PATCH/DELETE users.
@@ -359,7 +350,7 @@ Security Controls Currently Implemented (in code/config)
     cron or similar.
 
 10) External secrets and config
-  - No secrets in repo. SECRET_KEY, POSTGRES_PASSWORD, AUTH_DB_URL,
+  - No secrets in repo. SECRET_KEY, POSTGRES_PASSWORD, DATABASE_URL,
     OPENAI_API_KEY (optional), etc. from environment / .env. Production
     fails fast on default secrets.
 
@@ -368,10 +359,9 @@ Security Controls Currently Implemented (in code/config)
 External Integrations
 --------------------------------------------------------------------------------
 
-- OpenAI (optional): Used for LLM standardization of CV/JD and email CV
-  processing when OPENAI_API_KEY is set. Email scheduler disabled in code.
-- Azure: Email integration (e.g. azure_email_service, email_cv_processor)
-  for fetching/processing emails.
+- OpenRouter (Claude Haiku): LLM standardization of CV/JD, matching analysis and the AI agents
+  when OPENROUTER_API_KEY is set.
+- Azure (Microsoft Graph): sends the login OTP and follow-up reminder e-mails.
 - AWS S3 (optional): File storage when configured (e.g. s3_storage.py).
 - Let's Encrypt: ACME for TLS certificates when certbot volumes are used
   with nginx.
@@ -399,7 +389,7 @@ Backend:
     careers, s3_storage, job queue, etc.)
   - backend/app/utils/qdrant_utils.py, qdrant_pool.py, redis_cache.py,
     cache.py, security.py
-  - backend/app/db/auth_db.py (auth DB init and session)
+  - backend/app/db/database.py (engine, session, migrations at startup)
   - backend/app/core/config.py (auth and app settings)
   - backend/app/middleware/rate_limiter.py
   - backend/app/deps/auth.py (JWT dependency)

@@ -45,8 +45,8 @@ def _match_ceiling_error(count: int) -> Optional[str]:
     ceiling = settings.MATCH_MAX_CVS
     if ceiling and count > ceiling:
         return (
-            f"This request targets {count} CVs, which is above the current safety "
-            f"ceiling of {ceiling} per matching job. Split it into smaller batches."
+            f"A match can score at most {ceiling:,} CVs, and this request has {count:,}. "
+            f"Select fewer CVs (or a category) and run it again."
         )
     return None
 

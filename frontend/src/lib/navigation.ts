@@ -12,10 +12,12 @@ export type WorkspaceId =
   | 'match'
   | 'careers'
   | 'careers-manage'
-  | 'email'
   | 'reports'
   | 'system'
   | 'monitor'
+  | 'agent-interview'
+  | 'agent-linkedin'
+  | 'agent-usage'
   | 'tracker'
   | 'admin';
 
@@ -29,10 +31,12 @@ export const WORKSPACE_PATHS: Record<WorkspaceId, string> = {
   match: '/match',
   careers: '/careers-manage',
   'careers-manage': '/careers-manage',
-  email: '/email',
   reports: '/reports',
   system: '/system',
   monitor: '/monitor',
+  'agent-interview': '/agents/interview',
+  'agent-linkedin': '/agents/linkedin',
+  'agent-usage': '/agents/usage',
   tracker: '/tracker',
   admin: '/admin/users',
 };
@@ -44,10 +48,12 @@ const PATH_TO_WORKSPACE: Record<string, WorkspaceId> = {
   '/jobs': 'jobs',
   '/match': 'match',
   '/careers-manage': 'careers',
-  '/email': 'email',
   '/reports': 'reports',
   '/system': 'system',
   '/monitor': 'monitor',
+  '/agents/interview': 'agent-interview',
+  '/agents/linkedin': 'agent-linkedin',
+  '/agents/usage': 'agent-usage',
   '/tracker': 'tracker',
   '/admin/users': 'admin',
 };
@@ -58,7 +64,14 @@ export function workspacePath(id: WorkspaceId | string): string {
 
 export function workspaceFromPath(pathname: string): WorkspaceId | null {
   const clean = pathname.replace(/\/$/, '') || '/';
+  if (clean.startsWith('/candidates/')) return 'candidates';
   return PATH_TO_WORKSPACE[clean] ?? null;
+}
+
+/** Pages that fill the whole window (no page padding or width limit): the AI agent chats. */
+export function isFullBleedPath(pathname: string): boolean {
+  const p = pathname.replace(/\/$/, '');
+  return p === '/agents/interview' || p === '/agents/linkedin' || p === '/agentic';
 }
 
 export function isMatchPath(pathname: string): boolean {

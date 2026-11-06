@@ -1,6 +1,6 @@
 # =============================================================================
 # AlphaCV, Development (CPU-only)
-# Configuration comes from ./.env.dev (copy .env.development.example).
+# Configuration comes from ./.env.dev (created from .env.dev.example on first run).
 # Start:  ./scripts/start.sh dev         Stop: ./scripts/stop.sh dev
 # Exposed dev ports: 3000 frontend, 8000 backend, 80 nginx,
 #                    5434 postgres, 6335 qdrant, 6380 redis.
@@ -46,7 +46,6 @@ services:
     volumes:
       - ./backend:/app
       - uploads-dev-data:/data/uploads
-      - llm-cache-dev:/data/llm_cache
     networks:
       - dev-network
     depends_on:
@@ -67,7 +66,6 @@ services:
       - .env.dev
     environment:
       - EMBEDDING_SERVICE_URL=http://model-server-dev:8080
-      - ENABLE_EMAIL_SCHEDULER=true
       - ENABLE_PUBLIC_CV_QUEUE=true
     depends_on:
       - backend-dev
@@ -78,7 +76,6 @@ services:
     volumes:
       - ./backend:/app
       - uploads-dev-data:/data/uploads
-      - llm-cache-dev:/data/llm_cache
     networks:
       - dev-network
     restart: unless-stopped
@@ -110,14 +107,13 @@ services:
     volumes:
       - ./backend:/app
       - uploads-dev-data:/data/uploads
-      - llm-cache-dev:/data/llm_cache
     networks:
       - dev-network
     deploy:
       replicas: ${MATCH_WORKER_REPLICAS:-2}
     restart: unless-stopped
 
-  # Embedding model server (torch + sentence-transformer live ONLY here; internal, no host port)
+  # Embedding model server (multilingual-e5-small on ONNX Runtime lives ONLY here; internal, no host port)
   model-server-dev:
     image: alpha-model-server:dev
     build:
@@ -140,9 +136,6 @@ services:
       - "5434:5432"
     volumes:
       - postgres-dev-data:/var/lib/postgresql/data
-      # only the local-Postgres bootstrap: db/init/rds-bootstrap.sql is a manual one-time script for RDS and
-      # aborts first-run initialisation here
-      - ./db/init/01-create-databases.sh:/docker-entrypoint-initdb.d/01-create-databases.sh:ro
     networks:
       - dev-network
     restart: unless-stopped
@@ -195,4 +188,3 @@ volumes:
   postgres-dev-data:
   qdrant-dev-data:
   uploads-dev-data:
-  llm-cache-dev:

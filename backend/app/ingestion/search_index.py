@@ -3,6 +3,9 @@
   search_text         every word of the CV (its text, title, skills, keywords, name, contact, location ...) as
                       lower-case tokens joined by single spaces. Full-text indexed, so a keyword is an index lookup
                       over the whole collection, and a phrase can be confirmed with a plain substring test.
+  search_literal      only what the CV literally says (its text, name, contact, location, nationality): no AI-written
+                      skill/responsibility sentences or keywords. Boolean search is decided on this field, so a term the
+                      CV does not contain never matches. Not indexed; read back and checked exactly.
   search_location     location tokens ("Dubai, UAE" -> "dubai uae")
   search_nationality  nationality tokens
   search_experience   years of experience as a number (null when unknown), range indexed
@@ -25,8 +28,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
 
-SEARCH_VERSION = 2   # 2: adds uploaded_at
-SEARCH_FIELDS = ("search_text", "search_location", "search_nationality", "search_experience", "search_version",
+SEARCH_VERSION = 3   # 2: adds uploaded_at; 3: adds search_literal
+SEARCH_FIELDS = ("search_text", "search_literal", "search_location", "search_nationality", "search_experience", "search_version",
                  "uploaded_at")
 
 # Technology names a word tokenizer would otherwise destroy ("C#" -> "c", ".NET" -> "net").
@@ -105,8 +108,14 @@ def build_search_fields(payload: Dict[str, Any], text: str, uploaded_at: Optiona
     for key in ("keywords", "skills_sentences", "skills", "responsibility_sentences", "responsibilities", "languages"):
         parts.extend(_strings(info.get(key)))
 
+    literal = [text or ""]
+    for key in ("name", "email", "phone", "location", "nationality", "notice_period"):
+        literal.extend(_strings(pick(key)))
+    literal.append(re.sub(r"\D", "", phone))
+
     fields = {
         "search_text": normalize(" \n ".join(parts)),
+        "search_literal": normalize(" \n ".join(literal)),
         "search_location": normalize(pick("location")),
         "search_nationality": normalize(pick("nationality")),
         "search_experience": experience_years(pick("years_of_experience")),
@@ -149,7 +158,7 @@ def index_cv(qdrant, cv_id: str, text: Optional[str] = None) -> bool:
         from qdrant_client.models import PayloadSelectorExclude
 
         points = qdrant.client.retrieve("cv_structured", ids=[cv_id], with_vectors=False,
-                                        with_payload=PayloadSelectorExclude(exclude=["search_text"]))
+                                        with_payload=PayloadSelectorExclude(exclude=["search_text", "search_literal"]))
         if not points:
             return False
         doc = _cv_docs(qdrant, [cv_id]).get(str(cv_id), {})
@@ -173,7 +182,7 @@ def backfill(qdrant, batch_size: int = 128, on_batch=None) -> int:
     previous: Optional[set] = None
     while True:
         points, _ = qdrant.client.scroll("cv_structured", scroll_filter=pending, limit=batch_size, with_vectors=False,
-                                         with_payload=PayloadSelectorExclude(exclude=["search_text"]))
+                                         with_payload=PayloadSelectorExclude(exclude=["search_text", "search_literal"]))
         if not points:
             return done
         ids = [str(p.id) for p in points]

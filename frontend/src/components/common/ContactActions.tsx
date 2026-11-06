@@ -1,10 +1,14 @@
 'use client';
 import React, { useState } from 'react';
-import { Mail, Phone, MessageCircle, Eye, EyeOff } from '@/components/icons';
+import { Mail, Phone, MessageCircle, Eye, EyeOff, Linkedin, Github } from '@/components/icons';
+import { profileHandle, safeProfileUrl } from '@/lib/profileLinks';
 
 interface ContactActionsProps {
   email?: string | null;
   phone?: string | null;
+  /** Profile links read from the CV. They open in a new tab. */
+  linkedin?: string | null;
+  github?: string | null;
   /** "chips" shows label text next to icons; "icons" shows compact icon buttons only */
   variant?: 'chips' | 'icons';
   /**
@@ -35,13 +39,59 @@ function maskPhone(phone: string): string {
   return `${'•'.repeat(Math.max(4, d.length - 4))}${d.slice(-4)}`;
 }
 
+const SITE = {
+  linkedin: { name: 'LinkedIn', Icon: Linkedin, hover: 'hover:border-sky-300 hover:text-sky-700' },
+  github: { name: 'GitHub', Icon: Github, hover: 'hover:border-slate-400 hover:text-slate-900' },
+} as const;
+
+/** A compact icon that opens the profile in a new tab (greyed out, not a link, while contact details are hidden). */
+function ProfileIcon({ url, site, shown }: { url: string; site: 'linkedin' | 'github'; shown: boolean }) {
+  const { name, Icon, hover } = SITE[site];
+  if (!shown) {
+    return (
+      <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-400" title={`Reveal to open ${name}`}>
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" title={`Open ${name} profile`} aria-label={`Open ${name} profile`}
+      className={`inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors ${hover}`}>
+      <Icon className="h-3.5 w-3.5" />
+    </a>
+  );
+}
+
+/** A labelled chip that opens the profile in a new tab. */
+function ProfileChip({ url, site, shown }: { url: string; site: 'linkedin' | 'github'; shown: boolean }) {
+  const { name, Icon, hover } = SITE[site];
+  if (!shown) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-slate-50 px-2 py-1 text-xs text-gray-500">
+        <Icon className="h-3.5 w-3.5 shrink-0" />
+        <span className="font-mono tracking-wide">{'•'.repeat(6)}</span>
+      </span>
+    );
+  }
+  const handle = profileHandle(url);
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" title={`Open ${name} profile: ${url}`}
+      className={`inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 transition-colors ${hover}`}>
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span className="max-w-[140px] truncate">{handle || name}</span>
+    </a>
+  );
+}
+
 /**
- * Recruiter contact actions for a candidate: email, call, and WhatsApp.
+ * Recruiter contact actions for a candidate: email, call, WhatsApp, and their LinkedIn / GitHub profiles.
  * Renders nothing when no contact details are available.
  */
 export default function ContactActions({
   email,
   phone,
+  linkedin,
+  github,
   variant = 'chips',
   privacy = false,
   className = '',
@@ -51,7 +101,10 @@ export default function ContactActions({
   const phoneDigits = digits(phone);
   const hasPhone = phoneDigits.length >= 6;
 
-  if (!hasEmail && !hasPhone) return null;
+  const linkedinUrl = safeProfileUrl(linkedin, 'linkedin');
+  const githubUrl = safeProfileUrl(github, 'github');
+
+  if (!hasEmail && !hasPhone && !linkedinUrl && !githubUrl) return null;
 
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const showPlain = !privacy || revealed;
@@ -125,6 +178,8 @@ export default function ContactActions({
               </span>
             </>
           ))}
+        {linkedinUrl && <ProfileIcon url={linkedinUrl} site="linkedin" shown={showPlain} />}
+        {githubUrl && <ProfileIcon url={githubUrl} site="github" shown={showPlain} />}
         {revealBtn}
       </div>
     );
@@ -176,6 +231,8 @@ export default function ContactActions({
             <span className="font-mono tracking-wide">{displayPhone}</span>
           </span>
         ))}
+      {linkedinUrl && <ProfileChip url={linkedinUrl} site="linkedin" shown={showPlain} />}
+      {githubUrl && <ProfileChip url={githubUrl} site="github" shown={showPlain} />}
       {revealBtn}
     </div>
   );
