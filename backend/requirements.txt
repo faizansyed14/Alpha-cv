@@ -9,7 +9,7 @@ qdrant-client==1.12.1
 PyMuPDF==1.24.11
 striprtf==0.0.26  # .rtf text extraction
 python-docx==1.1.2
-onnxruntime==1.20.1
+onnxruntime==1.31.1
 opencv-python-headless==4.10.0.84
 # OCR (RapidOCR, ONNX, models bundled in the wheel) and its runtime dependencies. The Dockerfile swaps the GUI
 # opencv-python it drags in for the headless build pinned above.
