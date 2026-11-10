@@ -26,7 +26,7 @@
     "clsx": "^2.1.1",
     "docx-preview": "^0.3.2",
     "framer-motion": "^12.38.0",
-    "mammoth": "^1.6.0",
+    "mammoth": "^1.13.0",
     "next": "^16.1.2",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
