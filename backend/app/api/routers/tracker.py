@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import and_ as and_c, or_ as or_c
 from sqlmodel import Session, select
 
 from app.config.settings import settings
@@ -13,15 +14,10 @@ from app.db.database import get_session as get_tracker_session
 from app.api.deps import require_roles
 from app.models.tracker.models import (
     TrackerApplication,
-    TrackerApplicationAD,
     TrackerCandidate,
-    TrackerCandidateAD,
     TrackerFollowUp,
-    TrackerFollowUpAD,
     TrackerJobOpening,
-    TrackerJobOpeningAD,
     TrackerOption,
-    TrackerOptionAD,
 )
 from app.models.user import User
 from app.schemas.tracker import (
@@ -44,7 +40,8 @@ from app.schemas.tracker import (
 )
 from app.providers.cache.redis import get_redis_cache
 from app.config.settings import is_followup_email_reminder_enabled
-from app.integrations.email.followup_reminder_service import render_followup_email_html, send_followup_reminder_email
+from app.integrations.email.followup_reminder_service import (join_emails as _join_emails, render_followup_email_html, send_followup_reminder_email,
+                                                               split_emails as _split_emails)
 
 logger = logging.getLogger(__name__)
 
@@ -145,15 +142,15 @@ def _resolve_tracker_team(user: User, team: Optional[str]) -> str:
     return "dubai"
 
 
+def _scoped_team(session: Session, user: User, team: Optional[str]) -> str:
+    """The team this request works for; the session is limited to it from here on (see app/models/tracker/scope.py)."""
+    from app.models.tracker.scope import scope_session
+
+    return scope_session(session, _resolve_tracker_team(user, team))
+
+
 def _tracker_models(team: str):
-    if team == "abudhabi":
-        return {
-            "JobOpening": TrackerJobOpeningAD,
-            "Candidate": TrackerCandidateAD,
-            "Application": TrackerApplicationAD,
-            "FollowUp": TrackerFollowUpAD,
-            "Option": TrackerOptionAD,
-        }
+    """The tracker tables (the same for both teams: rows carry their team, and the scoped session keeps each request to its own)."""
     return {
         "JobOpening": TrackerJobOpening,
         "Candidate": TrackerCandidate,
@@ -170,55 +167,6 @@ def _reject_job_status_option_for_candidate_roles(user: User, kind: str | None) 
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not allowed to modify requirement status options",
         )
-
-
-@router.post("/admin/bootstrap-abudhabi", status_code=200)
-def bootstrap_abudhabi_from_existing_tables(
-    session: Session = Depends(tracker_session),
-    _: User = AllowedTrackerAdminUser,
-):
-    """
-    One-time bootstrap helper (non-destructive):
-    Copy rows from the existing tracker tables into the Abu Dhabi *_ad tables.
-
-    - Does NOT delete or modify Dubai tables.
-    - Keeps the same IDs so relationships (candidate_id, job_opening_id, etc.) remain valid.
-    - Safe to run multiple times (idempotent best-effort).
-    """
-    from sqlalchemy import text
-
-    bind = session.get_bind()
-    url = str(getattr(bind, "url", ""))
-    is_sqlite = url.startswith("sqlite")
-
-    # Include all current tracker tables (even if some endpoints are unused today).
-    # Copy order: referenced tables first.
-    table_pairs = [
-        ("tracker_option", "tracker_option_ad"),
-        ("tracker_job_opening", "tracker_job_opening_ad"),
-        ("tracker_candidate", "tracker_candidate_ad"),
-        ("tracker_application", "tracker_application_ad"),
-        ("tracker_follow_up", "tracker_follow_up_ad"),
-    ]
-
-    inserted: dict[str, int] = {}
-
-    with bind.begin() as conn:
-        for src, dst in table_pairs:
-            try:
-                if is_sqlite:
-                    # SQLite supports INSERT OR IGNORE for PK conflicts.
-                    res = conn.execute(text(f'INSERT OR IGNORE INTO "{dst}" SELECT * FROM "{src}"'))
-                else:
-                    # Postgres: use ON CONFLICT DO NOTHING on the primary key (id).
-                    res = conn.execute(text(f'INSERT INTO "{dst}" SELECT * FROM "{src}" ON CONFLICT (id) DO NOTHING'))
-                inserted[dst] = int(getattr(res, "rowcount", 0) or 0)
-            except Exception:
-                # Best-effort: if table doesn't exist or schemas diverge, skip.
-                inserted[dst] = inserted.get(dst, 0)
-
-    _tracker_cache_bust()
-    return {"success": True, "inserted": inserted}
 
 
 @router.post("/admin/import/selections-xlsx", status_code=200)
@@ -243,7 +191,9 @@ async def import_selections_xlsx(
     if team_norm not in {"dubai", "dxb", "abudhabi", "abudabi", "abudh"}:
         raise HTTPException(status_code=400, detail="Invalid team; use dubai|abudhabi")
     team_resolved = "abudhabi" if team_norm in {"abudhabi", "abudabi", "abudh"} else "dubai"
+    from app.models.tracker.scope import scope_session
 
+    scope_session(session, team_resolved)
     models = _tracker_models(team_resolved)
     Candidate = models["Candidate"]
     Application = models["Application"]
@@ -361,36 +311,17 @@ def clear_tracker_team_data(
 
     is_ad = team_norm in {"abudhabi", "abudabi", "abudh"}
 
-    # IMPORTANT: delete order matters due to foreign keys.
-    # We clear all tracker tables for that team, including options.
-    tables = (
-        [
-            "tracker_application_ad",
-            "tracker_candidate_ad",
-            "tracker_job_opening_ad",
-            "tracker_follow_up_ad",
-            "tracker_option_ad",
-        ]
-        if is_ad
-        else [
-            "tracker_application",
-            "tracker_candidate",
-            "tracker_job_opening",
-            "tracker_follow_up",
-            "tracker_option",
-        ]
-    )
+    # IMPORTANT: delete order matters due to foreign keys. Only this team's rows go; the other team is not touched.
+    tables = ["tracker_application", "tracker_candidate", "tracker_job_opening", "tracker_follow_up", "tracker_option"]
 
     bind = session.get_bind()
     deleted: dict[str, int] = {}
     with bind.begin() as conn:
         for t in tables:
-            try:
-                res = conn.execute(text(f'DELETE FROM "{t}"'))
-                deleted[t] = int(getattr(res, "rowcount", 0) or 0)
-            except Exception:
-                # Best-effort: if table doesn't exist in this deployment, skip.
-                deleted[t] = deleted.get(t, 0)
+            # `t` comes from the fixed list above, never from the request; the team value is a bound parameter.
+            res = conn.execute(text(f'DELETE FROM "{t}" WHERE team = :team'),  # nosec B608
+                                {"team": "abudhabi" if is_ad else "dubai"})
+            deleted[t] = int(getattr(res, "rowcount", 0) or 0)
 
     _tracker_cache_bust()
     return {"success": True, "team": ("abudhabi" if is_ad else "dubai"), "deleted": deleted}
@@ -403,7 +334,7 @@ def list_job_openings(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerReadUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     cache_hit = _tracker_cache_get(
         team_resolved,
         "job_openings",
@@ -445,7 +376,7 @@ def create_job_opening(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerJobWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     JobOpening = _tracker_models(team_resolved)["JobOpening"]
     row = JobOpening(
         title=data.title,
@@ -508,7 +439,7 @@ def update_job_opening(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerJobWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     JobOpening = _tracker_models(team_resolved)["JobOpening"]
     row = session.exec(select(JobOpening).where(JobOpening.id == job_opening_id)).first()
     if not row or row.is_deleted:
@@ -574,7 +505,7 @@ def list_options(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerReadUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     cache_hit = _tracker_cache_get(
         team_resolved,
         "options",
@@ -619,7 +550,7 @@ def create_option(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerOptionWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     Option = _tracker_models(team_resolved)["Option"]
     kind = data.kind.strip()
     _reject_job_status_option_for_candidate_roles(user, kind)
@@ -678,7 +609,7 @@ def purge_inactive_options(
     if not kind or not kind.strip():
         raise HTTPException(status_code=400, detail="kind is required")
     kind = kind.strip()
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     Option = _tracker_models(team_resolved)["Option"]
     rows = session.exec(
         select(Option).where(Option.kind == kind).where(Option.is_deleted == True)  # noqa: E712
@@ -701,7 +632,7 @@ def update_option(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerOptionWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     Option = _tracker_models(team_resolved)["Option"]
     row = session.exec(select(Option).where(Option.id == option_id)).first()
     if not row or row.is_deleted:
@@ -744,7 +675,7 @@ def delete_option(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerOptionWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     Option = _tracker_models(team_resolved)["Option"]
     row = session.exec(select(Option).where(Option.id == option_id)).first()
     if not row or row.is_deleted:
@@ -765,7 +696,7 @@ def delete_job_opening(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerJobWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     JobOpening = _tracker_models(team_resolved)["JobOpening"]
     row = session.exec(select(JobOpening).where(JobOpening.id == job_opening_id)).first()
     if not row or row.is_deleted:
@@ -784,7 +715,7 @@ def list_candidates(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerReadUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     Candidate = _tracker_models(team_resolved)["Candidate"]
     rows = session.exec(
         select(Candidate).where(Candidate.is_deleted == False).order_by(Candidate.created_at.desc())  # noqa: E712
@@ -809,7 +740,7 @@ def create_candidate(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     Candidate = _tracker_models(team_resolved)["Candidate"]
     row = Candidate(
         name=data.name,
@@ -838,7 +769,7 @@ def update_candidate(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     Candidate = _tracker_models(team_resolved)["Candidate"]
     row = session.exec(select(Candidate).where(Candidate.id == candidate_id)).first()
     if not row or row.is_deleted:
@@ -867,7 +798,7 @@ def delete_candidate(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     Candidate = _tracker_models(team_resolved)["Candidate"]
     row = session.exec(select(Candidate).where(Candidate.id == candidate_id)).first()
     if not row or row.is_deleted:
@@ -887,7 +818,7 @@ def create_application(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     models = _tracker_models(team_resolved)
     Candidate = models["Candidate"]
     JobOpening = models["JobOpening"]
@@ -947,7 +878,7 @@ def list_applications(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerReadUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     Application = _tracker_models(team_resolved)["Application"]
     q = select(Application)
     if candidate_id:
@@ -982,7 +913,7 @@ def list_candidate_rows(
     user: User = AllowedTrackerReadUser,
 ):
     """Convenience endpoint for UI: returns candidate + latest application in one call."""
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     cache_hit = _tracker_cache_get(
         team_resolved,
         "candidate_rows",
@@ -1079,7 +1010,7 @@ def update_application(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     Application = _tracker_models(team_resolved)["Application"]
     row = session.exec(select(Application).where(Application.id == application_id)).first()
     if not row:
@@ -1114,7 +1045,7 @@ def list_followups(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerReadUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     cache_hit = _tracker_cache_get(team_resolved, "followups")
     if cache_hit is not None:
         return cache_hit
@@ -1157,7 +1088,7 @@ def create_followup(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerFollowUpWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     FollowUp = _tracker_models(team_resolved)["FollowUp"]
     row = FollowUp(
         client_name=data.client_name.strip(),
@@ -1205,7 +1136,7 @@ def get_followup_email_settings(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerManagerUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     Option = _tracker_models(team_resolved)["Option"]
 
     to_row = session.exec(
@@ -1237,7 +1168,7 @@ def set_followup_email_settings(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerManagerUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     Option = _tracker_models(team_resolved)["Option"]
 
     def upsert(kind: str, value: str):
@@ -1283,7 +1214,7 @@ async def send_followup_reminder_now(
     if not is_followup_email_reminder_enabled():
         raise HTTPException(status_code=400, detail="Follow-up email reminders are disabled (SEND_EMAIL_REMINDER_FOLLOWUP!=true)")
 
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     models = _tracker_models(team_resolved)
     FollowUp = models["FollowUp"]
     Option = models["Option"]
@@ -1324,24 +1255,6 @@ async def send_followup_reminder_now(
         enabled = bool(getattr(r, "email_enabled", True))
         return email, enabled
 
-    def _split_emails(v: str) -> list[str]:
-        parts = []
-        for raw in str(v or "").replace(";", ",").split(","):
-            e = raw.strip()
-            if e:
-                parts.append(e)
-        out: list[str] = []
-        seen = set()
-        for e in parts:
-            k = e.lower()
-            if k in seen:
-                continue
-            seen.add(k)
-            out.append(e)
-        return out
-
-    def _join_emails(items: list[str]) -> str:
-        return ", ".join([e.strip() for e in items if str(e or "").strip()])
 
     to_override = (to or "").strip()
     cc_override = (cc or "").strip()
@@ -1407,7 +1320,7 @@ def update_followup(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerFollowUpWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     FollowUp = _tracker_models(team_resolved)["FollowUp"]
     row = session.exec(select(FollowUp).where(FollowUp.id == followup_id)).first()
     if not row or row.is_deleted:
@@ -1449,7 +1362,7 @@ def delete_followup(
     session: Session = Depends(tracker_session),
     user: User = AllowedTrackerFollowUpWriteUser,
 ):
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     FollowUp = _tracker_models(team_resolved)["FollowUp"]
     row = session.exec(select(FollowUp).where(FollowUp.id == followup_id)).first()
     if not row or row.is_deleted:
@@ -1471,7 +1384,7 @@ def export_job_openings_xlsx(
     from io import BytesIO
     from openpyxl import Workbook
 
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     JobOpening = _tracker_models(team_resolved)["JobOpening"]
     rows = session.exec(
         select(JobOpening)
@@ -1551,7 +1464,7 @@ def export_candidates_xlsx(
         ]
     )
 
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     models = _tracker_models(team_resolved)
     Candidate = models["Candidate"]
     Application = models["Application"]
@@ -1599,7 +1512,7 @@ def export_followups_xlsx(
     from io import BytesIO
     from openpyxl import Workbook
 
-    team_resolved = _resolve_tracker_team(user, team)
+    team_resolved = _scoped_team(session, user, team)
     FollowUp = _tracker_models(team_resolved)["FollowUp"]
     rows = session.exec(
         select(FollowUp)
@@ -1658,3 +1571,261 @@ def export_followups_xlsx(
         headers=headers,
     )
 
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Paged, searched lists for the workspace (the screen loads one page and the next as the reader scrolls).
+#
+# The filters, the search and the order are applied by the database over every row; each call returns {items, total}. The old list
+# endpoints above stay as they are for exports and other callers. `team=all` (admin / EVP) lists both teams together.
+# ---------------------------------------------------------------------------------------------------------------------
+_PAGE_MAX = 200
+
+
+def _page_teams(user: User, team: Optional[str]) -> list:
+    if (team or "").strip().lower() == "all":
+        if user.role not in {"admin", "evp"}:
+            raise HTTPException(status_code=403, detail="Only admins can list both teams together")
+        return ["dubai", "abudhabi"]
+    return [_resolve_tracker_team(user, team)]
+
+
+def _day(value: Optional[str]):
+    if not value:
+        return None
+    from datetime import date as _date
+
+    try:
+        return _date.fromisoformat(value.strip()[:10])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must look like 2026-11-03")
+
+
+def _contains_any(columns, text_: Optional[str]):
+    from sqlalchemy import func as _f
+
+    needle = f"%{(text_ or '').strip().lower()}%"
+    return or_c(*[_f.lower(_f.coalesce(c, "")).like(needle) for c in columns])
+
+
+def _merged_page(per_team, offset: int, limit: int, sort_key, reverse: bool) -> dict:
+    """per_team: [(team, count, fetch(offset, n) -> rows)]. One team: the database pages. Several: each team gives its first offset+limit
+    rows, they are merged in the requested order and the page is cut from the merge."""
+    total = sum(count for _t, count, _f in per_team)
+    if len(per_team) == 1:
+        team, _count, fetch = per_team[0]
+        return {"total": total, "items": [(team, r) for r in fetch(offset, limit)]}
+    merged = [(t, r) for t, _count, fetch in per_team for r in fetch(0, offset + limit)]
+    merged.sort(key=lambda tr: sort_key(tr[1]), reverse=reverse)
+    return {"total": total, "items": merged[offset: offset + limit]}
+
+
+@router.get("/job-openings/page")
+def page_job_openings(
+    team: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None, max_length=200),
+    status_filter: Optional[str] = Query(default=None, alias="status"),
+    date_from: Optional[str] = Query(default=None),
+    date_to: Optional[str] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=_PAGE_MAX),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(tracker_session),
+    user: User = AllowedTrackerReadUser,
+):
+    from sqlalchemy import func
+
+    d1, d2 = _day(date_from), _day(date_to)
+    per_team = []
+    for t in _page_teams(user, team):
+        JobOpening = _tracker_models(t)["JobOpening"]
+        conds = [JobOpening.is_deleted == False, JobOpening.team == t]  # noqa: E712
+        if status_filter and status_filter != "all":
+            conds.append(JobOpening.status == status_filter)
+        if q and q.strip():
+            conds.append(_contains_any([JobOpening.title, JobOpening.client, JobOpening.hiring_manager, JobOpening.department], q))
+        if d1:
+            conds.append(JobOpening.submission_date >= d1)
+        if d2:
+            conds.append(JobOpening.submission_date <= d2)
+        count = int(session.exec(select(func.count()).select_from(JobOpening).where(*conds)).one() or 0)
+        per_team.append((t, count, lambda o, n, JobOpening=JobOpening, conds=conds: session.exec(
+            select(JobOpening).where(*conds).order_by(JobOpening.created_at.desc(), JobOpening.id).offset(o).limit(n)).all()))
+    page = _merged_page(per_team, offset, limit, lambda r: r.created_at or datetime.min, True)
+    return {"total": page["total"], "items": [
+        {**TrackerJobOpeningRead.model_validate(r, from_attributes=True).model_dump(mode="json"), "team": t} for t, r in page["items"]]}
+
+
+@router.get("/follow-ups/page")
+def page_followups(
+    team: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None, max_length=200),
+    stage: Optional[str] = Query(default=None),
+    date_from: Optional[str] = Query(default=None, description="Next follow-up on or after"),
+    date_to: Optional[str] = Query(default=None, description="Next follow-up on or before"),
+    limit: int = Query(default=50, ge=1, le=_PAGE_MAX),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(tracker_session),
+    user: User = AllowedTrackerReadUser,
+):
+    from sqlalchemy import func
+
+    d1, d2 = _day(date_from), _day(date_to)
+    per_team = []
+    for t in _page_teams(user, team):
+        FollowUp = _tracker_models(t)["FollowUp"]
+        conds = [FollowUp.is_deleted == False, FollowUp.team == t]  # noqa: E712
+        if stage and stage != "all":
+            conds.append(FollowUp.current_stage == stage)
+        if q and q.strip():
+            conds.append(_contains_any([FollowUp.client_name, FollowUp.position, FollowUp.recruiter_name, FollowUp.account_manager,
+                                        FollowUp.recruitment_manager, FollowUp.client_feedback, FollowUp.interview_feedback, FollowUp.remarks], q))
+        if d1:
+            conds.append(FollowUp.next_follow_up_date >= d1)
+        if d2:
+            conds.append(FollowUp.next_follow_up_date <= d2)
+        count = int(session.exec(select(func.count()).select_from(FollowUp).where(*conds)).one() or 0)
+        per_team.append((t, count, lambda o, n, FollowUp=FollowUp, conds=conds: session.exec(
+            select(FollowUp).where(*conds).order_by(FollowUp.created_at.desc(), FollowUp.id).offset(o).limit(n)).all()))
+    page = _merged_page(per_team, offset, limit, lambda r: r.created_at or datetime.min, True)
+    return {"total": page["total"], "items": [
+        {**TrackerFollowUpRead.model_validate(r, from_attributes=True).model_dump(mode="json"), "team": t} for t, r in page["items"]]}
+
+
+def _candidate_rows_select(models: dict, user: User, team: str):
+    """(Candidate, latest Application) pairs the user may see, as a select; None when the user may see nothing. Restricted roles see only
+    candidates that have an application created by their own team location (the same rule as /candidate-rows)."""
+    from sqlalchemy import func
+
+    Candidate, Application = models["Candidate"], models["Application"]
+    visible = select(Application.id.label("aid"), Application.candidate_id.label("cid"),
+                     func.row_number().over(partition_by=Application.candidate_id, order_by=Application.created_at.desc()).label("rn")
+                     ).where(Application.team == team)
+    restricted = user.role not in {"admin", "evp"}
+    if restricted:
+        team_loc = _norm_team(getattr(user, "team_location", None) or "")
+        if not team_loc:
+            return None
+        flat = func.lower(func.replace(func.replace(func.replace(func.coalesce(Application.created_by_team_location, ""), " ", ""), "-", ""), "_", ""))
+        visible = visible.where(flat == team_loc)
+    latest = visible.subquery()
+    sel = (select(Candidate, Application)
+           .outerjoin(latest, and_c(latest.c.cid == Candidate.id, latest.c.rn == 1))
+           .outerjoin(Application, Application.id == latest.c.aid)
+           .where(Candidate.is_deleted == False, Candidate.team == team))  # noqa: E712
+    if restricted:
+        sel = sel.where(Application.id.is_not(None))
+    return sel
+
+
+@router.get("/candidate-rows/page")
+def page_candidate_rows(
+    team: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None, max_length=200),
+    status_filter: Optional[str] = Query(default=None, alias="status"),
+    date_from: Optional[str] = Query(default=None, description="Applied on or after"),
+    date_to: Optional[str] = Query(default=None, description="Applied on or before"),
+    sort: str = Query(default="latest", pattern="^(latest|oldest)$"),
+    limit: int = Query(default=50, ge=1, le=_PAGE_MAX),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(tracker_session),
+    user: User = AllowedTrackerReadUser,
+):
+    from datetime import date as _date
+    from sqlalchemy import func
+
+    d1, d2 = _day(date_from), _day(date_to)
+    per_team = []
+    for t in _page_teams(user, team):
+        models = _tracker_models(t)
+        Candidate, Application = models["Candidate"], models["Application"]
+        base = _candidate_rows_select(models, user, t)
+        if base is None:
+            continue
+        if status_filter and status_filter != "all":
+            base = base.where(Application.status == status_filter)
+        if q and q.strip():
+            base = base.where(_contains_any([Candidate.name, Application.position, Application.client, Application.recruiter,
+                                             Application.account_manager, Application.recruitment_manager, Application.comment], q))
+        if d1:
+            base = base.where(Application.applied_date >= d1)
+        if d2:
+            base = base.where(Application.applied_date <= d2)
+        count = int(session.exec(select(func.count()).select_from(base.subquery())).one() or 0)
+        applied = func.coalesce(Application.applied_date, _date(1970, 1, 1))
+        ordered = base.order_by(applied.desc() if sort == "latest" else applied.asc(), Candidate.created_at.desc(), Candidate.id)
+        per_team.append((t, count, lambda o, n, ordered=ordered: session.exec(ordered.offset(o).limit(n)).all()))
+    if not per_team:
+        return {"total": 0, "items": []}
+    page = _merged_page(per_team, offset, limit,
+                        lambda ca: (getattr(ca[1], "applied_date", None) or _date(1970, 1, 1)) if ca[1] is not None else _date(1970, 1, 1),
+                        sort == "latest")
+    return {"total": page["total"], "items": [{
+        "candidate": TrackerCandidateRead.model_validate(c, from_attributes=True).model_dump(mode="json"),
+        "application": TrackerApplicationRead.model_validate(a, from_attributes=True).model_dump(mode="json") if a is not None else None,
+        "team": t} for t, (c, a) in page["items"]]}
+
+
+@router.get("/summary")
+def tracker_summary(
+    team: Optional[str] = Query(default=None),
+    session: Session = Depends(tracker_session),
+    user: User = AllowedTrackerReadUser,
+):
+    """The numbers on the cards, counted by the database over every row (not over the page on screen)."""
+    from sqlalchemy import case, func
+
+    def n(cond):
+        return func.coalesce(func.sum(case((cond, 1), else_=0)), 0)
+
+    out = {"requirements": {"total": 0, "open": 0, "submitted": 0, "hold": 0, "closed": 0},
+           "selections": {"total": 0, "joined": 0, "backouts": 0, "offerReleased": 0, "offerPending": 0},
+           "followups": {"total": 0, "feedbackPending": 0, "positionsClosed": 0, "overdue": 0, "hold": 0, "interviewScheduled": 0}}
+    for t in _page_teams(user, team):
+        models = _tracker_models(t)
+        JobOpening, FollowUp = models["JobOpening"], models["FollowUp"]
+        st = func.lower(func.trim(JobOpening.status))
+        closed, hold, submitted = st.in_(("closed", "cancelled")), st == "hold", st == "submitted"
+        row = session.exec(select(func.count(), n(closed), n(hold), n(submitted)).where(JobOpening.is_deleted == False, JobOpening.team == t)).one()  # noqa: E712
+        total, c, h, s_ = (int(x or 0) for x in row)
+        out["requirements"]["total"] += total
+        out["requirements"]["closed"] += c
+        out["requirements"]["hold"] += h
+        out["requirements"]["submitted"] += s_
+        out["requirements"]["open"] += total - c - h - s_
+
+        rows = _candidate_rows_select(models, user, t)
+        if rows is not None:
+            Application = models["Application"]
+            sub = rows.with_only_columns(Application.status).subquery()
+            low = func.lower(func.coalesce(sub.c.status, ""))
+            flat = func.replace(func.replace(low, " ", ""), "-", "")
+            agg = session.exec(select(
+                func.count(),
+                n(and_c(low.like("%joined%"), ~low.like("%pending%"))),
+                n(or_c(flat.like("%backout%"), flat.like("%backedout%"))),
+                n(low.like("%offer released%")),
+                n(func.trim(low) == "offer pending"),
+            ).select_from(sub)).one()
+            total, j, b, orl, op = (int(x or 0) for x in agg)
+            out["selections"]["total"] += total
+            out["selections"]["joined"] += j
+            out["selections"]["backouts"] += b
+            out["selections"]["offerReleased"] += orl
+            out["selections"]["offerPending"] += op
+
+        stage = func.lower(func.trim(func.coalesce(FollowUp.current_stage, "")))
+        overdue = or_c(and_c(FollowUp.next_follow_up_date.is_not(None), FollowUp.next_follow_up_date < func.current_date(), stage != "positions closed"),
+                       stage == "overdue follow-ups")
+        row = session.exec(select(
+            func.count(), n(stage.in_(("feedback pending", "interview feedback pending"))), n(stage.in_(("positions closed", "position closed"))),
+            n(overdue), n(stage == "hold"),
+            n(or_c(stage == "interview", and_c(stage.like("%interview%"), stage.like("%scheduled%")))),
+        ).where(FollowUp.is_deleted == False, FollowUp.team == t)).one()  # noqa: E712
+        total, fp, pc, od, hd, isch = (int(x or 0) for x in row)
+        f = out["followups"]
+        f["total"] += total
+        f["feedbackPending"] += fp
+        f["positionsClosed"] += pc
+        f["overdue"] += od
+        f["hold"] += hd
+        f["interviewScheduled"] += isch
+    return out

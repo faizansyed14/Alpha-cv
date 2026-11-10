@@ -12,9 +12,7 @@ The agent has no tools that write anything and cannot reach other data: it sees 
 """
 from __future__ import annotations
 
-import asyncio
 import logging
-import re
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional

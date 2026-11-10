@@ -168,19 +168,14 @@ export default function AdminUsersPage() {
     e.preventDefault();
     if (!token) return;
 
-    // Validate: email is required for non-admin users (user/manager)
-    if (createForm.role !== 'admin' && createForm.otp_mode !== 'captcha' && !createForm.email?.trim()) {
-      setCreateError('Email is required for non-admin users using Email OTP (not needed for CAPTCHA)');
+    // The email is what the person signs in with: required, and it must look like one.
+    if (!createForm.email?.trim()) {
+      setCreateError('Email is required: it is what the person signs in with');
       return;
     }
-
-    // Basic email validation
-    if (createForm.email && createForm.email.trim()) {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(createForm.email)) {
-        setCreateError('Please enter a valid email address');
-        return;
-      }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(createForm.email.trim())) {
+      setCreateError('Please enter a valid email address');
+      return;
     }
 
     try {
@@ -189,7 +184,7 @@ export default function AdminUsersPage() {
       // Never send an empty-string email, the API's EmailStr rejects "" (422).
       const payload: CreateUserRequest = {
         ...createForm,
-        email: createForm.email?.trim() || undefined,
+        email: createForm.email.trim(),
         team_location: createForm.team_location?.trim() || null,
       };
       await api.createUser(token, payload);
@@ -329,13 +324,13 @@ export default function AdminUsersPage() {
                       </div>
                     </TD>
                     <TD>
-                      {u.email || <span className="italic text-gray-400">No email</span>}
+                      {u.email || <span className="italic text-amber-600" title="This person cannot sign in until an email is set">No email: cannot sign in</span>}
                     </TD>
                     <TD>
                       <Badge variant={roleBadgeVariant(u.role)}>{u.role}</Badge>
                     </TD>
                     <TD>
-                      {u.team_location || <span className="text-gray-400">-</span>}
+                      {u.role === 'admin' ? <span className="text-gray-400">All teams</span> : (u.team_location || <span className="text-gray-400">-</span>)}
                     </TD>
                     <TD>
                       {(() => {
@@ -366,6 +361,8 @@ export default function AdminUsersPage() {
                           size="sm"
                           variant="ghost"
                           className="h-8 w-8 p-0"
+                          disabled={u.role === 'admin'}
+                          title={u.role === 'admin' ? "The admin's email and password are set in the server's .env file" : undefined}
                           aria-label="Edit user"
                           onClick={() => {
                             setEditUser(u);
@@ -374,15 +371,17 @@ export default function AdminUsersPage() {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700"
-                          aria-label="Delete user"
-                          onClick={() => handleDeleteUser(u.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {u.role !== 'admin' && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700"
+                            aria-label="Delete user"
+                            onClick={() => handleDeleteUser(u.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TD>
                   </TR>
@@ -480,6 +479,7 @@ export default function AdminUsersPage() {
                 <div className="space-y-1.5">
                   <label className="block text-[13px] font-medium text-gray-700">
                     Username <span className="text-red-500">*</span>
+                    <span className="ml-2 text-xs text-gray-500">(the name shown in the app)</span>
                   </label>
                   <Input
                     value={createForm.username}
@@ -510,13 +510,8 @@ export default function AdminUsersPage() {
 
                 <div className="space-y-1.5">
                   <label className="block text-[13px] font-medium text-gray-700">
-                    Email {createForm.role !== 'admin' && <span className="text-red-500">*</span>}
-                    {createForm.role !== 'admin' && (
-                      <span className="ml-2 text-xs text-gray-500">(Required for recruiters/managers)</span>
-                    )}
-                    {createForm.role === 'admin' && (
-                      <span className="ml-2 text-xs text-gray-500">(Optional for admin)</span>
-                    )}
+                    Email <span className="text-red-500">*</span>
+                    <span className="ml-2 text-xs text-gray-500">(they sign in with this)</span>
                   </label>
                   <Input
                     type="email"
@@ -526,16 +521,11 @@ export default function AdminUsersPage() {
                       setCreateError(null);
                     }}
                     placeholder="user@example.com"
-                    required={createForm.role !== 'admin' && createForm.otp_mode !== 'captcha'}
+                    required
                   />
-                  {createForm.role !== 'admin' && createForm.otp_mode !== 'captcha' && (
-                    <p className="text-xs text-brand-600">
-                      Email OTP users need an email. Choose CAPTCHA below to skip email.
-                    </p>
-                  )}
                   {createForm.otp_mode === 'captcha' && (
                     <p className="text-xs text-amber-700">
-                      CAPTCHA mode shows an image challenge instead of email, no email is sent.
+                      CAPTCHA mode shows an image challenge after the password, no code is emailed.
                     </p>
                   )}
                 </div>
@@ -557,7 +547,6 @@ export default function AdminUsersPage() {
                     <option value="manager">Manager (Read/Write Tracker)</option>
                     <option value="evp">EVP (Manager access + sees all locations)</option>
                     <option value="account_manager">Account Manager (Tracker only)</option>
-                    <option value="admin">Admin (Administrator)</option>
                   </select>
                 </div>
 
@@ -633,26 +622,19 @@ export default function AdminUsersPage() {
               <form onSubmit={handleEditUser} className="space-y-4">
                 <div className="space-y-1.5">
                   <label className="block text-[13px] font-medium text-gray-700">
-                    Email {(editForm.role || editUser.role) !== 'admin' && <span className="text-red-500">*</span>}
-                    {(editForm.role || editUser.role) !== 'admin' && (
-                      <span className="ml-2 text-xs text-gray-500">(Required for recruiters/managers)</span>
-                    )}
+                    Email <span className="text-red-500">*</span>
+                    <span className="ml-2 text-xs text-gray-500">(they sign in with this)</span>
                   </label>
                   <Input
                     type="email"
                     value={editForm.email !== undefined ? editForm.email : (editUser.email || '')}
                     onChange={(e) => setEditForm({...editForm, email: e.target.value})}
                     placeholder="user@example.com"
-                    required={(editForm.role || editUser.role) !== 'admin' && (editForm.otp_mode || editUser.otp_mode || 'real') !== 'captcha'}
+                    required
                   />
-                  {(editForm.role || editUser.role) !== 'admin' && (editForm.otp_mode || editUser.otp_mode || 'real') !== 'captcha' && (
-                    <p className="text-xs text-brand-600">
-                      Email OTP users need an email. Choose CAPTCHA below to skip email.
-                    </p>
-                  )}
                   {(editForm.otp_mode || editUser.otp_mode) === 'captcha' && (
                     <p className="text-xs text-amber-700">
-                      CAPTCHA mode shows an image challenge instead of email, no email is sent.
+                      CAPTCHA mode shows an image challenge after the password, no code is emailed.
                     </p>
                   )}
                 </div>
@@ -667,6 +649,13 @@ export default function AdminUsersPage() {
                     placeholder="Leave blank to keep current password"
                   />
                 </div>
+                {editUser.role === 'admin' ? (
+                  <p className="rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                    The admin account always keeps the admin role, stays active, has access to every team and cannot be deleted. Its email and
+                    password are set in the server&apos;s .env file and cannot be changed here.
+                  </p>
+                ) : (
+                <>
                 <div className="space-y-1.5">
                   <label className="block text-[13px] font-medium text-gray-700">
                     Role
@@ -680,7 +669,6 @@ export default function AdminUsersPage() {
                     <option value="manager">Manager (Read/Write Tracker)</option>
                     <option value="evp">EVP (Manager access + sees all locations)</option>
                     <option value="account_manager">Account Manager (Tracker only)</option>
-                    <option value="admin">Admin (Administrator)</option>
                   </select>
                 </div>
 
@@ -702,6 +690,8 @@ export default function AdminUsersPage() {
                     <option value="Dubai">Dubai</option>
                   </select>
                 </div>
+                </>
+                )}
 
                 <div className="space-y-1.5">
                   <label className="block text-[13px] font-medium text-gray-700">
@@ -719,6 +709,7 @@ export default function AdminUsersPage() {
                     <p className="text-xs text-slate-500">Admins always sign in with the CAPTCHA, whatever is chosen here.</p>
                   )}
                 </div>
+                {editUser.role !== 'admin' && (
                 <div className="space-y-1.5">
                   <label className="flex cursor-pointer items-center gap-2">
                     <input
@@ -730,6 +721,7 @@ export default function AdminUsersPage() {
                     <span className="text-[13px] font-medium text-gray-700">Active</span>
                   </label>
                 </div>
+                )}
                 <div className="flex gap-2 pt-2">
                   <Button type="submit" variant="primary" loading={editLoading} className="flex-1">
                     Update user

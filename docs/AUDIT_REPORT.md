@@ -101,7 +101,7 @@ Infra/repo root:
 ## 8. Round-2 improvements (storage / retention / dedup / migrations)
 
 - **Storage backends split**: `app/services/storage/` — `LocalStorageBackend` (default) and `S3StorageBackend`, selected by `STORAGE_BACKEND` env; identical key layout (`cvs/<id><ext>`) so migration is `aws s3 sync` + flipping the flag. The misleading `s3_storage.py` (local code under an S3 name) was removed.
-- **RDS-ready relational data**: auth (`AUTH_DB_URL`), tracker (`TRACKER_DB_URL`) and email-processing tables (`POSTGRES_*`, now settings-driven with no hardcoded password fallback) all move to AWS RDS by editing `.env` only.
+- **RDS-ready relational data**: auth, tracker and talent tables, all in the one database named by `DATABASE_URL` (the old separate `AUTH_DB_URL` / `TRACKER_DB_URL` no longer exist); the email-processing tables (`POSTGRES_*`, now settings-driven with no hardcoded password fallback) all move to AWS RDS by editing `.env` only.
 - **Retention**: `db/cleanup_old_cvs.py` (dry-run capable, functionally tested) purges raw file + raw text + embeddings of CVs older than `CV_RETENTION_DAYS`, keeping structured data/notes/dedup hashes; matching regenerates embeddings on demand.
 - **Email dedup hardened**: persistent `processed_emails` (Postgres) + applicant+job duplicate check already existed; added **content-hash dedup** (`content_sha256` stored on every CV from email and public applications; identical files arriving in new emails are skipped via `find_cv_by_content_hash`).
 - **Alembic**: two isolated migration streams (`alembic -n auth`, `alembic -n tracker`) with env-driven URLs and generated baseline revisions.

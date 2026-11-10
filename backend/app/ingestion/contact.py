@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 
 import phonenumbers
 
-from app.ingestion.profile_links import find_profile_links, profile_link_spans
+from app.ingestion.profile_links import find_profile_links, github_repo_only, profile_link_spans
 
 # GCC / Levant / Egypt, South and South-East Asia, plus global anchors. Region hints only tell libphonenumber how to read
 # a number that carries no country code; numbers with '+' or '00' parse correctly under any hint.
@@ -170,6 +170,7 @@ def extract_contacts(text: str, link_text: str = "") -> Dict[str, object]:
     return {
         "linkedin": links["linkedin"],
         "github": links["github"],
+        "github_repo_only": github_repo_only(text, link_text),
         "link_spans": profile_link_spans(text),
         "emails": _rank(text, [e for e in emails if not _EMAIL_NOISE.match(e[2])] or emails),
         "phones": _rank(text, phones, keep_order=True),

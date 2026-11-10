@@ -29,7 +29,6 @@ class Settings(BaseSettings):
     # ---- Compute ----
     # CPU-only deployment. Bound the math libraries so N containers that each load
     # the embedding model don't oversubscribe the host's vCPUs.
-    TORCH_NUM_THREADS: int = 1
 
     # ---- URLs / CORS ----
     FRONTEND_URL: str = "http://localhost:3000"
@@ -56,12 +55,23 @@ class Settings(BaseSettings):
         default="admin",
         validation_alias=AliasChoices("ADMIN_PASSWORD", "DEFAULT_ADMIN_PASSWORD"),
     )
+    # The admin signs in with an email like everyone else. It is read from the environment only (.env: ADMIN_EMAIL=...), never written in
+    # the code. It is set on the admin account when that is created, and on an existing admin that has no email yet; change it afterwards
+    # on the Users page (the admin edits their own account there).
+    ADMIN_EMAIL: str = Field(
+        default="",
+        validation_alias=AliasChoices("ADMIN_EMAIL", "DEFAULT_ADMIN_EMAIL"),
+    )
     LOCAL_AUTH: bool = False  # dev-only login bypass
     LOCAL_AUTH_USERNAME: str = ""
     LOCAL_AUTH_PASSWORD: str = ""
     LOGIN_MAX_FAILED_ATTEMPTS: int = 5
     # Failures from ALL addresses together before the account itself is locked (stops distributed guessing).
     LOGIN_MAX_FAILED_ATTEMPTS_PER_ACCOUNT: int = 50
+    # Failures from ONE address across ALL accounts before that address is refused (credential stuffing tries one password on
+    # thousands of accounts, so no single account ever locks). Also stops one address from making the server hash passwords
+    # all day. Sized for an office of recruiters behind one address.
+    LOGIN_MAX_FAILED_ATTEMPTS_PER_IP: int = 30
     LOGIN_LOCKOUT_SECONDS: int = 900
     # A user shows as "online" on the admin page if they made an authenticated
     # request within this many seconds (logout clears it immediately).
@@ -72,6 +82,13 @@ class Settings(BaseSettings):
     # A full SQLAlchemy URL; point it at an AWS RDS endpoint to move it off-box (add ?sslmode=require for RDS).
     # The default is a local SQLite file, for tests and quick tries only.
     DATABASE_URL: str = "sqlite:///./app.db"
+    # Connections each process may hold open to PostgreSQL: (DB_POOL_SIZE + DB_MAX_OVERFLOW) x the number of processes (backend workers,
+    # background worker, match workers) must stay below PostgreSQL's max_connections (100 by default).
+    DB_POOL_SIZE: int = 8
+    DB_MAX_OVERFLOW: int = 8
+    DB_POOL_TIMEOUT_SECONDS: int = 10
+    # A search that runs longer than this is cancelled by PostgreSQL, so one expensive query cannot hold the database for everyone.
+    SEARCH_STATEMENT_TIMEOUT_SECONDS: int = 30
     ENABLE_CANDIDATE_TRACKER: bool = False
     ALLOW_PROD_DATA_ACCESS: bool = False
     TRACKER_PROD_URL_HINTS: str = ""  # comma-separated substrings treated as prod
@@ -79,10 +96,9 @@ class Settings(BaseSettings):
     # ---- Qdrant (vector store) ----
     QDRANT_HOST: str = "qdrant"
     QDRANT_PORT: int = 6333
-    QDRANT_MAX_CONNECTIONS: int = 50
+    QDRANT_GRPC_PORT: int = 6334            # vectors are read over gRPC (binary): about 2.5x faster than JSON over REST
+    QDRANT_PREFER_GRPC: bool = True
     QDRANT_TIMEOUT_SECONDS: int = 30
-    # Disable the (unused) HNSW graph and memory-map vectors from disk on startup; see QdrantUtils._tune_collections.
-    QDRANT_TUNE_COLLECTIONS: bool = True
     QDRANT_API_KEY: str = ""  # optional; when set the client authenticates to Qdrant
 
     # ---- Redis ----
@@ -92,7 +108,6 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: str = ""
     REDIS_MAX_CONNECTIONS: int = 50
     REDIS_SOCKET_TIMEOUT: int = 5
-    REDIS_RECONNECT_INTERVAL: int = 30
 
     # ---- Microsoft Graph (OTP email + mailbox CV intake) ----
     AZURE_TENANT_ID: str = ""
@@ -100,7 +115,6 @@ class Settings(BaseSettings):
     AZURE_CLIENT_SECRET: str = ""
     AZURE_MAILBOX_EMAIL: str = ""
     OTP_FROM_EMAIL: str = ""
-    OTP_FROM_NAME: str = "ATS System"
     OTP_TTL_SECONDS: int = 300
     OTP_MAX_ATTEMPTS: int = 5
     # Dev only: when true, login OTP is not emailed and the generated code is returned
@@ -119,8 +133,6 @@ class Settings(BaseSettings):
     CAPTCHA_SEND_WINDOW_SECONDS: int = 600
     CAPTCHA_RESEND_COOLDOWN_SECONDS: int = 2
 
-    GRAPH_SEND_RETRIES: int = 2
-    GRAPH_SEND_RETRY_DELAY: float = 1.5
 
     # ---- LLM: every model call goes through OpenRouter (one key, one OpenAI-style API, many models) ----
     OPENROUTER_API_KEY: str = ""
@@ -156,8 +168,6 @@ class Settings(BaseSettings):
     AGENTIC_TOOL_RESULT_CHARS: int = 6000  # a tool's answer is cut to this before the model sees it
     AGENTIC_MATCH_WAIT_SECONDS: int = 40   # how long the matching tool waits for a result before saying "still running"
     AGENTIC_HISTORY_MESSAGES: int = 8      # earlier messages the model sees
-    LLM_TIMEOUT_SECONDS: int = 60
-    LLM_BULK_TIMEOUT_SECONDS: int = 300
 
     # ---- Storage ----
     STORAGE_BACKEND: str = "local"  # local | s3
@@ -175,7 +185,6 @@ class Settings(BaseSettings):
     # Data retention: raw CV files/text + embeddings older than this can be
     # purged by db/cleanup_old_cvs.py (0 = keep forever). Structured data,
     # notes, tracker, auth and email-dedup records are always kept.
-    CV_RETENTION_DAYS: int = 0
 
     # ---- Embeddings / matching ----
     # multilingual-e5-small: 384-d vectors. Changing the model or EMBEDDING_DIM means recreating the Qdrant collections and
@@ -232,7 +241,6 @@ class Settings(BaseSettings):
     MATCH_DOC_CACHE_MAX_ITEMS: int = 8000
     MATCH_RESULT_CACHE_ENABLED: bool = True
     MATCH_RESULT_CACHE_TTL_SECONDS: int = 1800
-    LIST_CACHE_TTL_SECONDS: int = 60
 
     # ---- LLM re-scoring of the best semantic matches ----
     LLM_MATCH_TOP_N: int = 30          # top candidates re-scored by the LLM (the semantic stage only filters; the LLM decides)
@@ -270,9 +278,12 @@ class Settings(BaseSettings):
     MATCH_JOB_MAX_ATTEMPTS: int = 3
     # On SIGTERM a worker lets running jobs finish this long before handing them back to the queue.
     MATCH_SHUTDOWN_GRACE_SECONDS: int = 100
-    # Admission control. 0 disables a limit.
-    MATCH_QUEUE_MAX_JOBS_PER_USER: int = 0
-    MATCH_QUEUE_MAX_DEPTH: int = 0
+    # Admission control (0 disables a limit). A person can have this many matches queued or running at once; a normal user runs one
+    # or two, so a third is already unusual, and the limit stops a script or a stuck page from filling the queue. When the queue
+    # holds this many waiting jobs, new ones are refused with a clear message and Retry-After (the page shows it) instead of
+    # waiting hours. Both are answered with 429; a retry of the SAME request returns the existing job and is never counted twice.
+    MATCH_QUEUE_MAX_JOBS_PER_USER: int = 3
+    MATCH_QUEUE_MAX_DEPTH: int = 100
     # Poll timeout for the worker's blocking pop (seconds).
     MATCH_QUEUE_POLL_TIMEOUT: int = 5
     # A job whose status record is older than this with no completion is treated
@@ -282,13 +293,9 @@ class Settings(BaseSettings):
     MATCH_JOB_TTL_SECONDS: int = 86400
 
     # ---- Rate limiting ----
-    RATE_LIMIT_DEBUG: bool = False
-    ENABLE_RATE_LIMIT_METRICS: bool = True
     MAX_GLOBAL_CONCURRENT: int = 100
     CIRCUIT_BREAKER_THRESHOLD: int = 10
     CIRCUIT_BREAKER_RECOVERY_TIME: int = 120
-    CLEANUP_INTERVAL: int = 300
-    MEMORY_CLEANUP_THRESHOLD: int = 10000
     REPUTATION_DECAY_RATE: float = 0.05
     REPUTATION_PENALTY_RATE: float = 0.02
     MIN_REPUTATION: float = 0.5
@@ -298,7 +305,6 @@ class Settings(BaseSettings):
     ALLOWED_PROXY_IPS: str = "127.0.0.0/8,::1/128,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
 
     # ---- Queues / workers ----
-    ENABLE_APPLICATION_QUEUE: bool = True
     # Route public careers applications through the Redis queue consumed by the
     # dedicated background-worker container (recommended in production). Falls
     # back to in-process background processing when disabled or Redis is down.
@@ -309,8 +315,6 @@ class Settings(BaseSettings):
     INGEST_WORKER_CONCURRENCY: int = 4     # CVs being processed at once per worker
     INGEST_LLM_CONCURRENCY: int = 4        # of those, how many may be waiting on the LLM at once (rate-limit guard)
     INGEST_EMBED_CONCURRENCY: int = 2      # ... and on the embedding model server
-    MAX_CONCURRENT_APPLICATIONS: int = 5
-    APPLICATION_TIMEOUT_SECONDS: int = 300
 
     # ---- System thresholds ----
     CPU_THRESHOLD_PERCENT: int = 85
@@ -368,6 +372,12 @@ class Settings(BaseSettings):
             problems.append("SECRET_KEY (or JWT_SECRET_KEY) must be set to a strong value")
         if self.ADMIN_USERNAME == "admin" and self.ADMIN_PASSWORD == "admin":
             problems.append("ADMIN_USERNAME/ADMIN_PASSWORD are still defaults")
+        from app.security.password_policy import password_problem
+        weak = password_problem(self.ADMIN_PASSWORD, username=self.ADMIN_USERNAME, email=self.ADMIN_EMAIL)
+        if weak:
+            problems.append(f"ADMIN_PASSWORD is too weak: {weak.lower()}")
+        if not self.ADMIN_EMAIL.strip():
+            problems.append("ADMIN_EMAIL must be set (the admin signs in with it)")
         if self.LOCAL_AUTH:
             problems.append("LOCAL_AUTH (dev login bypass) must be disabled in production")
         if self.OTP_DISABLE_EMAIL:

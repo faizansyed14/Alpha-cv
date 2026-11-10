@@ -46,7 +46,37 @@ def test_positive_terms_skip_negated():
     assert [n.term for n in bq.positive_terms(node)] == ["a", "b", "c"]
 
 
-def test_filter_never_narrows_negations():
-    assert bq.to_filter(bq.parse("NOT a")) is None
-    assert bq.to_filter(bq.parse("a OR NOT b")) is None
-    assert bq.to_filter(bq.parse("a AND NOT b")) is not None
+def test_narrowing_never_narrows_negations():
+    from app.models.talent import CandidateSearch
+
+    col = CandidateSearch.literal
+    assert bq.to_narrowing(bq.parse("NOT a"), col) is None
+    assert bq.to_narrowing(bq.parse("a OR NOT b"), col) is None
+    assert bq.to_narrowing(bq.parse("a AND NOT b"), col) is not None
+
+
+def test_the_sql_form_decides_like_the_in_memory_form():
+    """to_sql is the same rule as evaluate: checked on a real (SQLite) table against the Python evaluator."""
+    from sqlalchemy import create_engine, select
+    from sqlmodel import Session, SQLModel
+
+    from app.models.talent import Candidate, CandidateSearch
+
+    texts = ["senior cloud engineer with terraform", "cloud engineer aws only", "azure expert network admin", "java developer",
+             "javascript developer", "led project management office", "managed a project", "python intern"]
+    queries = ['("Cloud Engineer") AND ("Azure" OR "Terraform")', '"Java"', '"project management"', "python NOT intern", "a OR b AND c",
+               "(cloud OR azure) AND NOT terraform", "NOT intern"]
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as s:
+        for i, t in enumerate(texts):
+            s.add(Candidate(id=str(i), content_sha256=str(i), original_filename="f"))
+        s.commit()
+        for i, t in enumerate(texts):
+            s.add(CandidateSearch(candidate_id=str(i), literal=normalize(t), text=normalize(t)))
+        s.commit()
+        for q in queries:
+            node = bq.parse(q)
+            in_sql = {int(r) for r in s.execute(select(CandidateSearch.candidate_id).where(bq.to_sql(node, CandidateSearch.literal))).scalars()}
+            in_python = {i for i, t in enumerate(texts) if bq.evaluate(node, normalize(t))}
+            assert in_sql == in_python, q

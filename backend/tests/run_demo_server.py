@@ -13,9 +13,10 @@ import os
 
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("OPENAI_API_KEY", "stub-key-for-demo")
-os.environ.setdefault("DATABASE_URL", "sqlite:///./demo_auth.db")
+os.environ["DATABASE_URL"] = "sqlite:///./demo_auth.db"      # always its own throwaway file, whatever the environment says: never a real database
+os.environ["ADMIN_EMAIL"] = "admin@harness.test"        # the harness admin signs in with this (see harness_login.ADMIN_EMAIL)
+os.environ["REDIS_HOST"], os.environ["REDIS_PORT"] = "127.0.0.1", "1"       # nothing listens there: the in-memory cache is used, never the real Redis
 os.environ.setdefault("ENABLE_CANDIDATE_TRACKER", "true")
-os.environ.setdefault("ENABLE_APPLICATION_QUEUE", "false")
 os.environ.setdefault("LOCAL_STORAGE_DIR", "/tmp/demo_uploads")
 os.environ.setdefault("CV_UPLOAD_DIR", "/tmp/demo_uploads/cv")
 os.environ.setdefault("OTP_DISABLE_EMAIL", "true")
@@ -54,19 +55,12 @@ import app.providers.embeddings.service as emb_mod
 emb_mod._shared_model = _FakeSentenceTransformer()
 emb_mod._model_device = "cpu"
 
-import app.providers.vectorstore.qdrant as qu
+import app.store as _store_mod
+from app.store import TalentStore
+from app.store.vectors import VectorStore
 
 _mem_client = QdrantClient(":memory:")
-
-
-def _patched_client(self):
-    if self._client is None:
-        self._client = _mem_client
-        self._ensure_collections_exist()
-    return self._client
-
-
-qu.QdrantUtils.client = property(_patched_client)
+_store_mod._store = TalentStore(vectors=VectorStore(client=_mem_client))   # the vectors live in memory; the tables in the sqlite file
 
 # Deterministic LLM stub: derive a plausible structure from the raw text.
 import app.providers.llm.service as llm_mod
@@ -132,11 +126,12 @@ llm_mod.LLMService.standardize_jd = _stub_jd
 
 from fastapi.testclient import TestClient
 from app.main import app
+from harness_login import ADMIN_EMAIL, login_with_captcha
 
 
 def seed():
     with TestClient(app) as client:
-        r = client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
+        r = login_with_captcha(client, ADMIN_EMAIL, "admin")
         admin = {"Authorization": f"Bearer {r.json()['access_token']}"}
 
         cvs = [
@@ -168,10 +163,10 @@ def seed():
         client.post("/api/admin/users", headers=admin, json={
             "username": "manager", "password": "Manager!234", "role": "manager",
             "email": "manager@demo-org.org", "team_location": "dubai"})
-        r = client.post("/api/auth/verify-password", json={"username": "manager", "password": "Manager!234"})
-        sr = client.post("/api/auth/send-otp", json={"username": "manager", "password": "Manager!234"})
+        r = client.post("/api/auth/verify-password", json={"email": "manager@demo-org.org", "password": "Manager!234"})
+        sr = client.post("/api/auth/send-otp", json={"email": "manager@demo-org.org", "password": "Manager!234"})
         dev_otp = (sr.json() or {}).get("dev_otp", "")
-        r = client.post("/api/auth/verify-otp", json={"username": "manager", "otp": dev_otp})
+        r = client.post("/api/auth/verify-otp", json={"email": "manager@demo-org.org", "otp": dev_otp})
         mgr = {"Authorization": f"Bearer {r.json().get('access_token', '')}"}
         r = client.post("/api/tracker/job-openings", headers=mgr,
                         json={"title": "Site Reliability Engineer", "client": "Acme Corp", "status": "Open"})
@@ -192,9 +187,9 @@ def seed():
             "email": "accountmgr@demo-org.org", "team_location": "dubai"})
 
         print("Demo data seeded")
-        print("   admin / admin")
-        print("   manager / Manager!234        (email OTP; dev returns code in response), tracker read/write")
-        print("   accountmgr / AccountMgr!234  (email OTP; dev returns code in response), TRACKER ONLY")
+        print(f"   {ADMIN_EMAIL} / admin")
+        print("   manager@demo-org.org / Manager!234        (email OTP; dev returns code in response), tracker read/write")
+        print("   accountmgr@demo-org.org / AccountMgr!234  (email OTP; dev returns code in response), TRACKER ONLY")
 
 
 if __name__ == "__main__":

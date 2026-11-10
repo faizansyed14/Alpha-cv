@@ -18,9 +18,11 @@ export interface PageHeaderProps extends Omit<React.HTMLAttributes<HTMLDivElemen
   actions?: React.ReactNode;
   /** Small label above the title */
   eyebrow?: React.ReactNode;
+  /** Real feature image mark shown beside the title (e.g. /icons/candidates.jpg) */
+  markSrc?: string;
 }
 
-export function PageHeader({ title, description, actions, eyebrow, className, ...props }: PageHeaderProps) {
+export function PageHeader({ title, description, actions, eyebrow, markSrc, className, ...props }: PageHeaderProps) {
   return (
     <motion.div
       variants={rise}
@@ -29,10 +31,15 @@ export function PageHeader({ title, description, actions, eyebrow, className, ..
       className={cn("mb-5 flex flex-wrap items-end justify-between gap-3", className)}
       {...(props as object)}
     >
-      <div className="min-w-0">
-        {eyebrow ? <div className="mb-1 text-xs font-semibold text-navy-600">{eyebrow}</div> : null}
-        <h1 className="text-[22px] font-bold leading-tight tracking-[-0.025em] text-slate-900 sm:text-2xl">{title}</h1>
-        {description ? <p className="mt-1 max-w-2xl text-sm text-slate-500">{description}</p> : null}
+      <div className="flex min-w-0 items-start gap-3">
+        {markSrc ? (
+          <img src={markSrc} alt="" draggable={false} className="mt-0.5 h-10 w-10 shrink-0 rounded-xl object-cover shadow-sm ring-1 ring-black/5" />
+        ) : null}
+        <div className="min-w-0">
+          {eyebrow ? <div className="mb-1 text-xs font-semibold text-navy-600">{eyebrow}</div> : null}
+          <h1 className="text-[22px] font-bold leading-tight tracking-[-0.025em] text-slate-900 sm:text-2xl">{title}</h1>
+          {description ? <p className="mt-1 max-w-2xl text-sm text-slate-500">{description}</p> : null}
+        </div>
       </div>
       {actions ? <div className="flex shrink-0 flex-wrap items-center gap-1.5">{actions}</div> : null}
     </motion.div>

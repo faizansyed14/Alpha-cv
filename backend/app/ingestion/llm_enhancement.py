@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List
 from app.config.settings import settings
 from app.matching.llm_scoring import get_llm_matching_service
-from app.providers.vectorstore.qdrant import get_qdrant_utils, get_decompressed_content
+from app.store import get_store
 
 logger = logging.getLogger(__name__)
 
@@ -124,16 +124,16 @@ async def enhance_with_llm_analysis_batched(
 
         logger.info(f"Starting LLM analysis (batched requests) for top {llm_analyze_count}/{total_candidates} candidates")
 
-        qdrant = get_qdrant_utils()
+        store = get_store()
 
         # Fetch JD raw text (one document)
-        jd_docs = qdrant.client.retrieve("jd_documents", ids=[jd_id], with_payload=True, with_vectors=False)
-        if not jd_docs or not jd_docs[0].payload:
+        jd_doc = store.jd_document(jd_id)
+        if not jd_doc:
             logger.warning(f"JD {jd_id} not found, skipping LLM analysis")
             for result in semantic_results:
                 result["has_llm_analysis"] = False
             return semantic_results
-        jd_raw_text = get_decompressed_content(jd_docs[0].payload)
+        jd_raw_text = jd_doc["raw_text"]
         if not jd_raw_text or len(jd_raw_text.strip()) < 50:
             logger.warning(f"JD {jd_id} has no usable raw text, skipping LLM analysis")
             for result in semantic_results:
@@ -155,21 +155,13 @@ async def enhance_with_llm_analysis_batched(
 
         if miss_indices:
             cv_ids = [top_candidates[i]["cv_id"] for i in miss_indices]
-            cv_docs = qdrant.client.retrieve("cv_documents", ids=cv_ids, with_payload=True, with_vectors=False)
-            id_to_payload = {}
-            if cv_docs:
-                for i, point in enumerate(cv_docs):
-                    if point.id is not None:
-                        id_to_payload[str(point.id)] = point.payload or {}
-                    elif i < len(cv_ids):
-                        id_to_payload[cv_ids[i]] = point.payload or {}
+            cv_docs = store.candidate_documents(cv_ids)
 
             candidates_for_bulk = []
             for idx in miss_indices:
                 r = top_candidates[idx]
                 cv_id = r["cv_id"]
-                payload = id_to_payload.get(str(cv_id)) or id_to_payload.get(cv_id) or {}
-                cv_raw = get_decompressed_content(payload) or ""
+                cv_raw = (cv_docs.get(str(cv_id)) or {}).get("raw_text") or ""
                 candidates_for_bulk.append({
                     "cv_id": cv_id,
                     "cv_raw_text": cv_raw,

@@ -6,17 +6,10 @@ import json
 import time
 from typing import Any, Dict, List, Optional
 
-from app.monitoring.recorder import EVENTS_KEY, LATENCY_BUCKETS_MS, percentile_from_buckets
+from app.monitoring.recorder import EVENTS_KEY, LATENCY_BUCKETS_MS, percentile_from_buckets, redis_client as _redis
 
 N_BUCKETS = len(LATENCY_BUCKETS_MS) + 1
 MODEL_KINDS = ("llm", "embedder", "ocr")
-
-
-def _redis():
-    from app.providers.cache.redis import get_redis_cache
-
-    cache = get_redis_cache()
-    return cache.redis_client if cache.is_connected else None
 
 
 def _num(v: Any) -> float:

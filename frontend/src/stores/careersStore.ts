@@ -10,11 +10,23 @@ import {
 } from '@/lib/types';
 import { logger } from '@/lib/logger';
 
+export interface JobFilters {
+  q: string;
+  scope: 'all' | 'mine' | 'others';
+  status: 'all' | 'active' | 'inactive';
+}
+
+const NO_JOB_FILTERS: JobFilters = { q: '', scope: 'all', status: 'all' };
+
 interface CareersState {
   // Job postings
   jobPostings: JobPostingListItem[];
   selectedJob: JobPostingListItem | null;
   totalJobPostings: number | null;
+  /** What the server filters the postings by; the list is always one page at a time. */
+  jobFilters: JobFilters;
+  /** How many postings match the search and owner filter, open and closed (the tabs' numbers); from the server. */
+  jobCounts: { all: number; active: number; inactive: number };
   
   // Applications
   applications: JobApplicationListItem[];
@@ -38,7 +50,8 @@ interface CareersState {
 interface CareersActions {
   // Job posting management
   createJobPostingWithFormData: (file: File | null, formData: any) => Promise<JobPostingResponse | null>;
-  loadJobPostings: () => Promise<void>;
+  /** First page of the postings that match the filters (the filters are kept for the next pages and for later reloads). */
+  loadJobPostings: (filters?: Partial<JobFilters>) => Promise<void>;
   loadMoreJobPostings: () => Promise<void>;
   selectJob: (job: JobPostingListItem | null) => void;
   updateJobStatus: (jobId: string, isActive: boolean) => Promise<boolean>;
@@ -76,6 +89,8 @@ type CareersStore = CareersState & CareersActions;
 export const useCareersStore = create<CareersStore>((set, get) => ({
   // Initial state
   jobPostings: [],
+  jobFilters: NO_JOB_FILTERS,
+  jobCounts: { all: 0, active: 0, inactive: 0 },
   selectedJob: null,
   totalJobPostings: null,
   applications: [],
@@ -117,22 +132,27 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
     }
   },
 
-  loadJobPostings: async () => {
-    set({ isLoading: true, error: null });
+  loadJobPostings: async (filters?: Partial<JobFilters>) => {
+    const active: JobFilters = { ...get().jobFilters, ...(filters ?? {}) };
+    set({ isLoading: true, error: null, jobFilters: active });
     try {
-      logger.info('Loading job postings (paginated)');
+      logger.info('Loading job postings (paginated, filtered by the server)');
       const JOBS_PAGE_SIZE = 20;
       // Load only the first page to reduce backend and frontend load
-      const { jobs, total } = await api.listJobPostingsPaged({
+      const { jobs, total, counts } = await api.listJobPostingsPaged({
         includeInactive: true,
         limit: JOBS_PAGE_SIZE,
         offset: 0,
+        ...active,
       });
-      
+      // a slower answer to an older filter must not overwrite the answer to the current one
+      if (get().jobFilters !== active) return;
+
       logger.info(`Loaded ${jobs.length} job postings (of ${total})`);
       set({
         jobPostings: jobs,
         totalJobPostings: total,
+        jobCounts: counts ?? { all: total, active: total, inactive: 0 },
         isLoading: false,
       });
     } catch (error: any) {
@@ -155,11 +175,14 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const JOBS_PAGE_SIZE = 20;
+      const filtersNow = get().jobFilters;
       const { jobs, total } = await api.listJobPostingsPaged({
         includeInactive: true,
         limit: JOBS_PAGE_SIZE,
         offset: jobPostings.length,
+        ...filtersNow,
       });
+      if (get().jobFilters !== filtersNow) return;   // the filter changed while this page was coming
 
       set((state) => ({
         jobPostings: [...state.jobPostings, ...jobs],
@@ -505,6 +528,7 @@ loadPublicJob: async (token: string) => {
     logger.info('Resetting careers store');
     set({
       jobPostings: [],
+      jobFilters: NO_JOB_FILTERS,
       selectedJob: null,
       applications: [],
       publicJob: null,

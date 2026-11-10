@@ -37,7 +37,7 @@ def _job_text(ctx: ToolContext, args: Dict[str, Any]) -> Tuple[str, str]:
         return found["text"], found["title"]
     if job_id:
         body = ctx.gateway.get(f"/api/careers/admin/jobs/{job_id}/edit-data")      # applies the person's own access
-        parts = [body.get("job_title"), body.get("company_name"), body.get("job_location"), body.get("job_summary"),
+        parts = [body.get("job_title"), body.get("job_location"), body.get("job_summary"),
                  body.get("key_responsibilities"), body.get("qualifications")]
         return "\n\n".join(str(p) for p in parts if p), text(body.get("job_title"), 120)
     raise ToolError("Say which job: a jd_id (saved job description) or a job_id (job posting).")

@@ -509,9 +509,7 @@ export default function JobApplicationForm({
       {/* Step 1: Upload CV to auto-fill */}
       <section className="rounded-xl border border-navy-100 bg-navy-50/40 p-4 sm:p-5">
         <div className="flex items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-navy-600 text-white">
-            <Sparkles className="h-4 w-4" />
-          </span>
+          <img src="/video/ai-robot.gif" alt="" aria-hidden className="h-9 w-9 shrink-0 object-contain" />
           <div className="min-w-0 flex-1">
             <h3 className="text-[14px] font-semibold text-slate-900">Upload CV to fill info</h3>
             <p className="mt-0.5 text-[12.5px] leading-relaxed text-slate-600">

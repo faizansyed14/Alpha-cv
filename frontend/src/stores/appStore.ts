@@ -59,6 +59,8 @@ interface AppState {
   totalJDs: number | null;
   selectedJD: string | null;
   selectedCVs: string[];
+  /** Names of CVs picked on pages that do not load the whole Candidates list (Saved CVs), so the match tray can name them. */
+  knownCVs: Record<string, { name: string; title: string }>;
   
   // Matching
   matchWeights: MatchWeights;
@@ -104,6 +106,7 @@ interface AppState {
   deselectCV: (cvId: string) => void;
   selectAllCVs: () => void;
   deselectAllCVs: () => void;
+  rememberCVs: (items: { id: string; full_name?: string; filename?: string; job_title?: string }[]) => void;
   uploadCV: (file: File) => Promise<void>;
   uploadCVs: (files: File[]) => Promise<void>;
   deleteCV: (cvId: string) => Promise<void>;
@@ -161,6 +164,7 @@ export const useAppStore = create<AppState>()(
       totalJDs: null,
       selectedJD: null,
       selectedCVs: [],
+      knownCVs: {},
       matchWeights: defaultWeights,
       matchResult: null,
       matchingProgress: {
@@ -288,6 +292,14 @@ export const useAppStore = create<AppState>()(
       
       deselectAllCVs: () => {
         set({ selectedCVs: [] });
+      },
+
+      rememberCVs: (items) => {
+        set((state) => {
+          const next = { ...state.knownCVs };
+          for (const cv of items) next[cv.id] = { name: cv.full_name || cv.filename || 'Candidate', title: cv.job_title && cv.job_title !== 'Not specified' ? cv.job_title : '' };
+          return { knownCVs: next };
+        });
       },
       
       uploadCV: async (file) => {

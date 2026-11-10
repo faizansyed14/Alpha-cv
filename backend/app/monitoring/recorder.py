@@ -27,6 +27,14 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from app.config.settings import settings
 
+
+def redis_client():
+    """The connected Redis client, or None when Redis is not reachable (the monitor then shows nothing instead of failing)."""
+    from app.providers.cache.redis import get_redis_cache
+
+    cache = get_redis_cache()
+    return cache.redis_client if cache.is_connected else None
+
 logger = logging.getLogger(__name__)
 
 LATENCY_BUCKETS_MS = (10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 120000)
@@ -150,10 +158,7 @@ class Recorder:
                 last_beat = time.time()
 
     def _redis(self):
-        from app.providers.cache.redis import get_redis_cache
-
-        cache = get_redis_cache()
-        return cache.redis_client if cache.is_connected else None
+        return redis_client()
 
     def flush(self) -> None:
         if not self._buf:

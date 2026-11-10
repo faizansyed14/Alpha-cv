@@ -3,6 +3,7 @@
 Uses the same Azure authentication as the email processing service.
 """
 
+import html
 import logging
 import aiohttp
 from typing import Optional
@@ -89,7 +90,7 @@ class EmailOTPService:
             <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
                 <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
                     <h2 style="color: #2563eb;">Login Verification Code</h2>
-                    <p>Hello{f' {username}' if username else ''},</p>
+                    <p>Hello{f' {html.escape(str(username))}' if username else ''},</p>
                     <p>You have requested a login verification code. Please use the following code to complete your login:</p>
                     <div style="background-color: #f3f4f6; border: 2px solid #2563eb; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0;">
                         <h1 style="color: #2563eb; font-size: 32px; margin: 0; letter-spacing: 5px;">{otp}</h1>

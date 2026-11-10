@@ -12,6 +12,8 @@ const backendUrl =
 const nextConfig = {
   /* config options here */
   reactStrictMode: true,
+  // Hide the Next.js "N" badge on demo / recording pages
+  devIndicators: false,
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
   },

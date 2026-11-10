@@ -14,9 +14,8 @@ from app.agentic.tools.base import Tool, ToolContext, ToolError, ToolOutput, num
 
 ROLES = frozenset({"admin", "user", "manager", "evp"})
 
-_DRAFT_FIELDS = ("job_title", "job_location", "job_summary", "key_responsibilities", "qualifications", "company_name", "additional_info")
-_LIMITS = {"job_title": 200, "job_location": 120, "job_summary": 2500, "key_responsibilities": 3500, "qualifications": 3500,
-           "company_name": 120, "additional_info": 1500}
+_DRAFT_FIELDS = ("job_title", "job_location", "job_summary", "key_responsibilities", "qualifications")
+_LIMITS = {"job_title": 200, "job_location": 120, "job_summary": 2500, "key_responsibilities": 3500, "qualifications": 3500}
 
 
 def _choices(rows: list, key: str = "title") -> Optional[list]:
@@ -48,7 +47,7 @@ def list_job_descriptions(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
     return out
 
 
-_LONG = ("job_summary", "key_responsibilities", "qualifications", "additional_info")
+_LONG = ("job_summary", "key_responsibilities", "qualifications")
 _NO_LOCATION = {"", "location not specified", "not specified", "n/a", "none", "unknown"}
 
 
@@ -99,7 +98,6 @@ def read_job_file(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
     fields = {
         "job_title": text(ui.get("job_title"), _LIMITS["job_title"]),
         "job_location": "" if _blank_location(ui.get("job_location")) else text(ui.get("job_location"), _LIMITS["job_location"]),
-        "company_name": "", "additional_info": "",
         "job_summary": str(ui.get("job_summary") or "").strip()[:_LIMITS["job_summary"]],
         "key_responsibilities": str(ui.get("key_responsibilities") or "").strip()[:_LIMITS["key_responsibilities"]],
         "qualifications": str(ui.get("qualifications") or "").strip()[:_LIMITS["qualifications"]],
@@ -165,8 +163,7 @@ def publish_job_post(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
         # step 3 of the Careers page form: create the posting from the (reviewed) fields. Create only: no job_id is ever sent.
         body = ctx.gateway.post("/api/careers/admin/jobs/unified-update", data={
             "jd_id": source["jd_id"], "job_title": form["job_title"], "job_location": form["job_location"], "job_summary": form.get("job_summary", ""),
-            "key_responsibilities": form.get("key_responsibilities", ""), "qualifications": form.get("qualifications", ""),
-            **{k: form[k] for k in ("company_name", "additional_info") if form.get(k)}})
+            "key_responsibilities": form.get("key_responsibilities", ""), "qualifications": form.get("qualifications", "")})
         job_id, token = body.get("job_id"), body.get("public_token")
         card = {"type": "job_posted", "job_id": job_id, "title": form["job_title"], "public_link": f"/careers/jobs/{token}" if token else None,
                 "public_token": token, "subject": _subject_of(ctx, str(job_id))}
@@ -195,8 +192,7 @@ TOOLS = [
     Tool("draft_job_post", "Prepare a draft job posting from what the person told you. It is only SHOWN; nothing is posted. "
          "Use their own words; never invent salary, benefits or company facts.",
          obj(job_title={"type": "string"}, job_location={"type": "string"}, job_summary={"type": "string"},
-             key_responsibilities={"type": "string", "description": "Bullet lines."}, qualifications={"type": "string", "description": "Bullet lines."},
-             company_name={"type": "string"}, additional_info={"type": "string"}, required=["job_title"]), ROLES, draft_job_post, writes=True),
+             key_responsibilities={"type": "string", "description": "Bullet lines."}, qualifications={"type": "string", "description": "Bullet lines."}, required=["job_title"]), ROLES, draft_job_post, writes=True),
     Tool("publish_job_post", "Publish the draft that is on screen. Takes no arguments. Works only right after the person confirmed the draft.",
          obj(), ROLES, publish_job_post, writes=True),
 ]

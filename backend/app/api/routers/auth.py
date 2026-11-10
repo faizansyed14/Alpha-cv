@@ -5,8 +5,11 @@ Behavior remains identical.
 """
 
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.config.settings import is_otp_email_sending_disabled, settings
@@ -14,11 +17,16 @@ from app.db.database import get_session
 from app.api.deps import bearer, require_user
 from app.models.user import User
 from app.schemas.auth import (
-    LoginRequest, TokenResponse, UserRead,
+    LoginRequest, MeRead, TokenResponse,
     SendOTPRequest, VerifyOTPRequest, VerifyPasswordRequest, VerifyPasswordResponse, OTPResponse,
     CaptchaRequest, CaptchaResponse, VerifyCaptchaRequest,
 )
-from app.security.auth import create_access_token, revoke_token, verify_password as verify_password_hash
+import logging
+
+from sqlalchemy.exc import TimeoutError as SATimeout
+
+from app.security.auth import burn_password_check, create_access_token, revoke_token, verify_password as verify_password_hash
+from app.security.logsafe import mask_email, security_event
 from app.integrations.email.otp_service import get_otp_service
 from app.integrations.email.email_otp_service import get_email_otp_service
 from app.security.captcha import get_captcha_service
@@ -32,6 +40,18 @@ def _dev_codes_returned() -> bool:
     return settings.is_development and is_otp_email_sending_disabled()
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _find_user(session: Session, email: str) -> Optional[User]:
+    """The account that signs in with this email address (any capitals), if there is one."""
+    wanted = (email or "").strip().lower()
+    if not wanted:
+        return None
+    user = session.exec(select(User).where(func.lower(User.email) == wanted)).first()
+    # Give the connection back NOW: the password hash that follows takes ~0.1 s, and a flood of wrong passwords must not be able
+    # to hold every pooled connection while it waits (that starved every other request). The loaded user stays readable.
+    session.close()
+    return user
 
 
 def _local_auth_matches(username: str, password: str) -> bool:
@@ -55,7 +75,7 @@ def login(data: LoginRequest, request: Request, session: Session = Depends(get_s
     logger = logging.getLogger(__name__)
     
     # Dev-only local auth bypass (LOCAL_AUTH=true, development environment only)
-    if _local_auth_matches(data.username, data.password):
+    if _local_auth_matches(data.email, data.password):
         token = create_access_token(sub=settings.LOCAL_AUTH_USERNAME, role="admin")
         return TokenResponse(
             access_token=token,
@@ -65,7 +85,7 @@ def login(data: LoginRequest, request: Request, session: Session = Depends(get_s
         )
     
     # Brute-force lockout (per-username, Redis-backed)
-    locked, retry_after = check_lockout(data.username, rate_limiter.get_client_ip(request))
+    locked, retry_after = check_lockout(data.email, rate_limiter.get_client_ip(request))
     if locked:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -74,20 +94,23 @@ def login(data: LoginRequest, request: Request, session: Session = Depends(get_s
         )
 
     # Continue with existing server-side authentication flow
-    user = session.exec(select(User).where(User.username == data.username)).first()
+    user = _find_user(session, data.email)
     # Reject unknown OR deactivated accounts (same generic message to avoid enumeration).
     if not user or not user.is_active:
-        record_failure(data.username, rate_limiter.get_client_ip(request))
+        burn_password_check(data.password)
+        record_failure(data.email, rate_limiter.get_client_ip(request))
+        security_event("login_failed", logging.WARNING, reason="unknown_or_inactive", account=mask_email(data.email), ip=rate_limiter.get_client_ip(request))
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     if not verify_password_hash(data.password, user.password_hash):
-        record_failure(data.username, rate_limiter.get_client_ip(request))
+        record_failure(data.email, rate_limiter.get_client_ip(request))
+        security_event("login_failed", logging.WARNING, reason="bad_password", account=mask_email(data.email), ip=rate_limiter.get_client_ip(request))
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    reset(data.username, rate_limiter.get_client_ip(request))
+    reset(data.email, rate_limiter.get_client_ip(request))
 
     # No account may skip the second factor (admins included): the password alone never yields a token.
-    logger.warning(f"Direct login attempted without a second factor: {data.username}")
+    logger.warning(f"Direct login attempted without a second factor: {mask_email(data.email)}")
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Second-factor verification is required. Please use the verify-password endpoint (OTP / CAPTCHA)."
@@ -96,7 +119,7 @@ def login(data: LoginRequest, request: Request, session: Session = Depends(get_s
 @router.post("/verify-password", response_model=VerifyPasswordResponse)
 def verify_password_endpoint(data: VerifyPasswordRequest, request: Request, session: Session = Depends(get_session)) -> VerifyPasswordResponse:
     """
-    Verify username and password.
+    Verify email and password.
     Returns success and whether OTP is required based on user role.
     Every account needs a second factor: CAPTCHA for admins and for users set to captcha mode, email OTP otherwise.
     """
@@ -105,7 +128,7 @@ def verify_password_endpoint(data: VerifyPasswordRequest, request: Request, sess
     
     try:
         # Dev-only local auth bypass (LOCAL_AUTH=true, development environment only)
-        if _local_auth_matches(data.username, data.password):
+        if _local_auth_matches(data.email, data.password):
             logger.info("Local dev password verified (OTP not required)")
             return VerifyPasswordResponse(
                 success=True,
@@ -114,7 +137,7 @@ def verify_password_endpoint(data: VerifyPasswordRequest, request: Request, sess
             )
 
         # Brute-force lockout (per-username, Redis-backed)
-        locked, retry_after = check_lockout(data.username, rate_limiter.get_client_ip(request))
+        locked, retry_after = check_lockout(data.email, rate_limiter.get_client_ip(request))
         if locked:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -123,11 +146,12 @@ def verify_password_endpoint(data: VerifyPasswordRequest, request: Request, sess
             )
 
         # Verify user exists and password is correct
-        user = session.exec(select(User).where(User.username == data.username)).first()
+        user = _find_user(session, data.email)
 
         if not user or not user.is_active:
-            record_failure(data.username, rate_limiter.get_client_ip(request))
-            logger.warning("Failed password verification (unknown/inactive user)")
+            burn_password_check(data.password)
+            record_failure(data.email, rate_limiter.get_client_ip(request))
+            security_event("login_failed", logging.WARNING, reason="unknown_or_inactive", account=mask_email(data.email), ip=rate_limiter.get_client_ip(request))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
@@ -135,21 +159,21 @@ def verify_password_endpoint(data: VerifyPasswordRequest, request: Request, sess
 
         # Verify password
         if not verify_password_hash(data.password, user.password_hash):
-            record_failure(data.username, rate_limiter.get_client_ip(request))
-            logger.warning("Failed password verification (bad password)")
+            record_failure(data.email, rate_limiter.get_client_ip(request))
+            security_event("login_failed", logging.WARNING, reason="bad_password", account=mask_email(data.email), ip=rate_limiter.get_client_ip(request))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
             )
 
         # Success, clear the failure counter
-        reset(data.username, rate_limiter.get_client_ip(request))
+        reset(data.email, rate_limiter.get_client_ip(request))
         
         # Every account needs a second factor; auth_mode_for_user() gives admins the CAPTCHA.
 
         mode = auth_mode_for_user(user)  # "otp" or "captcha"
         if mode == "captcha":
-            logger.info(f"Password verified for regular user: {data.username} - CAPTCHA required")
+            logger.info(f"Password verified for regular user: {mask_email(data.email)} - CAPTCHA required")
             return VerifyPasswordResponse(
                 success=True,
                 requires_otp=True,
@@ -159,13 +183,13 @@ def verify_password_endpoint(data: VerifyPasswordRequest, request: Request, sess
 
         # Email OTP mode - email is required
         if not user.email:
-            logger.error(f"Regular user {data.username} does not have email configured")
+            logger.error(f"Regular user {mask_email(data.email)} does not have email configured")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email not configured for user. Please contact administrator."
             )
 
-        logger.info(f"Password verified for regular user: {data.username} - OTP required")
+        logger.info(f"Password verified for regular user: {mask_email(data.email)} - OTP required")
         return VerifyPasswordResponse(
             success=True,
             requires_otp=True,
@@ -175,11 +199,13 @@ def verify_password_endpoint(data: VerifyPasswordRequest, request: Request, sess
     
     except HTTPException:
         raise
+    except SATimeout:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="The server is busy. Please try again in a moment.", headers={"Retry-After": "5"})
     except Exception as e:
         logger.error(f"Error verifying password: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error verifying password: {str(e)}"
+            detail="Something went wrong. Please try again."
         )
 
 @router.post("/send-otp", response_model=OTPResponse)
@@ -192,9 +218,9 @@ async def send_otp(data: SendOTPRequest, request: Request, session: Session = De
     logger = logging.getLogger(__name__)
     
     try:
-        logger.info(f"OTP send request for user: {data.username}")
+        logger.info(f"OTP send request for user: {mask_email(data.email)}")
         client_ip = rate_limiter.get_client_ip(request)
-        locked, retry_after = check_lockout(data.username, client_ip)
+        locked, retry_after = check_lockout(data.email, client_ip)
         if locked:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -203,10 +229,11 @@ async def send_otp(data: SendOTPRequest, request: Request, session: Session = De
             )
         
         # Verify user exists and password is correct
-        user = session.exec(select(User).where(User.username == data.username)).first()
+        user = _find_user(session, data.email)
         if not user or not user.is_active:
-            record_failure(data.username, client_ip)
-            logger.warning(f"User not found or inactive for OTP request: {data.username}")
+            burn_password_check(data.password)
+            record_failure(data.email, client_ip)
+            security_event("login_failed", logging.WARNING, reason="otp_request_unknown_or_inactive", account=mask_email(data.email), ip=client_ip)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
@@ -214,8 +241,8 @@ async def send_otp(data: SendOTPRequest, request: Request, session: Session = De
         
         # Verify password
         if not verify_password_hash(data.password, user.password_hash):
-            record_failure(data.username, client_ip)
-            logger.warning(f"Invalid password for OTP request for user: {data.username}")
+            record_failure(data.email, client_ip)
+            security_event("login_failed", logging.WARNING, reason="otp_request_bad_password", account=mask_email(data.email), ip=client_ip)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
@@ -223,7 +250,7 @@ async def send_otp(data: SendOTPRequest, request: Request, session: Session = De
         
         # Check if user has email configured
         if not user.email:
-            logger.error(f"User {data.username} does not have email configured")
+            logger.error(f"User {mask_email(data.email)} does not have email configured")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email not configured for user. Please contact administrator."
@@ -231,7 +258,7 @@ async def send_otp(data: SendOTPRequest, request: Request, session: Session = De
         
         # Admin users should not need OTP (this should not be called for admin, but check anyway)
         if user.role == "admin":
-            logger.warning(f"OTP requested for admin user {data.username} - this should not happen")
+            logger.warning(f"OTP requested for admin user {mask_email(data.email)} - this should not happen")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Admin users do not require OTP"
@@ -252,9 +279,9 @@ async def send_otp(data: SendOTPRequest, request: Request, session: Session = De
         # Anti email-bomb: throttle OTP sends per username (skipped in the dev
         # no-email mode so local/CI login loops aren't blocked).
         if not skip_email:
-            allowed, retry_after = otp_service.check_and_record_send(data.username)
+            allowed, retry_after = otp_service.check_and_record_send(user.username)
             if not allowed:
-                logger.warning(f"OTP send throttled for {data.username} (retry in {retry_after}s)")
+                logger.warning(f"OTP send throttled for {user.username} (retry in {retry_after}s)")
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail=f"An OTP was recently sent. Please wait {retry_after}s before requesting another.",
@@ -264,18 +291,18 @@ async def send_otp(data: SendOTPRequest, request: Request, session: Session = De
         otp = otp_service.generate_otp()
 
         # Store OTP with username (using stored email)
-        otp_service.store_otp(email=user.email, otp=otp, username=data.username)
+        otp_service.store_otp(email=user.email, otp=otp, username=user.username)
 
         if skip_email:
             email_sent = True  # Dev: do not actually email
-            logger.info(f"OTP email disabled (dev): not sending email for {data.username}")
+            logger.info(f"OTP email disabled (dev): not sending email for {mask_email(data.email)}")
         else:
             email_otp_service = get_email_otp_service()
-            logger.info(f"Sending OTP to {user.email} for user {data.username}")
+            logger.info(f"Sending OTP to {mask_email(user.email)} for user {mask_email(data.email)}")
             email_sent = await email_otp_service.send_otp_email(
                 to_email=user.email,
                 otp=otp,
-                username=data.username
+                username=user.username
             )
 
         if email_sent:
@@ -293,7 +320,7 @@ async def send_otp(data: SendOTPRequest, request: Request, session: Session = De
             else:
                 masked_email = user.email  # Fallback if email format is unexpected
             
-            logger.info(f"OTP sent successfully to {user.email} for user {data.username}")
+            logger.info(f"OTP sent successfully to {mask_email(user.email)} for user {mask_email(data.email)}")
             return OTPResponse(
                 message=f"OTP sent successfully",
                 success=True,
@@ -301,7 +328,7 @@ async def send_otp(data: SendOTPRequest, request: Request, session: Session = De
                 dev_otp=(otp if _dev_codes_returned() else None),
             )
         else:
-            logger.error(f"Failed to send OTP email to {user.email} for user {data.username}")
+            logger.error(f"Failed to send OTP email to {mask_email(user.email)} for user {mask_email(data.email)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to send OTP email. Please check Azure email configuration. See backend logs for details."
@@ -309,11 +336,13 @@ async def send_otp(data: SendOTPRequest, request: Request, session: Session = De
     
     except HTTPException:
         raise
+    except SATimeout:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="The server is busy. Please try again in a moment.", headers={"Retry-After": "5"})
     except Exception as e:
         logger.error(f"Error sending OTP: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error sending OTP: {str(e)}"
+            detail="Something went wrong. Please try again."
         )
 
 @router.post("/verify-otp", response_model=TokenResponse)
@@ -326,12 +355,12 @@ async def verify_otp(data: VerifyOTPRequest, request: Request, session: Session 
     logger = logging.getLogger(__name__)
     
     try:
-        logger.info(f"OTP verification request for user: {data.username}")
+        logger.info(f"OTP verification request for user: {mask_email(data.email)}")
         
         # Find user by username
-        user = session.exec(select(User).where(User.username == data.username)).first()
+        user = _find_user(session, data.email)
         if not user or not user.is_active:
-            logger.warning(f"User not found or inactive: {data.username}")
+            logger.warning(f"User not found or inactive: {mask_email(data.email)}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired OTP"
@@ -339,7 +368,7 @@ async def verify_otp(data: VerifyOTPRequest, request: Request, session: Session 
         
         # Get user's email
         if not user.email:
-            logger.error(f"User {data.username} does not have email configured")
+            logger.error(f"User {mask_email(data.email)} does not have email configured")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email not configured for user"
@@ -351,15 +380,15 @@ async def verify_otp(data: VerifyOTPRequest, request: Request, session: Session 
         is_valid, stored_username = otp_service.verify_otp(email=user.email, otp=data.otp)
         
         if not is_valid:
-            logger.warning(f"Invalid or expired OTP for user: {data.username}")
+            security_event("login_failed", logging.WARNING, reason="bad_otp", account=mask_email(data.email), ip=rate_limiter.get_client_ip(request))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired OTP"
             )
         
         # Verify username matches
-        if stored_username != data.username:
-            logger.warning(f"Username mismatch: expected {data.username}, got {stored_username}")
+        if stored_username != user.username:
+            logger.warning(f"Username mismatch: expected {user.username}, got {stored_username}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid OTP"
@@ -367,7 +396,7 @@ async def verify_otp(data: VerifyOTPRequest, request: Request, session: Session 
         
         # Create access token
         token = create_access_token(sub=user.username, role=user.role)
-        logger.info(f"OTP verified and user logged in: {user.username} ({user.role})")
+        security_event("login_ok", factor="otp", user=user.username, role=user.role, ip=rate_limiter.get_client_ip(request))
         return TokenResponse(
             access_token=token,
             token_type="bearer",
@@ -377,11 +406,13 @@ async def verify_otp(data: VerifyOTPRequest, request: Request, session: Session 
     
     except HTTPException:
         raise
+    except SATimeout:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="The server is busy. Please try again in a moment.", headers={"Retry-After": "5"})
     except Exception as e:
         logger.error(f"Error verifying OTP: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error verifying OTP: {str(e)}"
+            detail="Something went wrong. Please try again."
         )
 
 @router.post("/captcha", response_model=CaptchaResponse)
@@ -394,7 +425,7 @@ def get_captcha(data: CaptchaRequest, request: Request, session: Session = Depen
     logger = logging.getLogger(__name__)
 
     # Brute-force lockout (shared with password attempts)
-    locked, retry_after = check_lockout(data.username, rate_limiter.get_client_ip(request))
+    locked, retry_after = check_lockout(data.email, rate_limiter.get_client_ip(request))
     if locked:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -402,24 +433,27 @@ def get_captcha(data: CaptchaRequest, request: Request, session: Session = Depen
             headers={"Retry-After": str(retry_after or settings.LOGIN_LOCKOUT_SECONDS)},
         )
 
-    user = session.exec(select(User).where(User.username == data.username)).first()
+    user = _find_user(session, data.email)
+    if not user or not user.is_active:
+        burn_password_check(data.password)
     if not user or not user.is_active or not verify_password_hash(data.password, user.password_hash):
-        record_failure(data.username, rate_limiter.get_client_ip(request))
+        record_failure(data.email, rate_limiter.get_client_ip(request))
+        security_event("login_failed", logging.WARNING, reason="captcha_request_bad_credentials", account=mask_email(data.email), ip=rate_limiter.get_client_ip(request))
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     if auth_mode_for_user(user) != "captcha":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This account uses email OTP, not CAPTCHA")
 
-    reset(data.username, rate_limiter.get_client_ip(request))
+    reset(data.email, rate_limiter.get_client_ip(request))
     try:
-        challenge = get_captcha_service().create_challenge(data.username, data.fingerprint)
+        challenge = get_captcha_service().create_challenge(user.username, data.fingerprint)
     except PermissionError as pe:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many CAPTCHA requests. Please wait a moment.",
             headers={"Retry-After": str(pe)},
         )
-    logger.info(f"CAPTCHA issued for user {data.username}")
+    logger.info(f"CAPTCHA issued for user {mask_email(data.email)}")
     return CaptchaResponse(
         success=True,
         captcha_id=challenge["captcha_id"],
@@ -435,7 +469,7 @@ def verify_captcha(data: VerifyCaptchaRequest, request: Request, session: Sessio
     import logging
     logger = logging.getLogger(__name__)
 
-    locked, retry_after = check_lockout(data.username, rate_limiter.get_client_ip(request))
+    locked, retry_after = check_lockout(data.email, rate_limiter.get_client_ip(request))
     if locked:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -443,28 +477,30 @@ def verify_captcha(data: VerifyCaptchaRequest, request: Request, session: Sessio
             headers={"Retry-After": str(retry_after or settings.LOGIN_LOCKOUT_SECONDS)},
         )
 
-    user = session.exec(select(User).where(User.username == data.username)).first()
+    user = _find_user(session, data.email)
     if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found or inactive")
+        # same answer as a wrong CAPTCHA: this endpoint must not tell whether an email is registered
+        record_failure(data.email, rate_limiter.get_client_ip(request))
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired CAPTCHA")
 
     ok = get_captcha_service().verify(
         captcha_id=data.captcha_id, answer=data.answer,
-        username=data.username, fingerprint=data.fingerprint,
+        username=user.username, fingerprint=data.fingerprint,
     )
     if not ok:
-        record_failure(data.username, rate_limiter.get_client_ip(request))
-        logger.warning(f"Invalid/expired CAPTCHA for user: {data.username}")
+        record_failure(data.email, rate_limiter.get_client_ip(request))
+        security_event("login_failed", logging.WARNING, reason="bad_captcha", account=mask_email(data.email), ip=rate_limiter.get_client_ip(request))
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired CAPTCHA")
 
-    reset(data.username, rate_limiter.get_client_ip(request))
+    reset(data.email, rate_limiter.get_client_ip(request))
     token = create_access_token(sub=user.username, role=user.role)
-    logger.info(f"CAPTCHA verified and user logged in: {user.username} ({user.role})")
+    security_event("login_ok", factor="captcha", user=user.username, role=user.role, ip=rate_limiter.get_client_ip(request))
     return TokenResponse(access_token=token, token_type="bearer", username=user.username, role=user.role)
 
 
-@router.get("/me", response_model=UserRead)
-def get_me(user: User = Depends(require_user)) -> UserRead:
-    return UserRead(id=user.id, username=user.username, role=user.role, is_active=user.is_active, email=user.email)
+@router.get("/me", response_model=MeRead)
+def get_me(user: User = Depends(require_user)) -> MeRead:
+    return MeRead(id=user.id, username=user.username, role=user.role, is_active=user.is_active)
 
 
 @router.post("/logout")
@@ -474,4 +510,5 @@ def logout(user: User = Depends(require_user), token: HTTPAuthorizationCredentia
     import app.services.presence as presence
     revoke_token(token.credentials)
     presence.clear(user.username)
+    security_event("logout", user=user.username)
     return {"success": True}

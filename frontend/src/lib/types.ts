@@ -26,6 +26,10 @@ export interface CVAdvancedSearchParams {
   added_within_days?: number;
   added_from?: string;
   added_to?: string;
+  /** Only CVs in any of these categories (folders). */
+  categories?: string[];
+  /** Only CVs that have (or have no) HR notes. */
+  notes?: 'with' | 'without';
   limit?: number;
   cursor?: string | null;
 }
@@ -135,7 +139,6 @@ export interface CVDataResponse {
     skills_embeddings: number;
     responsibilities_embeddings: number;
     has_title_embedding: boolean;
-    has_experience_embedding: boolean;
     embedding_dimension: number;
   };
   structured_info: any;
@@ -175,7 +178,6 @@ export interface JDDataResponse {
     skills_embeddings: number;
     responsibilities_embeddings: number;
     has_title_embedding: boolean;
-    has_experience_embedding: boolean;
     embedding_dimension: number;
   };
   structured_info: any;
@@ -189,6 +191,8 @@ export interface CVListResponse {
   cvs: CVListItem[];
   /** Present when using pagination (limit/offset) */
   total?: number;
+  /** True when the real total is larger than `total` (a search counts only up to a cap). */
+  total_is_estimate?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -443,7 +447,7 @@ export interface UsersPresenceResponse {
 export interface CreateUserRequest {
   username: string;
   password: string;
-  email?: string;  // Required for non-admin users
+  email: string;   // what the person signs in with
   role: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager';
   otp_mode?: 'real' | 'captcha';
   team_location?: string | null;
@@ -546,7 +550,6 @@ export interface JobPostingResponse {
   upload_date: string;
   filename: string;
   is_active: boolean;
-  company_name?: string;
   posted_by_user?: string;
   posted_by_role?: string;
   // Email integration fields
@@ -560,7 +563,6 @@ export interface PublicJobView {
   job_id: string;
   job_title?: string;
   job_location?: string;
-  company_name?: string;
   job_description: string;
   upload_date: string;
   requirements?: string[];
@@ -599,6 +601,52 @@ export interface JobPostingListItem {
   email_subject_template?: string;
   // Naukri Gulf Boolean recruiter search string (LLM-generated from the JD)
   boolean_search_string?: string;
+}
+
+export type BugStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+export type BugSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+/** A bug report as its reporter sees it. */
+export interface BugReport {
+  id: string;
+  title: string;
+  description: string;
+  steps?: string | null;
+  area: string;
+  severity: BugSeverity;
+  status: BugStatus;
+  admin_note?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+  resolved_at?: string | null;
+}
+
+/** A bug report as the admin sees it: with who sent it and from where. */
+export interface AdminBugReport extends BugReport {
+  user_agent?: string | null;
+  reporter_username: string;
+  reporter_role?: string | null;
+  reporter_email?: string | null;
+  handled_by?: string | null;
+}
+
+export interface BugCreateRequest {
+  title: string;
+  description: string;
+  steps?: string;
+  area: string;
+  severity: BugSeverity;
+}
+
+export type BugCounts = Record<'all' | BugStatus, number>;
+
+/** The dashboard's numbers, counted by the server over every posting. */
+export interface CareersOverview {
+  postings: { total: number; live: number; closed: number };
+  applications: { total: number; days: string[]; series: number[]; last_7_days: number; previous_7_days: number };
+  months: { key: string; label: string; count: number }[];
+  top_jobs: { job_id: string; job_title: string; posted_by_user?: string | null; is_active: boolean; upload_date?: string; application_count: number }[];
+  recent_jobs: { job_id: string; job_title: string; job_location?: string; posted_by_user?: string | null; is_active: boolean; upload_date?: string; application_count: number }[];
 }
 
 export interface WeeklyAnalysisReport {

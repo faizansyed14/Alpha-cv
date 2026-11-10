@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Award,
+  Bookmark,
   Briefcase,
   Eye,
   FileText as FileTextIcon,
@@ -78,14 +79,20 @@ interface CandidateCardProps {
   onToggleSelect: () => void;
   onOpenDetails: () => void;
   onPreview: () => void;
-  onDelete: () => void;
-  onSaveNote: (text: string) => Promise<void> | void;
-  onDeleteNote: () => Promise<void> | void;
+  /** Without these the card has no delete button / no notes (the Saved CVs page). */
+  onDelete?: () => void;
+  onSaveNote?: (text: string) => Promise<void> | void;
+  onDeleteNote?: () => Promise<void> | void;
+  /** Whether this CV is on the signed-in person's saved list, and how to save / unsave it. Without the handler there is no bookmark. */
+  saved?: boolean;
+  onToggleSave?: () => void;
+  detailsTourId?: string;
+  detailsTourLabel?: string;
 }
 
 /**
  * Production candidate row for the Candidates workspace.
- * Initials avatar; contact masked by default; keyword chips + expandable full skills.
+ * Initials avatar; contact always visible; keyword chips + expandable full skills.
  * Card body opens the full candidate page; checkbox only toggles selection.
  * Notes are written inline from the pencil action.
  */
@@ -104,6 +111,10 @@ export default function CandidateCard({
   onDelete,
   onSaveNote,
   onDeleteNote,
+  saved = false,
+  onToggleSave,
+  detailsTourId,
+  detailsTourLabel,
 }: CandidateCardProps) {
   const [showSkills, setShowSkills] = useState(false);
   const [showAllKeywords, setShowAllKeywords] = useState(false);
@@ -169,7 +180,7 @@ export default function CandidateCard({
 
   const saveCompose = async () => {
     const text = draft.trim();
-    if (!text || noteSaving) return;
+    if (!text || noteSaving || !onSaveNote) return;
     await onSaveNote(text);
     setComposing(false);
     setDraft('');
@@ -178,13 +189,14 @@ export default function CandidateCard({
   const removeNote = async () => {
     setMenuOpen(false);
     if (!window.confirm('Delete this note?')) return;
-    await onDeleteNote();
+    await onDeleteNote?.();
     setComposing(false);
     setDraft('');
   };
 
   return (
     <article
+      data-scroll-id={cv.id}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('button, a, input, label, textarea')) return;
         onOpenDetails();
@@ -255,7 +267,7 @@ export default function CandidateCard({
         )}
 
         {(d.email || d.phone || d.linkedin || d.github) && (
-          <ContactActions email={d.email} phone={d.phone} linkedin={d.linkedin} github={d.github} privacy className="mt-2.5" />
+          <ContactActions email={d.email} phone={d.phone} linkedin={d.linkedin} github={d.github} className="mt-2.5" />
         )}
 
         {matchedKeywords.length > 0 && (
@@ -401,11 +413,24 @@ export default function CandidateCard({
       </div>
 
       <div className="flex shrink-0 flex-col items-center gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
+        {onToggleSave && (
+          <button
+            type="button"
+            onClick={onToggleSave}
+            aria-pressed={saved}
+            title={saved ? 'Saved: click to remove from your saved CVs' : 'Save this CV'}
+            className={`rounded-lg p-2 transition-colors ${saved ? 'bg-navy-600 text-white shadow-sm hover:bg-navy-700' : 'text-slate-500 hover:bg-navy-50 hover:text-navy-700'}`}
+          >
+            <Bookmark className={`h-4 w-4 ${saved ? 'text-white' : 'text-slate-500'}`} />
+          </button>
+        )}
         <button
           type="button"
           onClick={onOpenDetails}
           title="Open candidate page"
-          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+          data-tour={detailsTourId}
+          data-tour-label={detailsTourLabel}
+          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 data-[tour-active=true]:ring-2 data-[tour-active=true]:ring-navy-500 data-[tour-active=true]:ring-offset-2"
         >
           <Eye className="h-4 w-4 text-navy-800" />
         </button>
@@ -417,22 +442,26 @@ export default function CandidateCard({
         >
           <FileTextIcon className="h-4 w-4 text-indigo-600" />
         </button>
-        <button
-          type="button"
-          onClick={onDelete}
-          title="Delete candidate"
-          className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600"
-        >
-          <Trash2 className="h-4 w-4 text-rose-500" />
-        </button>
-        <button
-          type="button"
-          onClick={() => (noteText ? startEdit() : startAdd())}
-          title={noteText ? 'Edit note' : 'Add note'}
-          className={`rounded-lg p-2 hover:bg-navy-50 ${noteText ? 'text-navy-700' : 'text-slate-500 hover:text-navy-700'}`}
-        >
-          <Pencil className={`h-4 w-4 ${noteText ? 'text-navy-600' : 'text-slate-500'}`} />
-        </button>
+        {onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Delete candidate"
+            className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600"
+          >
+            <Trash2 className="h-4 w-4 text-rose-500" />
+          </button>
+        )}
+        {onSaveNote && (
+          <button
+            type="button"
+            onClick={() => (noteText ? startEdit() : startAdd())}
+            title={noteText ? 'Edit note' : 'Add note'}
+            className={`rounded-lg p-2 hover:bg-navy-50 ${noteText ? 'text-navy-700' : 'text-slate-500 hover:text-navy-700'}`}
+          >
+            <Pencil className={`h-4 w-4 ${noteText ? 'text-navy-600' : 'text-slate-500'}`} />
+          </button>
+        )}
       </div>
       </div>
     </article>

@@ -345,9 +345,10 @@ Security Controls Currently Implemented (in code/config)
     Prometheus) with docker healthchecks where defined.
 
 9) Backups
-  - Scripts under scripts/backup/ (e.g. backup_uncompressed.sh) for
-    configs and data. No in-repo automated backup job; deployer can add
-    cron or similar.
+  - scripts/backup.sh and scripts/restore.sh (local | dev | prod): database dump,
+    Qdrant snapshots and the raw files, with checksums and a verified restore.
+    See docs/BACKUP_AND_RECOVERY.md. No in-repo scheduler; add the cron line
+    shown there.
 
 10) External secrets and config
   - No secrets in repo. SECRET_KEY, POSTGRES_PASSWORD, DATABASE_URL,

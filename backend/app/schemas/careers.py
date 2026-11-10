@@ -19,7 +19,6 @@ class JobPostingResponse(BaseModel):
     upload_date: str = Field(..., description="ISO timestamp when job was posted")
     filename: str = Field(..., description="Original filename of uploaded job description")
     is_active: bool = Field(True, description="Whether the job posting is currently accepting applications")
-    company_name: Optional[str] = Field(None, description="Company name associated with posting")
     posted_by_user: Optional[str] = Field(None, description="Username of the user who posted this job")
     posted_by_role: Optional[str] = Field(None, description="Role of the user who posted this job (admin/user)")
     # Email integration fields
@@ -32,7 +31,6 @@ class PublicJobView(BaseModel):
     job_id: str = Field(..., description="Unique identifier for the job posting")
     job_title: Optional[str] = Field("Position Available", description="Job title or position name")
     job_location: Optional[str] = Field(None, description="Job location (city, country, remote, etc.)")
-    company_name: Optional[str] = Field("Alpha Data Recruitment", description="Company name for branding")
     job_description: str = Field(..., description="Full job description text")
     upload_date: str = Field(..., description="When this job was posted")
     requirements: Optional[List[str]] = Field([], description="List of required skills and qualifications")
@@ -94,7 +92,6 @@ class JobPostingSummary(BaseModel):
     job_summary: Optional[str] = Field(None, description="Short job summary preview (not full JD text)")
     key_responsibilities: Optional[str] = Field(None, description="Short responsibilities preview")
     qualifications: Optional[str] = Field(None, description="Short qualifications preview")
-    company_name: Optional[str] = Field(None, description="Company name")
     upload_date: str = Field(..., description="When job was posted")
     filename: str = Field(..., description="Original filename")
     is_active: bool = Field(..., description="Whether job is active")

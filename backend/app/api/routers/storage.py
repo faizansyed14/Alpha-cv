@@ -6,7 +6,7 @@ import logging
 from app.api.deps import require_core_app
 from app.models.user import User
 from app.providers.storage import get_storage_service
-from app.providers.vectorstore.qdrant import get_qdrant_utils
+from app.store import get_store
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -41,7 +41,8 @@ async def get_file(doc_type: str, doc_id: str, _: User = Depends(require_core_ap
                 raise HTTPException(status_code=404, detail=f"Directory for {doc_type} not found")
             
         # Since we don't store the extension in some DB records, find by prefix
-        matching_files = [f for f in os.listdir(target_dir) if f.startswith(doc_id)]
+        # exact id only: a prefix match let a short id ("a") open someone else's file
+        matching_files = [f for f in os.listdir(target_dir) if os.path.splitext(f)[0] == doc_id]
         
         if not matching_files:
             logger.error(f"File not found with ID {doc_id} in {target_dir}")
@@ -50,12 +51,11 @@ async def get_file(doc_type: str, doc_id: str, _: User = Depends(require_core_ap
         file_path = os.path.join(target_dir, matching_files[0])
         
         # Get filename for download
-        qdrant = get_qdrant_utils()
-        collection = f"{doc_type}_documents"
         try:
-            doc = qdrant.client.retrieve(collection, ids=[doc_id])
-            download_name = doc[0].payload.get("filename", matching_files[0]) if doc else matching_files[0]
-        except:
+            store = get_store()
+            doc = store.candidate_document(doc_id) if doc_type.startswith("cv") else store.jd_document(doc_id)
+            download_name = (doc or {}).get("filename") or matching_files[0]
+        except Exception:  # noqa: BLE001
             download_name = matching_files[0]
             
         return FileResponse(
@@ -68,4 +68,4 @@ async def get_file(doc_type: str, doc_id: str, _: User = Depends(require_core_ap
         raise
     except Exception as e:
         logger.error(f"Error serving file: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error. Please try again or contact support.")

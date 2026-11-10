@@ -4,7 +4,7 @@ const matchCandidates = vi.fn();
 const getMatchJob = vi.fn();
 vi.mock('@/lib/api', () => ({ api: { matchCandidates: (r: unknown) => matchCandidates(r), getMatchJob: (id: string) => getMatchJob(id) } }));
 
-import { clearActiveMatch, loadActiveMatch, resumeMatchJob, runMatchJob, type MatchUpdate } from './matchRun';
+import { clearActiveMatch, loadActiveMatch, pollDelay, resumeMatchJob, retryAfterMs, runMatchJob, type MatchUpdate } from './matchRun';
 
 const queued = (extra = {}) => ({ is_queued: true, job_id: 'job-1', status: 'queued', queue_position: 2, progress: { progress_percent: 0 }, ...extra });
 const running = (percent: number, extra = {}) => ({
@@ -185,5 +185,38 @@ describe('a running match survives a reload', () => {
     localStorage.setItem('alpha.activeMatch.v1', JSON.stringify({ jobId: 'b', startedAt: Date.now(), totalCVs: 1, owner: 'sam' }));
     expect(loadActiveMatch('alex')).toBeNull();
     expect(loadActiveMatch('sam')).toMatchObject({ jobId: 'b' });
+  });
+});
+
+describe('being told to slow down', () => {
+  const throttle = (retryAfter?: string) => ({ response: { status: 429, headers: retryAfter ? { 'retry-after': retryAfter } : {}, data: { detail: 'slow down' } } });
+
+  it('keeps following the job through many 429 answers instead of abandoning it', async () => {
+    matchCandidates.mockResolvedValue(queued());
+    for (let i = 0; i < 12; i++) getMatchJob.mockRejectedValueOnce(throttle());   // more than the 8 plain failures that used to abort
+    getMatchJob.mockResolvedValueOnce(done);
+    await expect(runMatchJob({ jd_id: 'jd' } as never, () => {}, { pollMs: 1 })).resolves.toBe(done);
+  });
+
+  it('a busy server (503) is waited out the same way', async () => {
+    matchCandidates.mockResolvedValue(queued());
+    getMatchJob.mockRejectedValueOnce({ response: { status: 503, headers: {}, data: { detail: 'The server is busy.' } } }).mockResolvedValueOnce(done);
+    await expect(runMatchJob({ jd_id: 'jd' } as never, () => {}, { pollMs: 1 })).resolves.toBe(done);
+  });
+
+  it('honours Retry-After, within limits', () => {
+    expect(retryAfterMs(throttle('5'), 1000)).toBe(5000);
+    expect(retryAfterMs(throttle('999'), 1000)).toBe(30000);   // never longer than 30 s
+    expect(retryAfterMs(throttle('0'), 1000)).toBe(1000);      // never shorter than the normal poll
+    expect(retryAfterMs(throttle(), 1000)).toBe(1000);
+  });
+});
+
+describe('pollDelay', () => {
+  it('reads every second at first and backs off as the match gets long', () => {
+    expect(pollDelay(1000, 5_000)).toBe(1000);
+    expect(pollDelay(1000, 60_000)).toBe(2000);
+    expect(pollDelay(1000, 300_000)).toBe(3000);
+    expect(pollDelay(1000, 3_600_000)).toBe(5000);
   });
 });

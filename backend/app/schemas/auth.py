@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field, EmailStr, field_validator
+from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
+
+from app.security.password_policy import password_problem
 from typing import Optional
 
 
@@ -10,13 +12,27 @@ def _blank_to_none(v):
         return v or None
     return v
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
+# Everyone signs in with their email address and password. The username is only the name shown in the app. (``email`` is a plain
+# string here, not EmailStr: a malformed address is just a failed sign-in, answered like any other wrong credentials.)
+class _SignInBody(BaseModel):
+    """Sign-in bodies come from anyone on the internet: no NUL characters (PostgreSQL cannot store them: a NUL in an email
+    used to reach the database and end as a 500), and every field has a size limit."""
 
-class VerifyPasswordRequest(BaseModel):
-    username: str
-    password: str
+    @field_validator("*", mode="after")
+    @classmethod
+    def _no_nul(cls, v):
+        if isinstance(v, str) and "\x00" in v:
+            raise ValueError("contains an invalid character")
+        return v
+
+
+class LoginRequest(_SignInBody):
+    email: str = Field(..., max_length=320)
+    password: str = Field(..., max_length=256)
+
+class VerifyPasswordRequest(_SignInBody):
+    email: str = Field(..., max_length=320)
+    password: str = Field(..., max_length=256)
 
 class VerifyPasswordResponse(BaseModel):
     success: bool
@@ -25,19 +41,19 @@ class VerifyPasswordResponse(BaseModel):
     # Second factor the client should present: "none" (admin), "otp" (email), or "captcha".
     auth_mode: str = "none"
 
-class SendOTPRequest(BaseModel):
-    username: str
-    password: str  # Still verify password for security
+class SendOTPRequest(_SignInBody):
+    email: str = Field(..., max_length=320)
+    password: str = Field(..., max_length=256)  # Still verify password for security
 
-class VerifyOTPRequest(BaseModel):
-    username: str  # Username instead of email
-    otp: str
+class VerifyOTPRequest(_SignInBody):
+    email: str = Field(..., max_length=320)
+    otp: str = Field(..., max_length=16)
 
 # ---- Image CAPTCHA ----
-class CaptchaRequest(BaseModel):
-    username: str
-    password: str  # verified before a challenge is issued
-    fingerprint: str = ""  # client fingerprint, binds the challenge to this client
+class CaptchaRequest(_SignInBody):
+    email: str = Field(..., max_length=320)
+    password: str = Field(..., max_length=256)  # verified before a challenge is issued
+    fingerprint: str = Field("", max_length=256)  # client fingerprint, binds the challenge to this client
 
 class CaptchaResponse(BaseModel):
     success: bool
@@ -46,11 +62,11 @@ class CaptchaResponse(BaseModel):
     expires_in: int
     dev_code: Optional[str] = None  # DEV ONLY (OTP_DISABLE_EMAIL): the answer, for tests
 
-class VerifyCaptchaRequest(BaseModel):
-    username: str
-    captcha_id: str
-    answer: str
-    fingerprint: str = ""
+class VerifyCaptchaRequest(_SignInBody):
+    email: str = Field(..., max_length=320)
+    captcha_id: str = Field(..., max_length=128)
+    answer: str = Field(..., max_length=32)
+    fingerprint: str = Field("", max_length=256)
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -73,10 +89,18 @@ class UserRead(BaseModel):
     otp_mode: str = "real"
     team_location: Optional[str] = None
 
-class UserCreate(BaseModel):
+class MeRead(BaseModel):
+    """What /api/auth/me tells the page about whoever is signed in. No email: nothing in the app needs it, and it should not travel
+    (or sit in a browser's memory, a log or a screenshot) for no reason."""
+    id: str
     username: str
-    password: str
-    email: Optional[EmailStr] = None  # Required for non-admin users
+    role: str
+    is_active: bool
+
+class UserCreate(BaseModel):
+    username: str = Field(..., min_length=2, max_length=64)
+    password: str = Field(..., max_length=256)
+    email: EmailStr   # what the person signs in with: required, and one account per address
     otp_mode: str = Field(default="real", pattern="^(real|captcha)$")
     # Roles:
     # - admin: full access (all pages + user management)
@@ -90,8 +114,15 @@ class UserCreate(BaseModel):
     _norm_email = field_validator("email", mode="before")(_blank_to_none)
     _norm_team = field_validator("team_location", mode="before")(_blank_to_none)
 
+    @model_validator(mode="after")
+    def _password_rules(self):
+        problem = password_problem(self.password, username=self.username, email=str(self.email))
+        if problem:
+            raise ValueError(problem)
+        return self
+
 class UserUpdate(BaseModel):
-    password: Optional[str] = None
+    password: Optional[str] = Field(default=None, max_length=256)
     email: Optional[EmailStr] = None
     otp_mode: Optional[str] = Field(default=None, pattern="^(real|captcha)$")
     role: Optional[str] = Field(default=None, pattern="^(user|manager|admin|evp|account_manager)$")
@@ -100,3 +131,12 @@ class UserUpdate(BaseModel):
 
     _norm_email = field_validator("email", mode="before")(_blank_to_none)
     _norm_pw = field_validator("password", mode="before")(_blank_to_none)
+
+    @field_validator("password")
+    @classmethod
+    def _password_rules(cls, v):
+        # who the password belongs to is checked in the route (it knows the account); length and common-password rules apply here
+        problem = password_problem(v) if v else None
+        if problem:
+            raise ValueError(problem)
+        return v

@@ -1,7 +1,7 @@
 """Image CAPTCHA service for login second-factor.
 
-Replaces the old "fixed OTP" mode. For users whose auth mode is `captcha`, the
-login flow shows a distorted image of a random code that the user must type.
+For users whose auth mode is `captcha`, the login flow shows a distorted image of a
+random code that the user must type.
 
 Security features:
 - Random code (ambiguous characters removed), case-insensitive.

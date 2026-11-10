@@ -103,15 +103,14 @@ def get_job_applications(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
     limit = number(args.get("limit"), pages.PAGE, 1, 20)
     rows = ctx.gateway.get(f"/api/careers/admin/jobs/{job_id}/applications")
     rows = rows if isinstance(rows, list) else []
-    rows.sort(key=lambda r: (r.get("match_score") is None, -(r.get("match_score") or 0)))
     shown = [{
         "application_id": r.get("application_id"), "name": text(r.get("applicant_name"), 80), "years": r.get("years_of_experience"),
         "location": text(r.get("location"), 60), "notice_period": text(r.get("notice_period"), 40), "nationality": text(r.get("nationality"), 40),
-        "expected_salary": r.get("expected_salary"), "status": text(r.get("status"), 30), "match_score": r.get("match_score"),
+        "expected_salary": r.get("expected_salary"), "status": text(r.get("status"), 30),
         "applied": text(r.get("application_date"), 10),
     } for r in rows[:limit]]
     ctx.see(job_id)
-    return ToolOutput(pages.for_model(shown, ["name", "years", "location", "status", "match_score"], len(rows), True),
+    return ToolOutput(pages.for_model(shown, ["name", "years", "location", "status"], len(rows), True),
                       {"type": "applications", "rows": shown, "total": len(rows), "job_id": job_id},
                       f"Applications read for job_id={job_id}: {len(rows)} in total")
 

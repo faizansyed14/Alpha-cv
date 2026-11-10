@@ -16,7 +16,9 @@ import sys
 
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("OPENAI_API_KEY", "stub")
-os.environ.setdefault("DATABASE_URL", "sqlite:///./sec_auth.db")
+os.environ["DATABASE_URL"] = "sqlite:///./sec_auth.db"      # always its own throwaway file, whatever the environment says: never a real database
+os.environ["ADMIN_EMAIL"] = "admin@harness.test"        # the harness admin signs in with this (see harness_login.ADMIN_EMAIL)
+os.environ["REDIS_HOST"], os.environ["REDIS_PORT"] = "127.0.0.1", "1"       # nothing listens there: the in-memory cache is used, never the real Redis
 os.environ.setdefault("LOCAL_STORAGE_DIR", "/tmp/sec_uploads")
 os.environ.setdefault("CV_UPLOAD_DIR", "/tmp/sec_uploads/cv")
 os.environ.setdefault("OTP_DISABLE_EMAIL", "true")
@@ -56,21 +58,16 @@ import app.providers.embeddings.service as emb_mod
 emb_mod._shared_model = _FakeST()
 emb_mod._model_device = "cpu"
 
-import app.providers.vectorstore.qdrant as qu
-_mem = QdrantClient(":memory:")
+import app.store as _store_mod
+from app.store import TalentStore
+from app.store.vectors import VectorStore
 
-
-def _client(self):
-    if self._client is None:
-        self._client = _mem
-        self._ensure_collections_exist()
-    return self._client
-
-
-qu.QdrantUtils.client = property(_client)
+_mem_client = QdrantClient(":memory:")
+_store_mod._store = TalentStore(vectors=VectorStore(client=_mem_client))   # the vectors live in memory; the tables in the sqlite file
 
 from fastapi.testclient import TestClient
 from app.main import app
+from harness_login import ADMIN_EMAIL, login_with_captcha
 from app.config.settings import settings
 
 failures = []
@@ -88,7 +85,7 @@ def main() -> int:
     check("OTP is cryptographic 6-digit", otp.isdigit() and len(otp) == 6, f"otp={otp}")
 
     with TestClient(app) as client:
-        login = client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
+        login = login_with_captcha(client, ADMIN_EMAIL, "admin")
         check("admin login works", login.status_code == 200, f"status={login.status_code}")
         token = login.json().get("access_token", "")
         admin = {"Authorization": f"Bearer {token}"}
@@ -125,7 +122,7 @@ def main() -> int:
             "username": "victim", "password": "RightPass!234", "role": "user",
             "email": "victim@sec-test.org"})
         statuses = [
-            client.post("/api/auth/verify-password", json={"username": "victim", "password": "wrong"}).status_code
+            client.post("/api/auth/verify-password", json={"email": "victim@sec-test.org", "password": "wrong"}).status_code
             for _ in range(settings.LOGIN_MAX_FAILED_ATTEMPTS + 2)
         ]
         check("login lockout engages (429) after repeated failures", 429 in statuses,
@@ -135,10 +132,10 @@ def main() -> int:
         client.post("/api/admin/users", headers=admin, json={
             "username": "otpuser", "password": "RightPass!234", "role": "user",
             "email": "otpuser@sec-test.org"})
-        client.post("/api/auth/verify-password", json={"username": "otpuser", "password": "RightPass!234"})
-        client.post("/api/auth/send-otp", json={"username": "otpuser", "password": "RightPass!234"})
+        client.post("/api/auth/verify-password", json={"email": "otpuser@sec-test.org", "password": "RightPass!234"})
+        client.post("/api/auth/send-otp", json={"email": "otpuser@sec-test.org", "password": "RightPass!234"})
         wrong_otp = [
-            client.post("/api/auth/verify-otp", json={"username": "otpuser", "otp": "000000"}).status_code
+            client.post("/api/auth/verify-otp", json={"email": "otpuser@sec-test.org", "otp": "000000"}).status_code
             for _ in range(8)
         ]
         check("wrong OTP never authenticates", all(s != 200 for s in wrong_otp), f"statuses={wrong_otp}")

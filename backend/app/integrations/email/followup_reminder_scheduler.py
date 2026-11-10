@@ -10,8 +10,10 @@ from sqlmodel import Session, select
 
 from app.config.settings import is_followup_email_reminder_enabled
 from app.db.database import engine as _db_engine
-from app.models.tracker.models import TrackerFollowUp, TrackerFollowUpAD, TrackerOption, TrackerOptionAD
-from app.integrations.email.followup_reminder_service import render_followup_email_html, send_followup_reminder_email
+from app.models.tracker.models import TrackerFollowUp, TrackerOption
+from app.models.tracker.scope import scope_session
+from app.integrations.email.followup_reminder_service import (join_emails as _join_emails, render_followup_email_html, send_followup_reminder_email,
+                                                               split_emails as _split_emails)
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +22,18 @@ def _norm_team(team: str) -> str:
     return "".join(ch for ch in (team or "").strip().lower() if ch.isalnum())
 
 
-def _option_model(team: str):
-    return TrackerOptionAD if _norm_team(team) == "abudhabi" else TrackerOption
+def _team_key(team: str) -> str:
+    return "abudhabi" if _norm_team(team) == "abudhabi" else "dubai"
+
+
+def _option_model(session: Session, team: str):
+    """The option table, with the session limited to this team's rows."""
+    scope_session(session, _team_key(team))
+    return TrackerOption
 
 
 def _get_option_value(session: Session, *, team: str, kind: str) -> str:
-    Opt = _option_model(team)
+    Opt = _option_model(session, team)
     r = session.exec(
         select(Opt)
         .where(Opt.kind == kind)
@@ -36,7 +44,7 @@ def _get_option_value(session: Session, *, team: str, kind: str) -> str:
 
 
 def _set_option_value(session: Session, *, team: str, kind: str, value: str) -> None:
-    Opt = _option_model(team)
+    Opt = _option_model(session, team)
     existing = session.exec(
         select(Opt)
         .where(Opt.kind == kind)
@@ -64,8 +72,7 @@ def _lookup_person_email(session: Session, *, team: str, kind: str, name: Option
     """
     if not name or not str(name).strip():
         return None, True
-    is_ad = _norm_team(team) == "abudhabi"
-    Opt = TrackerOptionAD if is_ad else TrackerOption
+    Opt = _option_model(session, team)
     nm = str(name).strip()
     row = session.exec(
         select(Opt)
@@ -153,7 +160,8 @@ async def _run_followup_reminders_for_team(session: Session, *, team: str, tz_na
         return {"enabled": False, "team": team, "sent": 0, "skipped": 0}
 
     hhmm = _get_option_value(session, team=team, kind="followup_reminder_send_time") or "09:00"
-    FollowUpModel = TrackerFollowUpAD if _norm_team(team) == "abudhabi" else TrackerFollowUp
+    scope_session(session, _team_key(team))
+    FollowUpModel = TrackerFollowUp
 
     # Compute "today" in local TZ (UAE by default) to match business expectation.
     try:
@@ -189,24 +197,6 @@ async def _run_followup_reminders_for_team(session: Session, *, team: str, tz_na
         def _opt(kind: str) -> str:
             return (_get_option_value(session, team=team, kind=kind) or "").strip()
 
-        def _split_emails(v: str | None) -> list[str]:
-            parts = []
-            for raw in str(v or "").replace(";", ",").split(","):
-                e = raw.strip()
-                if e:
-                    parts.append(e)
-            out: list[str] = []
-            seen = set()
-            for e in parts:
-                k = e.lower()
-                if k in seen:
-                    continue
-                seen.add(k)
-                out.append(e)
-            return out
-
-        def _join_emails(items: list[str]) -> str:
-            return ", ".join([e.strip() for e in items if str(e or "").strip()])
 
         # Respect Account Manager reminder ON/OFF (skip if OFF).
         _am_email_for_toggle, to_enabled = _lookup_person_email(

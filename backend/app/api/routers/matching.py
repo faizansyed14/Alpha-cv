@@ -1,7 +1,7 @@
 """Matching endpoints: queue-backed CV <-> JD matching (enqueue, progress, job status) and category matching.
 
 The CPU-bound work runs in the match-worker container (app/jobs/match_worker.py), never in the API process.
-Uses *_structured for standardized JSON and *_embeddings for the exact 32 vectors.
+Uses *_structured for standardized JSON and *_embeddings for the exact 31 vectors.
 """
 import asyncio
 import logging
@@ -161,7 +161,7 @@ async def match_candidates(req: NewMatchRequest, _: User = Depends(require_core_
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Inline matching failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Matching error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Matching error. Please try again or contact support.")
 
 
 @router.get("/match/jobs/{job_id}", response_model=MatchResponse)
@@ -237,4 +237,4 @@ async def match_by_category(request: TopCandidatesRequest, _: User = Depends(req
         })
     except Exception as e:
         logger.error(f"Category-based matching failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Category-based matching failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Category-based matching failed. Please try again or contact support.")

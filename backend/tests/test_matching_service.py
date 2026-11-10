@@ -204,7 +204,7 @@ class TestMatchingServiceTitleExtraction:
     def setup_method(self):
         """Set up MatchingService instance for testing."""
         with patch('app.matching.engine.get_embedding_service'), \
-             patch('app.matching.engine.get_qdrant_utils'):
+             patch('app.matching.engine.get_store'):
             self.service = MatchingService()
     
     def test_extract_domains_from_title(self):
@@ -273,7 +273,7 @@ class TestMatchingServiceSimilarity:
     def setup_method(self):
         """Set up MatchingService instance for testing."""
         with patch('app.matching.engine.get_embedding_service'), \
-             patch('app.matching.engine.get_qdrant_utils'):
+             patch('app.matching.engine.get_store'):
             self.service = MatchingService()
     
     def test_calculate_domain_similarity_exact_match(self):
@@ -394,7 +394,7 @@ class TestMatchingServiceBusinessRules:
     def setup_method(self):
         """Set up MatchingService instance for testing."""
         with patch('app.matching.engine.get_embedding_service'), \
-             patch('app.matching.engine.get_qdrant_utils'):
+             patch('app.matching.engine.get_store'):
             self.service = MatchingService()
     
     def test_apply_business_rules_exact_title_match(self):
@@ -459,7 +459,7 @@ class TestMatchingServiceMatchStructuredData:
         self.mock_qdrant = Mock()
         
         with patch('app.matching.engine.get_embedding_service', return_value=self.mock_embedding_service), \
-             patch('app.matching.engine.get_qdrant_utils', return_value=self.mock_qdrant):
+             patch('app.matching.engine.get_store', return_value=self.mock_qdrant):
             self.service = MatchingService()
     
     @pytest.mark.skip(reason="Requires complex GPU mocking - testing core logic separately")
@@ -623,7 +623,7 @@ class TestMatchingServiceExperienceMatch:
     def setup_method(self):
         """Set up MatchingService instance for testing."""
         with patch('app.matching.engine.get_embedding_service'), \
-             patch('app.matching.engine.get_qdrant_utils'):
+             patch('app.matching.engine.get_store'):
             self.service = MatchingService()
     
     def test_experience_match_candidate_meets_requirement(self):
@@ -664,115 +664,13 @@ class TestMatchingServiceExperienceMatch:
 
 
 @pytest.mark.unit
-class TestMatchingServiceCosineSimilarity:
-    """Test cosine similarity calculations."""
-    
-    def setup_method(self):
-        """Set up MatchingService with mocked embedding service."""
-        self.mock_embedding_service = Mock()
-        self.mock_embedding_service.calculate_cosine_similarity = Mock(return_value=0.85)
-        self.mock_embedding_service.device = "cpu"
-        
-        with patch('app.matching.engine.get_embedding_service', return_value=self.mock_embedding_service), \
-             patch('app.matching.engine.get_qdrant_utils'):
-            self.service = MatchingService()
-    
-    def test_cos_sim_list(self):
-        """Test cosine similarity between two vectors."""
-        v1 = [0.1] * settings.EMBEDDING_DIM
-        v2 = [0.2] * settings.EMBEDDING_DIM
-        
-        result = self.service._cos_sim_list(v1, v2)
-        
-        # Should call embedding service
-        self.mock_embedding_service.calculate_cosine_similarity.assert_called_once()
-        assert result == 0.85  # Mocked return value
-    
-    def test_cos_sim_list_identical_vectors(self):
-        """Test cosine similarity with identical vectors."""
-        v1 = [0.5] * settings.EMBEDDING_DIM
-        v2 = [0.5] * settings.EMBEDDING_DIM
-        
-        # Mock perfect similarity
-        self.mock_embedding_service.calculate_cosine_similarity.return_value = 1.0
-        result = self.service._cos_sim_list(v1, v2)
-        
-        assert result == 1.0
-
-
-@pytest.mark.unit
-class TestMatchingServiceMatchExact:
-    """Test match_cv_against_jd_exact method."""
-    
-    def setup_method(self):
-        """Set up MatchingService with mocked dependencies."""
-        self.mock_embedding_service = Mock()
-        self.mock_embedding_service.device = "cpu"
-        self.mock_embedding_service.calculate_batch_cosine_similarity = Mock(
-            return_value=np.array([[0.8, 0.7], [0.9, 0.6]])  # Mock similarity matrix
-        )
-        self.mock_embedding_service.calculate_cosine_similarity = Mock(return_value=0.85)
-        
-        self.mock_qdrant = Mock()
-        
-        with patch('app.matching.engine.get_embedding_service', return_value=self.mock_embedding_service), \
-             patch('app.matching.engine.get_qdrant_utils', return_value=self.mock_qdrant):
-            self.service = MatchingService()
-    
-    def test_match_cv_against_jd_exact_success(self):
-        """Test exact matching with valid vectors."""
-        # Mock vector retrieval
-        cv_vectors = {
-            "skill_vectors": [[0.1] * settings.EMBEDDING_DIM for _ in range(5)],
-            "responsibility_vectors": [[0.1] * settings.EMBEDDING_DIM for _ in range(3)],
-            "experience_vector": [[0.1] * settings.EMBEDDING_DIM],
-            "job_title_vector": [[0.1] * settings.EMBEDDING_DIM]
-        }
-        
-        jd_vectors = {
-            "skill_vectors": [[0.2] * settings.EMBEDDING_DIM for _ in range(3)],
-            "responsibility_vectors": [[0.2] * settings.EMBEDDING_DIM for _ in range(2)],
-            "experience_vector": [[0.2] * settings.EMBEDDING_DIM],
-            "job_title_vector": [[0.2] * settings.EMBEDDING_DIM]
-        }
-        
-        # Mock the _get_exact_vectors method
-        with patch.object(self.service, '_get_exact_vectors', side_effect=[cv_vectors, jd_vectors]):
-            # Mock GPU similarity calculations
-            self.mock_embedding_service.calculate_batch_cosine_similarity = Mock(
-                side_effect=lambda a, b: np.array([[0.8] * len(b) for _ in range(len(a))])
-            )
-            self.mock_embedding_service.calculate_cosine_similarity = Mock(return_value=0.85)
-            
-            result = self.service.match_cv_against_jd_exact("cv-1", "jd-1")
-        
-        assert result["cv_id"] == "cv-1"
-        assert result["jd_id"] == "jd-1"
-        assert "final_score" in result
-        assert "final_score_percentage" in result
-        assert "breakdown" in result
-        assert "processing_time" in result
-        assert 0.0 <= result["final_score"] <= 1.0
-        assert 0.0 <= result["final_score_percentage"] <= 100.0
-    
-    def test_match_cv_against_jd_exact_missing_vectors(self):
-        """Test exact matching with missing vectors."""
-        self.service._get_exact_vectors = Mock(return_value=None)
-        
-        with pytest.raises(Exception) as exc_info:
-            self.service.match_cv_against_jd_exact("cv-1", "jd-1")
-        
-        assert "Missing embeddings" in str(exc_info.value)
-
-
-@pytest.mark.unit
 class TestMatchingServiceScoringWeights:
     """Test that scoring weights are correctly applied."""
     
     def setup_method(self):
         """Set up MatchingService instance."""
         with patch('app.matching.engine.get_embedding_service'), \
-             patch('app.matching.engine.get_qdrant_utils'):
+             patch('app.matching.engine.get_store'):
             self.service = MatchingService()
     
     def test_default_scoring_weights(self):
@@ -797,7 +695,7 @@ class TestMatchingServiceEdgeCases:
     def setup_method(self):
         """Set up MatchingService instance."""
         with patch('app.matching.engine.get_embedding_service'), \
-             patch('app.matching.engine.get_qdrant_utils'):
+             patch('app.matching.engine.get_store'):
             self.service = MatchingService()
     
     def test_get_enhanced_title_similarity_case_insensitive(self):

@@ -6,12 +6,10 @@ Single responsibility: CV document management through REST API.
 
 import asyncio
 import logging
-from qdrant_client.http.models import FieldCondition, Filter, MatchValue, MatchAny, Range
 import os
 import re
 import time
 import uuid
-from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Form, UploadFile, Query
@@ -19,14 +17,15 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from pydantic import BaseModel, Field
 from app.config.settings import settings
 from app.security.uploads import CV_EXTENSIONS, secure_upload
-from app.api.deps import require_admin, require_core_app
+from app.api.deps import require_core_app
 from app.models.user import User
 from app.ingestion.cv_parser import get_parsing_service
 from app.ingestion.pipeline import SOURCE_UPLOAD, CVSubmission, IngestError, ingest_cv
 from app.ingestion.preview import render_page_png
 from app.providers.llm.service import get_llm_service
 from app.providers.embeddings.service import get_embedding_service
-from app.providers.vectorstore.qdrant import CV_PAYLOAD, get_qdrant_utils, get_decompressed_content, resolve_candidate_full_name, resolve_candidate_contact
+from app.store import get_store
+from app.store.candidates import FACET_FIELDS
 from app.providers.storage import get_storage_service
 from app.providers.cache.memory import get_cache_service
 from app.ingestion.skill_keywords import extract_skill_keywords
@@ -79,10 +78,6 @@ class NoteRequest(BaseModel):
     # anyone). Kept optional so older clients that still send it keep working.
     hr_user: Optional[str] = None
 
-
-def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
-
 # ----------------------------
 # CV Upload Progress Tracking
 # ----------------------------
@@ -116,7 +111,7 @@ async def get_cv_upload_progress(cv_id: str, _: User = Depends(require_core_app)
         })
     except Exception as e:
         logger.error(f"Failed to get CV upload progress: {e}")
-        raise HTTPException(status_code=500, detail=f"Progress tracking error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Progress tracking error. Please try again or contact support.")
 
 def update_cv_upload_progress(cv_id: str, **kwargs):
     """Update CV upload progress."""
@@ -278,245 +273,11 @@ async def upload_cv(
         raise
     except Exception as e:
         logger.error(f"CV upload failed: {e}")
-        raise HTTPException(status_code=500, detail=f"CV processing failed: {e}")
+        raise HTTPException(status_code=500, detail="CV processing failed. Please try again or contact support.")
 
 
 CV_LIST_PAGE = 200   # CVs per API call (default and maximum); the UI shows the same 200 per page
 CV_LIST_MAX_IDS = 100_000   # ids_only (no personal data) may ask for more: the match launcher needs up to the whole DB
-
-
-def _cv_list_page(cvs: List[Dict[str, Any]], limit: int, offset: int, category: Optional[str], q: Optional[str],
-                  ids_only: bool) -> Dict[str, Any]:
-    page = cvs[offset: offset + limit]
-    body: Dict[str, Any] = {"status": "success", "count": len(page), "total": len(cvs), "limit": limit,
-                            "offset": offset, "category": category, "q": q}
-    if ids_only:
-        body["ids"] = [cv["id"] for cv in page]
-    else:
-        body["cvs"] = page
-    return body
-
-
-def _job_titles(qdrant) -> Dict[str, str]:
-    """job_id -> job title for careers applications (shown as "Applied for ..."). Job postings are few and change
-    rarely, so this is kept for 30 seconds instead of being read again for every page of CVs."""
-    cache = get_cache_service()
-    cached = cache.get("job_titles", namespace="cv_data")
-    if cached is not None:
-        return cached
-    out = _read_job_titles(qdrant)
-    cache.set("job_titles", out, ttl_seconds=30, namespace="cv_data")
-    return out
-
-
-def _read_job_titles(qdrant) -> Dict[str, str]:
-    out: Dict[str, str] = {}
-    try:
-        for j in qdrant.get_all_job_postings(include_inactive=True):
-            jid = str(j.get("id") or j.get("job_id") or "").strip()
-            if not jid:
-                continue
-            structured = j.get("structured_info") or {}
-            title = structured.get("job_title") or j.get("job_title") or ""
-            if title:
-                out[jid] = str(title)
-    except Exception:
-        return {}
-    return out
-
-
-def _cv_row(doc_id: str, payload: Dict[str, Any], doc_meta: Dict[str, Any], job_title_by_id: Dict[str, str]) -> Dict[str, Any]:
-    """One CV as the Candidates list shows it."""
-    structured = payload.get("structured_info", {}) or {}
-    skills = structured.get("skills_sentences", structured.get("skills", []))
-    resps = structured.get("responsibility_sentences", structured.get("responsibilities", []))
-
-    filename = doc_meta.get("filename", "Unknown")
-    if filename and "/" in filename:
-        filename = filename.split("/")[-1]
-
-    is_job_application = bool(payload.get("is_job_application", False))
-    applied_job_id = str(payload.get("job_id") or "").strip() if is_job_application else ""
-    # Persisted match score for the job this candidate applied to (set when a match runs against that job).
-    applied_job_match = payload.get("applied_job_match")
-    applied_score = applied_job_match.get("overall_score") if isinstance(applied_job_match, dict) else None
-    contact = resolve_candidate_contact(payload, structured)
-    skills_nonempty = [s for s in skills if isinstance(s, str) and s.strip()][:20]
-    keywords_nonempty = [k for k in (structured.get("keywords") or []) if k][:20]
-    languages = structured.get("languages") or []
-    if not isinstance(languages, list):
-        languages = []
-    certifications = structured.get("certifications") or []
-    if not isinstance(certifications, list):
-        certifications = []
-    return {
-        "id": doc_id,
-        "filename": filename,
-        "upload_date": doc_meta.get("upload_date", "Unknown"),
-        "full_name": resolve_candidate_full_name(payload, structured),
-        "job_title": structured.get("job_title", "Not specified"),
-        "years_of_experience": structured.get("years_of_experience", structured.get("experience_years", "Not specified")),
-        "skills_count": len(skills_nonempty),
-        "skills": skills_nonempty,
-        # LLM-generated keywords: also the exact field the advanced CV search filters against.
-        "skill_keywords": keywords_nonempty,
-        "responsibilities_count": len(resps),
-        "has_structured_data": True,
-        "category": structured.get("category", "General"),
-        "is_job_application": is_job_application,
-        "applied_job_id": applied_job_id or None,
-        "applied_job_title": (job_title_by_id.get(applied_job_id) if applied_job_id else None),
-        "match_score": applied_score,
-        "is_top_for_job": False,  # set by _mark_top_applicants
-        "location": payload.get("location") or structured.get("location"),
-        "notice_period": payload.get("notice_period"),
-        "nationality": payload.get("nationality"),
-        "gender": structured.get("gender"),
-        "languages": [str(x).strip() for x in languages if str(x).strip()][:20],
-        "certifications": [str(x).strip() for x in certifications if str(x).strip()][:20],
-        "email": contact.get("email"),
-        "phone": contact.get("phone"),
-        "linkedin_url": contact.get("linkedin_url"),
-        "github_url": contact.get("github_url"),
-        "job_application": {
-            "expected_salary": payload.get("expected_salary"),
-        } if is_job_application else None,
-    }
-
-
-def _mark_top_applicants(rows: List[Dict[str, Any]]) -> None:
-    """Rank applicants within each job by their persisted match score; the best gets the green "#1" badge."""
-    by_job: Dict[str, List[Dict[str, Any]]] = {}
-    for cv in rows:
-        jid = cv.get("applied_job_id")
-        if jid and cv.get("match_score") is not None:
-            by_job.setdefault(jid, []).append(cv)
-    for group in by_job.values():
-        group.sort(key=lambda c: c.get("match_score") or 0, reverse=True)
-        for rank, cv in enumerate(group, start=1):
-            cv["match_rank"] = rank
-            cv["is_top_for_job"] = rank == 1
-
-
-def _ranks_for_page(qdrant, structs: Dict[str, Dict[str, Any]]) -> Dict[str, int]:
-    """cv_id -> rank among the applicants of its job (1 = best), for the applicants ON THIS PAGE that have a persisted
-    score. The rank is 1 + how many applicants of that job score higher, counted by Qdrant on an index, so the cost is
-    one small query per applicant on the page and does not depend on how many applications exist."""
-    todo = []
-    for cv_id, pl in structs.items():
-        match = pl.get("applied_job_match")
-        jid = str(pl.get("job_id") or "").strip()
-        if pl.get("is_job_application") and jid and isinstance(match, dict) and match.get("overall_score") is not None:
-            todo.append((cv_id, jid, float(match["overall_score"])))
-    if not todo:
-        return {}
-
-    def rank(item):
-        cv_id, jid, score = item
-        above = qdrant.client.count("cv_structured", exact=True, count_filter=Filter(must=[
-            FieldCondition(key="job_id", match=MatchValue(value=jid)),
-            FieldCondition(key="is_job_application", match=MatchValue(value=True)),
-            FieldCondition(key="applied_job_match.overall_score", range=Range(gt=score)),
-        ])).count
-        return cv_id, int(above) + 1
-
-    from concurrent.futures import ThreadPoolExecutor
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        return dict(pool.map(rank, todo))
-
-
-def _rows_for_ids(qdrant, ids: List[str]) -> List[Dict[str, Any]]:
-    """The full list rows for one page of ids: two batched reads (structured data + document metadata)."""
-    if not ids:
-        return []
-    structs = {str(p.id): (p.payload or {}) for p in qdrant.client.retrieve(
-        "cv_structured", ids=ids, with_payload=CV_PAYLOAD, with_vectors=False)}
-    docs = {str(p.id): (p.payload or {}) for p in qdrant.client.retrieve(
-        "cv_documents", ids=ids, with_payload=["id", "filename", "upload_date"], with_vectors=False)}
-    titles = _job_titles(qdrant)
-    ranks = _ranks_for_page(qdrant, structs)
-    rows = []
-    for cv_id in ids:
-        if cv_id not in structs:
-            continue  # deleted between the id read and this one
-        row = _cv_row(cv_id, structs[cv_id], docs.get(cv_id, {}), titles)
-        rank = ranks.get(cv_id)
-        if rank is not None:
-            row["match_rank"], row["is_top_for_job"] = rank, rank == 1
-        rows.append(row)
-    return rows
-
-
-def _search_page(qdrant, q: str, cats: List[str], offset: int, limit: int, ids_only: bool) -> Dict[str, Any]:
-    """One page for the Candidates search box, from the indexed full-text search (every word typed must be in the CV:
-    its text, title, skills, name, contact). Reaches at most the first 2,000 matches: past that, narrow the search."""
-    words = [w for w in re.split(r"\s+", q.strip()) if w][:8]
-    want = min(offset + limit, 2000)
-    ids: List[str] = []
-    total: Optional[int] = None
-    cursor = None
-    for _ in range(40):
-        res = qdrant.search_cvs_advanced(keywords=words, match_all=True, limit=min(100, max(1, want - len(ids))),
-                                         cursor=cursor, with_total=cursor is None)
-        if cursor is None:
-            total = res.get("total")
-        ids.extend(str(p.id) for p, _m in res["points"])
-        cursor = res.get("next_cursor")
-        if not cursor or len(ids) >= want:
-            break
-    page_ids = ids[offset: offset + limit]
-    body: Dict[str, Any] = {"status": "success", "total": total if total is not None else len(ids), "limit": limit,
-                            "offset": offset, "category": cats[0] if len(cats) == 1 else None, "q": q}
-    if ids_only:
-        body["ids"] = page_ids
-        body["count"] = len(page_ids)
-        return body
-    rows = _rows_for_ids(qdrant, page_ids)
-    if cats:
-        rows = [r for r in rows if (r.get("category") or "General") in cats]
-    body["cvs"], body["count"] = rows, len(rows)
-    return body
-
-
-def _matches_search(cv: Dict[str, Any], needle: str) -> bool:
-    return (
-        needle in str(cv.get("full_name") or "").lower()
-        or needle in str(cv.get("job_title") or "").lower()
-        or needle in str(cv.get("filename") or "").lower()
-        or needle in str(cv.get("id") or "").lower()
-    )
-
-
-def _build_full_cv_list(qdrant) -> List[Dict[str, Any]]:
-    """Every CV as a list row, newest first. Reads the WHOLE collection (about 20 s at 30,000 CVs), so it is only used
-    for the basic search box and until uploaded_at has been backfilled; plain browsing pages through Qdrant instead."""
-    titles = _job_titles(qdrant)
-
-    structured_points = []
-    offset = None
-    while True:
-        points, offset = qdrant.client.scroll("cv_structured", limit=200, offset=offset, with_payload=CV_PAYLOAD,
-                                              with_vectors=False)
-        structured_points.extend(points)
-        if not offset:
-            break
-
-    docs_map: Dict[str, Dict[str, Any]] = {}
-    offset = None
-    while True:
-        points, offset = qdrant.client.scroll("cv_documents", limit=500, offset=offset,
-                                              with_payload=["id", "filename", "upload_date"], with_vectors=False)
-        for p in points:
-            payload = p.payload or {}
-            docs_map[payload.get("id") or str(p.id)] = payload
-        if not offset:
-            break
-
-    rows = [_cv_row(str(p.id), p.payload or {}, docs_map.get(str(p.id), {}), titles) for p in structured_points]
-    _mark_top_applicants(rows)
-    rows.sort(key=lambda x: x.get("upload_date", ""), reverse=True)
-    return rows
 
 
 @router.get("/cvs")
@@ -525,63 +286,92 @@ async def list_cvs(
     offset: int = Query(0, ge=0, description="Number of items to skip"),
     category: Optional[str] = Query(None, description="Filter by CV category (folder)"),
     categories: Optional[List[str]] = Query(None, description="Several categories at once (repeat the parameter); newest first across all of them"),
-    q: Optional[str] = Query(None, description="Case-insensitive search across name/title/filename/id"),
+    q: Optional[str] = Query(None, description="Search box: every word typed must be in the CV (its text, title, skills, name, contact)"),
     ids_only: bool = Query(False, description="Return only CV ids (no contact data); pages up to the whole database"),
     _: User = Depends(require_core_app),
 ) -> JSONResponse:
     """
-    List CVs, newest first, one page per call (200). Browsing and the category folders are served by Qdrant itself
-    (count + sorted, indexed paging), so the cost does not grow with the number of CVs. The basic search box and
-    the period before uploaded_at has been backfilled use a cached scan of the whole collection instead.
+    List CVs, newest first, one page per call (200). The database counts, sorts and pages, so the cost does not grow with
+    the number of CVs. The search box needs every word typed to be in the CV.
 
     One call never returns the whole database: it used to hand every candidate's name, email and phone to any
     account. The match launcher, which only needs ids, asks for ids_only.
     """
     cats = [c for c in (categories or []) if c] or ([category] if category else [])
-    category_arg = cats if len(cats) > 1 else (cats[0] if cats else None)   # one name, or a list for several
     max_limit = CV_LIST_MAX_IDS if ids_only else CV_LIST_PAGE
     limit = min(limit or max_limit, max_limit)
-    searching = bool(q and q.strip())
+    store = get_store()
     try:
-        qdrant = get_qdrant_utils()
-
-        # ---- fast path: Qdrant counts, sorts and pages ----
-        if not searching and await asyncio.to_thread(qdrant.uploaded_at_ready):
-            total = await asyncio.to_thread(qdrant.count_cvs, category_arg)
-            ids = await asyncio.to_thread(qdrant.list_cv_ids_newest_first, offset, limit, category_arg)
-            body: Dict[str, Any] = {"status": "success", "count": len(ids), "total": total, "limit": limit,
-                                    "offset": offset, "category": category, "q": q}
-            if ids_only:
-                body["ids"] = ids
-            else:
-                body["cvs"] = await asyncio.to_thread(_rows_for_ids, qdrant, ids)
-                body["count"] = len(body["cvs"])
-            return JSONResponse(body)
-
-        # ---- the search box: the full-text index (a word typed must appear in the CV), never a scan ----
-        if searching and await asyncio.to_thread(qdrant.uploaded_at_ready):
-            body = await asyncio.to_thread(_search_page, qdrant, q, cats, offset, limit, ids_only)
-            return JSONResponse(body)
-
-        # ---- fallback: the cached full list ----
-        cache = get_cache_service()
-        cached = cache.get("cv_list", namespace="cv_data")
-        if cached is None:
-            all_rows = await asyncio.to_thread(_build_full_cv_list, qdrant)
-            cache.set("cv_list", {"status": "success", "count": len(all_rows), "cvs": all_rows}, ttl_seconds=60, namespace="cv_data")
+        estimate = False
+        if q and q.strip():
+            words = [w for w in re.split(r"\s+", q.strip()) if w][:8]
+            ids, total, estimate = await asyncio.to_thread(store.search_candidate_ids, words, offset, limit, cats)
         else:
-            all_rows = cached.get("cvs", [])
-        rows = all_rows
-        if cats:
-            rows = [cv for cv in rows if (cv.get("category") or "General") in cats]
-        if searching:
-            needle = q.strip().lower()
-            rows = [cv for cv in rows if _matches_search(cv, needle)]
-        return JSONResponse(_cv_list_page(rows, limit, offset, category, q, ids_only))
-
+            cache, key = get_cache_service(), "cv_total:" + "|".join(sorted(cats))
+            total = cache.get(key, namespace="cv_data")
+            if total is None:                      # counting millions of rows on every page click would be wasted work
+                total = await asyncio.to_thread(store.count_candidates, cats)
+                cache.set(key, total, ttl_seconds=30, namespace="cv_data")
+            ids = await asyncio.to_thread(store.list_candidate_ids, offset, limit, cats)
+        body: Dict[str, Any] = {"status": "success", "count": len(ids), "total": total, "total_is_estimate": estimate, "limit": limit,
+                                "offset": offset, "category": cats[0] if len(cats) == 1 else category, "q": q}
+        if ids_only:
+            body["ids"] = ids
+        else:
+            body["cvs"] = await asyncio.to_thread(store.candidate_rows, ids)
+            body["count"] = len(body["cvs"])
+        return JSONResponse(body)
     except Exception as e:
         logger.error(f"Failed to list CVs: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list CVs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list CVs. Please try again or contact support.")
+
+
+class SavedCvsBody(BaseModel):
+    cv_ids: List[str] = Field(..., min_length=1, max_length=500)
+
+
+@router.get("/saved")
+async def list_saved_cvs(
+    limit: int = Query(50, ge=1, le=CV_LIST_PAGE, description="Page size"),
+    offset: int = Query(0, ge=0),
+    q: Optional[str] = Query(None, max_length=200, description="Search the saved CVs: every word typed must be in the CV"),
+    user: User = Depends(require_core_app),
+) -> JSONResponse:
+    """The CVs the signed-in person saved, the one saved last first, in the same shape as the Candidates list. The database counts,
+    searches and pages them."""
+    store = get_store()
+    try:
+        if q and q.strip():
+            words = [w for w in re.split(r"\s+", q.strip()) if w][:8]
+            ids, total = await asyncio.to_thread(store.search_saved_ids, user.username, words, offset, limit)
+        else:
+            ids, total = await asyncio.to_thread(store.list_saved_ids, user.username, offset, limit)
+        cvs = await asyncio.to_thread(store.candidate_rows, ids)
+        return JSONResponse({"status": "success", "cvs": cvs, "count": len(cvs), "total": total, "limit": limit, "offset": offset, "q": q})
+    except Exception as e:
+        logger.error(f"Failed to list saved CVs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list saved CVs")
+
+
+@router.get("/saved/ids")
+async def saved_cv_ids(user: User = Depends(require_core_app)) -> JSONResponse:
+    """Which CVs the signed-in person has saved (ids only), so every CV card can show its bookmark."""
+    ids = await asyncio.to_thread(get_store().saved_candidate_ids, user.username)
+    return JSONResponse({"ids": ids})
+
+
+@router.post("/saved")
+async def save_cvs(body: SavedCvsBody, user: User = Depends(require_core_app)) -> JSONResponse:
+    """Add CVs to the signed-in person's saved list."""
+    added = await asyncio.to_thread(get_store().save_candidates, user.username, body.cv_ids)
+    return JSONResponse({"status": "success", "saved": added})
+
+
+@router.post("/saved/remove")
+async def unsave_cvs(body: SavedCvsBody, user: User = Depends(require_core_app)) -> JSONResponse:
+    """Take CVs off the signed-in person's saved list (the CVs are not deleted)."""
+    removed = await asyncio.to_thread(get_store().unsave_candidates, user.username, body.cv_ids)
+    return JSONResponse({"status": "success", "removed": removed})
 
 
 @router.get("/categories")
@@ -590,12 +380,15 @@ async def get_categories(_: User = Depends(require_core_app)):
     Get all CV categories with their counts.
     """
     try:
-        qdrant = get_qdrant_utils()
-        categories = qdrant.get_categories_with_counts()
-        return JSONResponse(content={"categories": categories})
+        cache = get_cache_service()
+        counts = cache.get("categories", namespace="cv_data")
+        if counts is None:
+            counts = await asyncio.to_thread(get_store().category_counts)
+            cache.set("categories", counts, ttl_seconds=20, namespace="cv_data")
+        return JSONResponse(content={"categories": counts})
     except Exception as e:
         logger.error(f"Failed to get categories: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get categories: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get categories. Please try again or contact support.")
 
 @router.get("/search/facets/{field}")
 async def get_cv_search_facet(
@@ -605,17 +398,20 @@ async def get_cv_search_facet(
 ) -> JSONResponse:
     """
     Distinct values + counts for a filterable field (location, nationality,
-    notice_period, keywords), across every CV, feeds the searchable checkbox
+    notice_period, keywords, languages), across every CV, feeds the searchable checkbox
     lists and the keyword-search autocomplete in the advanced search modal.
-    See QdrantUtils.CV_FACET_FIELDS for the allowlist. `keywords` defaults to
-    a higher limit than the others since its vocabulary is naturally larger
-    (up to 20 LLM-extracted terms per CV vs. one location/nationality each).
+    `keywords` defaults to a higher limit than the others since its vocabulary is
+    naturally larger (up to 20 LLM-extracted terms per CV vs. one location/nationality each).
     """
-    qdrant = get_qdrant_utils()
-    if field not in qdrant.CV_FACET_FIELDS:
+    if field not in FACET_FIELDS:
         raise HTTPException(status_code=400, detail=f"Unsupported facet field: {field}")
     effective_limit = max(limit, 500) if field == "keywords" else limit
-    values = qdrant.get_cv_facet(field, limit=effective_limit)
+    cache, key = get_cache_service(), f"facet:{field}:{effective_limit}"
+    values = cache.get(key, namespace="cv_data")
+    if values is None:
+        values = await asyncio.to_thread(get_store().candidate_facet, field, effective_limit)
+        cache.set(key, values, ttl_seconds=300, namespace="cv_data")      # a vocabulary list: five minutes old is fine, and it is costly on a big table
+    values = [dict(v) for v in values]
     if field == "location":
         # The location filter is country-wise: cities roll up into their country. `members` are the raw stored
         # locations behind each country, which the search uses to find them.
@@ -653,461 +449,143 @@ async def search_cvs_advanced(
     _: User = Depends(require_core_app),
 ) -> CVAdvancedSearchResponse:
     """
-    Advanced CV search (keywords + experience range + location + nationality),
-    evaluated server-side against the whole cv_structured collection via
-    indexed Qdrant filters (see QdrantUtils.search_cvs_advanced for the
-    matching rules). Paginated with an opaque cursor: pass the previous
-    response's next_cursor back in to get the next page (the frontend's
-    "load 50, then fetch more as you scroll" flow).
+    Advanced CV search (keywords + experience range + location + nationality + languages + a pasted boolean string),
+    evaluated by the database against every CV. Paginated with an opaque cursor: pass the previous
+    response's next_cursor back in to get the next page (the frontend's "load 50, then fetch more as you scroll" flow).
     """
     try:
-        qdrant = get_qdrant_utils()
-
-        job_title_by_id: Dict[str, str] = {}
-        try:
-            for j in qdrant.get_all_job_postings(include_inactive=True):
-                jid = str(j.get("id") or j.get("job_id") or "").strip()
-                structured_jd = j.get("structured_info") or {}
-                title = structured_jd.get("job_title") or j.get("job_title") or ""
-                if jid and title:
-                    job_title_by_id[jid] = str(title)
-        except Exception:
-            job_title_by_id = {}
-
+        store = get_store()
         added_after, added_before = _freshness_range(req.added_within_days, req.added_from, req.added_to)
-
-        found = qdrant.search_cvs_advanced(
-            keywords=req.keywords,
-            match_all=req.match_all,
-            experience_min=req.experience_min,
-            experience_max=req.experience_max,
-            locations=req.locations,
-            nationalities=req.nationalities,
-            languages=req.languages,
-            limit=req.limit,
-            cursor=req.cursor,
-            with_total=not req.cursor,
-            boolean_query=req.boolean_query,
-            added_after=added_after,
-            added_before=added_before,
-        )
-        points = [p for p, _ in found["points"]]
-        matched_by_id = {str(p.id): matched for p, matched in found["points"]}
-
-        doc_ids = [str(p.id) for p in points]
-        docs_map: Dict[str, Dict[str, Any]] = {}
-        if doc_ids:
-            docs_points, _ = qdrant.client.scroll(
-                collection_name="cv_documents",
-                scroll_filter=Filter(must=[FieldCondition(key="id", match=MatchValue(value=doc_ids[0]))])
-                if len(doc_ids) == 1 else Filter(must=[FieldCondition(key="id", match=MatchAny(any=doc_ids))]),
-                limit=len(doc_ids),
-                with_payload=True,
-                with_vectors=False,
-            )
-            docs_map = {str(p.id): (p.payload or {}) for p in docs_points}
-
-        results: List[CVSearchResultItem] = []
-        for p in points:
-            doc_id = str(p.id)
-            payload = p.payload or {}
-            structured = payload.get("structured_info", {}) or {}
-            doc_meta = docs_map.get(doc_id, {})
-
-            filename = doc_meta.get("filename", "Unknown")
-            if filename and "/" in filename:
-                filename = filename.split("/")[-1]
-
-            is_job_application = bool(payload.get("is_job_application", False))
-            applied_job_id = str(payload.get("job_id") or "").strip() if is_job_application else ""
-            applied_job_match = payload.get("applied_job_match")
-            applied_score = applied_job_match.get("overall_score") if isinstance(applied_job_match, dict) else None
-
-            skills_src = structured.get("skills_sentences", structured.get("skills", [])) or []
-            skills_nonempty = [s for s in skills_src if isinstance(s, str) and s.strip()][:20]
-            languages = structured.get("languages") or []
-            if not isinstance(languages, list):
-                languages = []
-            certifications = structured.get("certifications") or []
-            if not isinstance(certifications, list):
-                certifications = []
-            contact = resolve_candidate_contact(payload, structured)
-
-            results.append(CVSearchResultItem(
-                id=doc_id,
-                filename=filename,
-                upload_date=doc_meta.get("upload_date", "Unknown"),
-                full_name=resolve_candidate_full_name(payload, structured),
-                job_title=structured.get("job_title") or "Not specified",
-                years_of_experience=structured.get("years_of_experience", structured.get("experience_years", "Not specified")),
-                category=structured.get("category", "General"),
-                skills=skills_nonempty,
-                skill_keywords=[k for k in (structured.get("keywords") or []) if k][:20],
-                location=payload.get("location") or structured.get("location"),
-                nationality=payload.get("nationality"),
-                notice_period=payload.get("notice_period"),
-                gender=structured.get("gender"),
-                languages=[str(x).strip() for x in languages if str(x).strip()][:20],
-                certifications=[str(x).strip() for x in certifications if str(x).strip()][:20],
-                email=contact.get("email"),
-                phone=contact.get("phone"),
-                linkedin_url=contact.get("linkedin_url"),
-                github_url=contact.get("github_url"),
-                is_job_application=is_job_application,
-                applied_job_id=applied_job_id or None,
-                applied_job_title=(job_title_by_id.get(applied_job_id) if applied_job_id else None),
-                match_score=applied_score,
-                matched_keywords=matched_by_id.get(doc_id, []),
-            ))
-
+        found = await asyncio.to_thread(
+            store.search_candidates,
+            keywords=req.keywords, match_all=req.match_all, experience_min=req.experience_min, experience_max=req.experience_max,
+            locations=req.locations, nationalities=req.nationalities, languages=req.languages, limit=req.limit, cursor=req.cursor,
+            with_total=not req.cursor, boolean_query=req.boolean_query, added_after=added_after, added_before=added_before,
+            categories=req.categories, notes=req.notes)
+        rows = await asyncio.to_thread(store.candidate_rows, found["ids"])
+        fields = CVSearchResultItem.model_fields
+        results = [CVSearchResultItem(**{**{k: r.get(k) for k in fields if k in r}, "matched_keywords": found["matched"].get(r["id"], [])})
+                   for r in rows]
         return CVAdvancedSearchResponse(results=results, next_cursor=found["next_cursor"], count=len(results),
                                         total=found["total"], total_is_estimate=found["total_is_estimate"])
     except BooleanQueryError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Advanced CV search failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Advanced CV search failed: {e}")
+        raise HTTPException(status_code=500, detail="Advanced CV search failed. Please try again or contact support.")
 
 
 @router.get("/{cv_id}")
 async def get_cv_details(cv_id: str, _: User = Depends(require_core_app)) -> JSONResponse:
     """
-    Get details for a specific CV.
-    Combines cv_structured + cv_documents + cv_embeddings stats.
-    Also handles job application CVs (stored with application_id as document_id).
+    Get details for a specific CV: the candidate's rows, their latest application (if any) and what is stored in Qdrant for them.
     """
     try:
-        logger.info(f"Starting get_cv_details for CV: {cv_id}")
-        qdrant = get_qdrant_utils()
-
-        # Structured data
-        s = qdrant.client.retrieve("cv_structured", ids=[cv_id], with_payload=CV_PAYLOAD, with_vectors=False)
-        if not s:
-            logger.error(f"CV not found in cv_structured collection: {cv_id}")
+        store = get_store()
+        d = await asyncio.to_thread(store.candidate_detail, cv_id)
+        if not d:
             raise HTTPException(status_code=404, detail=f"CV not found: {cv_id}")
-        structured_payload = s[0].payload or {}
-        logger.info(f"Found CV in cv_structured: {cv_id}, payload keys: {list(structured_payload.keys())}")
-        
-        # Check if this is a job application CV (has is_job_application flag)
-        is_job_application = structured_payload.get("is_job_application", False)
-        logger.info(f"CV {cv_id} is_job_application: {is_job_application}")
-        
-        if is_job_application:
-            # For job applications, the structured data is still nested under structured_info
-            # but we also have application-specific fields in the main payload
-            structured = structured_payload.get("structured_info", structured_payload)
-        else:
-            # For regular CVs, structured data is nested under structured_info
-            structured = structured_payload.get("structured_info", structured_payload)
+        emb = await asyncio.to_thread(store.embeddings_info, cv_id, "cv")
 
-        # Doc meta
-        d = qdrant.client.retrieve("cv_documents", ids=[cv_id], with_payload=True, with_vectors=False)
-        doc_meta = (d[0].payload if d else {}) or {}
-
-        # Embedding info - handle both optimized and legacy storage
-        try:
-            # Try optimized single-point retrieval first
-            emb_point = qdrant.client.retrieve(
-                collection_name="cv_embeddings",
-                ids=[cv_id],
-                with_payload=True,
-                with_vectors=False
-            )
-            
-            if emb_point and len(emb_point) > 0:
-                payload = emb_point[0].payload
-                if payload and "vector_structure" in payload:
-                    # Optimized storage - single point with vector_structure
-                    vector_structure = payload["vector_structure"]
-                    skills_count = len(vector_structure.get("skill_vectors", []))
-                    resp_count = len(vector_structure.get("responsibility_vectors", []))
-                    has_title = len(vector_structure.get("job_title_vector", [])) > 0
-                    has_exp = len(vector_structure.get("experience_vector", [])) > 0
-                    # Get dimension from first skill vector if available
-                    dim = len(vector_structure.get("skill_vectors", [[]])[0]) if vector_structure.get("skill_vectors") else 0
-                else:
-                    # Legacy storage - multiple points
-                    emb_points, _ = qdrant.client.scroll(
-                        collection_name="cv_embeddings",
-                        scroll_filter=Filter(must=[FieldCondition(key="id", match=MatchValue(value=cv_id))]),
-                        limit=100,
-                        with_payload=True,
-                        with_vectors=True
-                    )
-                    skills_count = len([p for p in emb_points if (p.payload or {}).get("vector_type") == "skill"])
-                    resp_count = len([p for p in emb_points if (p.payload or {}).get("vector_type") == "responsibility"])
-                    has_title = any((p.payload or {}).get("vector_type") == "job_title" for p in emb_points)
-                    has_exp = any((p.payload or {}).get("vector_type") == "experience" for p in emb_points)
-                    dim = 0
-                    for p in emb_points:
-                        if isinstance(p.vector, list):
-                            dim = len(p.vector)
-                            break
-            else:
-                # No embeddings found
-                skills_count = resp_count = 0
-                has_title = has_exp = False
-                dim = 0
-        except Exception as e:
-            logger.warning(f"Failed to get embeddings info for {cv_id}: {e}")
-            skills_count = resp_count = 0
-            has_title = has_exp = False
-            dim = 0
-
-        # Handle both old and new data structures
-        skills = structured.get("skills_sentences", structured.get("skills", []))
-        responsibilities = structured.get("responsibility_sentences", structured.get("responsibilities", []))
-
-        # Create optimized structured_info without duplicates
-        optimized_structured = structured.copy()
-        # Remove duplicate skills and responsibilities from structured_info
-        # Frontend should use candidate.skills and candidate.responsibilities instead
-        if "skills" in optimized_structured:
-            del optimized_structured["skills"]
-        if "responsibilities" in optimized_structured:
-            del optimized_structured["responsibilities"]
-
-        response = {
-            "id": cv_id,
-            "filename": doc_meta.get("filename", "Unknown"),
-            "upload_date": doc_meta.get("upload_date", "Unknown"),
-            "document_type": "cv",
-            "is_job_application": is_job_application,
-            "candidate": {
-                "full_name": resolve_candidate_full_name(structured_payload, structured),
-                "job_title": structured.get("job_title", "Not specified"),
-                "years_of_experience": structured.get("years_of_experience", structured.get("experience_years", "Not specified")),
-                "skills": skills,
-                "responsibilities": responsibilities,
-                "skills_count": len(skills),
-                "responsibilities_count": len(responsibilities),
-                "contact_info": structured.get("contact_info", {}),
-                **{k: v for k, v in resolve_candidate_contact(structured_payload, structured).items() if k in ("linkedin_url", "github_url")},
-                "expected_salary": structured_payload.get("expected_salary") or structured.get("expected_salary"),
-                "gender": structured.get("gender"),
-                "languages": [
-                    str(x).strip() for x in (structured.get("languages") or [])
-                    if str(x).strip()
-                ][:20] if isinstance(structured.get("languages"), list) else [],
-                "certifications": [
-                    str(x).strip() for x in (structured.get("certifications") or [])
-                    if str(x).strip()
-                ][:20] if isinstance(structured.get("certifications"), list) else [],
-                "location": structured_payload.get("location") or structured.get("location"),
-                "nationality": structured_payload.get("nationality") or structured.get("nationality"),
-            },
-            "job_application": {
-                "expected_salary": structured_payload.get("expected_salary"),
-                "years_of_experience": structured_payload.get("years_of_experience"),
-                "experience_warning": structured_payload.get("experience_warning"),
-                "applicant_name": structured_payload.get("applicant_name"),
-                "applicant_email": structured_payload.get("applicant_email"),
-                "applicant_phone": structured_payload.get("applicant_phone"),
-                "application_date": structured_payload.get("application_date"),
-                "application_status": structured_payload.get("application_status"),
-                "job_id": structured_payload.get("job_id"),
-            } if is_job_application else None,
-            "embeddings_info": {
-                "skills_embeddings": skills_count,
-                "responsibilities_embeddings": resp_count,
-                "has_title_embedding": has_title,
-                "has_experience_embedding": has_exp,
-                "embedding_dimension": dim,
-            },
-            "structured_info": optimized_structured,
-            "processing_metadata": structured.get("processing_metadata", {})
-        }
-
-        # Add job application specific data if this is a job application
-        if is_job_application:
-            response["job_application"] = {
-                "job_id": structured_payload.get("job_id"),
-                "applicant_name": structured_payload.get("applicant_name"),
-                "applicant_email": structured_payload.get("applicant_email"),
-                "applicant_phone": structured_payload.get("applicant_phone"),
-                "application_date": structured_payload.get("application_date"),
-                "application_status": structured_payload.get("application_status"),
-                "cover_letter": structured_payload.get("cover_letter"),
-                "cv_filename": structured_payload.get("cv_filename"),
-                "expected_salary": structured_payload.get("expected_salary"),
-                "years_of_experience": structured_payload.get("years_of_experience"),
-                "location": structured_payload.get("location"),
-                "notice_period": structured_payload.get("notice_period"),
-                "nationality": structured_payload.get("nationality")
+        contact = {k: v for k, v in (("name", d["full_name"]), ("email", d["email"]), ("phone", d["phone"]),
+                                      ("linkedin", d["linkedin_url"]), ("github", d["github_url"])) if v}
+        years = d["years_of_experience"] if d["years_of_experience"] is not None else "Not specified"
+        latest = d["applications"][0] if d["applications"] else None
+        application = None
+        if latest:
+            application = {
+                "job_id": latest["job_id"], "applicant_name": d["full_name"], "applicant_email": d["email"], "applicant_phone": d["phone"],
+                "application_date": latest["application_date"], "application_status": latest["application_status"],
+                "cv_filename": d["filename"],
+                "expected_salary": d["expected_salary"], "years_of_experience": d["years_of_experience"], "location": d["location"],
+                "notice_period": d["notice_period"], "nationality": d["nationality"],
             }
-
+        response = {
+            "id": cv_id, "filename": d["filename"] or "Unknown", "upload_date": d["upload_date"], "document_type": "cv",
+            "is_job_application": latest is not None,
+            "candidate": {
+                "full_name": d["full_name"] or "Not specified", "job_title": d["job_title"] or "Not specified", "years_of_experience": years,
+                "skills": d["skills"], "responsibilities": d["responsibilities"], "skills_count": len(d["skills"]),
+                "responsibilities_count": len(d["responsibilities"]), "contact_info": contact, "email": d["email"], "phone": d["phone"],
+                "linkedin_url": d["linkedin_url"], "github_url": d["github_url"], "expected_salary": d["expected_salary"], "gender": d["gender"],
+                "languages": d["languages"][:20], "certifications": d["certifications"][:20], "location": d["location"],
+                "nationality": d["nationality"], "notice_period": d["notice_period"],
+            },
+            "job_application": application,
+            "embeddings_info": {
+                "skills_embeddings": emb["skills"], "responsibilities_embeddings": emb["responsibilities"],
+                "has_title_embedding": emb["has_title"], "embedding_dimension": emb["dimension"],
+            },
+            # the same facts again under the names the candidate page reads (built from the rows above, not stored a second time)
+            "structured_info": {
+                "name": d["full_name"], "full_name": d["full_name"], "job_title": d["job_title"], "category": d["category"], "gender": d["gender"],
+                "languages": d["languages"], "certifications": d["certifications"], "keywords": d["keywords"],
+                "skills_sentences": d["skills"], "responsibility_sentences": d["responsibilities"], "contact_info": contact,
+                "years_of_experience": d["years_of_experience"], "location": d["location"], "nationality": d["nationality"],
+                "notice_period": d["notice_period"], "expected_salary": d["expected_salary"], "email": d["email"], "phone": d["phone"],
+                "linkedin_url": d["linkedin_url"], "github_url": d["github_url"], "hr_notes": d["notes"], "source": d["source"],
+            },
+            "processing_metadata": {"model_used": d["llm_model"], "processing_time": (d["extraction_ms"] or 0) / 1000.0,
+                                    "embedding_model": d["embedding_model"]},
+        }
         return JSONResponse({"status": "success", "cv": response})
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get CV details: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get CV details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get CV details. Please try again or contact support.")
 
 
 @router.delete("/{cv_id}")
 async def delete_cv(cv_id: str, _: User = Depends(require_core_app)) -> JSONResponse:
     """
-    Delete a CV and all associated data across:
-      - cv_documents
-      - cv_structured
-      - cv_embeddings (all vectors with document_id == cv_id)
-      - S3 file storage
+    Delete a CV and everything about it: the candidate's rows (skills, notes, applications ...), its vectors in Qdrant, and the stored file.
     """
     try:
-        qdrant = get_qdrant_utils()
-
-        # Check existence and get file info
-        s = qdrant.client.retrieve("cv_structured", ids=[cv_id], with_payload=CV_PAYLOAD)
-        if not s:
+        info = await asyncio.to_thread(get_store().delete_candidate, cv_id)
+        if info is None:
             raise HTTPException(status_code=404, detail=f"CV not found: {cv_id}")
-        
-        doc_payload = (qdrant.client.retrieve("cv_documents", ids=[cv_id], with_payload=True) or [{}])[0].payload
-        filename = doc_payload.get("filename", cv_id)
-        file_path = doc_payload.get("file_path", "")
-        
-        # Delete from S3 if stored there
-        if file_path and file_path.startswith('s3://'):
+        filename = info["filename"] or cv_id
+        if info.get("file_path"):
             try:
-                s3_service = get_storage_service()
-                file_ext = os.path.splitext(filename)[1] or '.pdf'
-                s3_service.delete_file(cv_id, "cv", file_ext)
-                logger.info(f"Deleted CV file from S3: {cv_id}")
-            except Exception as e:
-                logger.warning(f"Failed to delete CV from S3: {e}")
-
-        # Delete embedding points
-        emb_points, _ = qdrant.client.scroll(
-            collection_name="cv_embeddings",
-            scroll_filter=Filter(must=[FieldCondition(key="id", match=MatchValue(value=cv_id))]),
-            limit=1000,
-            with_payload=False,
-            with_vectors=False
-        )
-        emb_ids = [str(p.id) for p in emb_points]
-        if emb_ids:
-            qdrant.client.delete(collection_name="cv_embeddings", points_selector=emb_ids)
-
-        # Delete structured + document
-        qdrant.client.delete(collection_name="cv_structured", points_selector=[cv_id])
-        qdrant.client.delete(collection_name="cv_documents", points_selector=[cv_id])
-
-        # Invalidate CV list cache since we deleted a CV
-        cache = get_cache_service()
-        cache.delete("cv_list", namespace="cv_data")
+                await asyncio.to_thread(get_storage_service().delete_file, cv_id, "cv", os.path.splitext(filename)[1] or ".pdf")
+            except Exception as e:  # noqa: BLE001 - the record is gone; a stray file is reported, not fatal
+                logger.warning(f"Failed to delete the stored file of CV {cv_id}: {e}")
         _invalidate_match_caches(cv_id)
-        logger.debug("Invalidated CV list cache after deletion")
-
-        return JSONResponse({
-            "status": "success",
-            "message": f"CV '{filename}' deleted successfully",
-            "deleted_cv_id": cv_id
-        })
+        return JSONResponse({"status": "success", "message": f"CV '{filename}' deleted successfully", "deleted_cv_id": cv_id})
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to delete CV: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete CV: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete CV. Please try again or contact support.")
 
 
 @router.get("/{cv_id}/embeddings")
 async def get_cv_embeddings_info(cv_id: str, _: User = Depends(require_core_app)) -> JSONResponse:
     """
-    Get detailed embeddings information for a CV from cv_embeddings.
+    What is stored in Qdrant for a CV: how many skill / responsibility vectors, the title and experience vectors, the dimension.
     """
     try:
-        qdrant = get_qdrant_utils()
-
-        # Verify CV exists
-        s = qdrant.client.retrieve("cv_structured", ids=[cv_id], with_payload=CV_PAYLOAD)
-        if not s:
+        store = get_store()
+        if not await asyncio.to_thread(store.candidate_exists, cv_id):
             raise HTTPException(status_code=404, detail=f"CV not found: {cv_id}")
-
-        # Try optimized single-point retrieval first
-        try:
-            emb_point = qdrant.client.retrieve(
-                collection_name="cv_embeddings",
-                ids=[cv_id],
-                with_payload=True,
-                with_vectors=False
-            )
-            
-            info = {
-                "cv_id": cv_id,
-                "embeddings_found": False,
-                "skills": {"count": 0, "embedding_dimension": 0},
-                "responsibilities": {"count": 0, "embedding_dimension": 0},
-                "title_embedding": False,
-                "experience_embedding": False,
-                "total_embeddings": 0
-            }
-            
-            if emb_point and len(emb_point) > 0:
-                payload = emb_point[0].payload
-                if payload and "vector_structure" in payload:
-                    # Optimized storage - single point with vector_structure
-                    vector_structure = payload["vector_structure"]
-                    info["embeddings_found"] = True
-                    info["skills"]["count"] = len(vector_structure.get("skill_vectors", []))
-                    info["responsibilities"]["count"] = len(vector_structure.get("responsibility_vectors", []))
-                    info["title_embedding"] = len(vector_structure.get("job_title_vector", [])) > 0
-                    info["experience_embedding"] = len(vector_structure.get("experience_vector", [])) > 0
-                    
-                    # Get dimensions from first vectors if available
-                    if vector_structure.get("skill_vectors"):
-                        info["skills"]["embedding_dimension"] = len(vector_structure["skill_vectors"][0])
-                    if vector_structure.get("responsibility_vectors"):
-                        info["responsibilities"]["embedding_dimension"] = len(vector_structure["responsibility_vectors"][0])
-                else:
-                    # Legacy storage - multiple points
-                    points, _ = qdrant.client.scroll(
-                        collection_name="cv_embeddings",
-                        scroll_filter=Filter(must=[FieldCondition(key="id", match=MatchValue(value=cv_id))]),
-                        limit=2000,
-                        with_payload=True,
-                        with_vectors=True
-                    )
-                    
-                    info["embeddings_found"] = bool(points)
-                    
-                    for p in points:
-                        pld = p.payload or {}
-                        vtype = pld.get("vector_type")
-                        if vtype == "skill":
-                            info["skills"]["count"] += 1
-                            if isinstance(p.vector, list) and not info["skills"]["embedding_dimension"]:
-                                info["skills"]["embedding_dimension"] = len(p.vector)
-                        elif vtype == "responsibility":
-                            info["responsibilities"]["count"] += 1
-                            if isinstance(p.vector, list) and not info["responsibilities"]["embedding_dimension"]:
-                                info["responsibilities"]["embedding_dimension"] = len(p.vector)
-                        elif vtype == "job_title":
-                            info["title_embedding"] = True
-                        elif vtype == "experience":
-                            info["experience_embedding"] = True
-
-            info["total_embeddings"] = info["skills"]["count"] + info["responsibilities"]["count"] + int(info["title_embedding"]) + int(info["experience_embedding"])
-            
-        except Exception as e:
-            logger.warning(f"Failed to get embeddings info for {cv_id}: {e}")
-            info = {
-                "cv_id": cv_id,
-                "embeddings_found": False,
-                "skills": {"count": 0, "embedding_dimension": 0},
-                "responsibilities": {"count": 0, "embedding_dimension": 0},
-                "title_embedding": False,
-                "experience_embedding": False,
-                "total_embeddings": 0
-            }
-
+        e = await asyncio.to_thread(store.embeddings_info, cv_id, "cv")
+        info = {
+            "cv_id": cv_id, "embeddings_found": e["embeddings_found"],
+            "skills": {"count": e["skills"], "embedding_dimension": e["dimension"] if e["skills"] else 0},
+            "responsibilities": {"count": e["responsibilities"], "embedding_dimension": e["dimension"] if e["responsibilities"] else 0},
+            "title_embedding": e["has_title"],
+            "total_embeddings": e["skills"] + e["responsibilities"] + int(e["has_title"]),
+        }
         return JSONResponse({"status": "success", "embeddings_info": info})
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get CV embeddings info: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get CV embeddings info: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get CV embeddings info. Please try again or contact support.")
 
 
 @router.post("/standardize-cv")
@@ -1174,7 +652,7 @@ async def standardize_cv_text(request: StandardizeCVRequest, _: User = Depends(r
         raise
     except Exception as e:
         logger.error(f"CV text standardization failed: {e}")
-        raise HTTPException(status_code=500, detail=f"CV standardization failed: {e}")
+        raise HTTPException(status_code=500, detail="CV standardization failed. Please try again or contact support.")
 @router.get("/{cv_id}/preview")
 async def preview_cv(cv_id: str, page: int = Query(1, ge=1), scale: float = Query(1.0, ge=0.5, le=2.5),
                      _: User = Depends(require_core_app)):
@@ -1184,14 +662,13 @@ async def preview_cv(cv_id: str, page: int = Query(1, ge=1), scale: float = Quer
     native viewers. The total page count is returned in ``X-Preview-Pages``.
     """
     _validate_doc_id(cv_id)
-    res = get_qdrant_utils().client.retrieve("cv_documents", ids=[cv_id], with_payload=True, with_vectors=False)
-    if not res:
+    doc = await asyncio.to_thread(get_store().candidate_document, cv_id)
+    if not doc:
         raise HTTPException(status_code=404, detail="CV not found")
-    payload = res[0].payload or {}
-    text = get_decompressed_content(payload)
+    text = doc["raw_text"]
     if not text or not text.strip():
         raise HTTPException(status_code=404, detail="This CV has no extracted text to preview")
-    png, total = await asyncio.to_thread(render_page_png, text, page, label=payload.get("filename", ""), scale=scale)
+    png, total = await asyncio.to_thread(render_page_png, text, page, label=doc["filename"] or "", scale=scale)
     return Response(png, media_type="image/png", headers={
         "X-Preview-Pages": str(total), "Access-Control-Expose-Headers": "X-Preview-Pages",
         "Cache-Control": "private, max-age=300"})
@@ -1199,170 +676,40 @@ async def preview_cv(cv_id: str, page: int = Query(1, ge=1), scale: float = Quer
 
 @router.get("/{cv_id}/download")
 async def download_cv(cv_id: str, _: User = Depends(require_core_app)):
+    """
+    Download the original uploaded CV file. Falls back to a .txt export of the extracted text if the file is no longer in storage.
+    """
     _validate_doc_id(cv_id)
-    """
-    Download the original uploaded CV file.
-    Falls back to a .txt export of raw_content if the file_path is missing.
-    Also handles job application CVs (stored with application_id as document_id).
-    """
-    q = get_qdrant_utils().client
-    res = q.retrieve("cv_documents", ids=[cv_id], with_payload=True, with_vectors=False)
-    if not res:
+    doc = await asyncio.to_thread(get_store().candidate_document, cv_id)
+    if not doc:
         raise HTTPException(status_code=404, detail="CV not found")
+    filename = doc["filename"] or f"{cv_id}.dat"
+    filepath = doc["file_path"]
+    mime_type = doc["mime_type"] or mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
-    payload = res[0].payload or {}
-    filepath = payload.get("file_path") or payload.get("filepath")
-    filename = payload.get("filename", f"{cv_id}.dat")
-    
-    # For job applications, use a more descriptive filename if available
-    if not filepath and not payload.get("raw_content"):
-        # Check if this is a job application by looking at structured data
-        structured_res = q.retrieve("cv_structured", ids=[cv_id], with_payload=CV_PAYLOAD, with_vectors=False)
-        if structured_res and structured_res[0].payload:
-            structured_payload = structured_res[0].payload
-            if structured_payload.get("is_job_application"):
-                applicant_name = structured_payload.get("applicant_name", "Applicant")
-                cv_filename = structured_payload.get("cv_filename", "cv.pdf")
-                filename = f"{applicant_name}_{cv_filename}"
+    if filepath and filepath.startswith("s3://"):
+        # Stored through the storage service (legacy "s3://" paths resolve to its local layout): copy to a temp file and stream it.
+        import tempfile
+        from starlette.background import BackgroundTask
 
-    # Check if file is in S3
-    if filepath and filepath.startswith('s3://'):
-        # File is stored in S3 - stream it through backend (avoids CORS)
-        s3_service = get_storage_service()
-        file_ext = os.path.splitext(filename)[1] or '.pdf'
-        
+        file_ext = os.path.splitext(filename)[1] or ".pdf"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
+            tmp_path = tmp.name
         try:
-            import tempfile
-            from starlette.background import BackgroundTask
-
-            # Legacy "s3://" paths now resolve through the local storage service
-            # (boto3/S3 was replaced by filesystem storage; same layout: <type>s/<id><ext>).
-            with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
-                tmp_path = tmp.name
-
-            s3_service.download_file(cv_id, "cv", file_ext, tmp_path)
-
-            mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-
-            def cleanup():
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-
-            # Temp file is removed after the response is sent.
-            return FileResponse(
-                tmp_path,
-                media_type=mime_type,
-                filename=filename,
-                background=BackgroundTask(cleanup),
-            )
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to download from S3: {e}")
-            # Final fallback to raw_content
-            raw = get_decompressed_content(payload)
-            if raw:
-                logger.info(f"Final fallback to raw_content for {cv_id}")
-                base_name = os.path.splitext(filename)[0]
-                stripped = raw.lstrip()
-                if stripped.startswith("%PDF-"):
-                    return StreamingResponse(
-                        BytesIO(raw.encode("latin-1", "ignore")), media_type="application/pdf",
-                        headers={"Content-Disposition": f'inline; filename="{base_name}.pdf"'},
-                    )
-                if stripped[:4] == "PK\x03\x04":
-                    return StreamingResponse(
-                        BytesIO(raw.encode("latin-1", "ignore")),
-                        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        headers={"Content-Disposition": f'attachment; filename="{base_name}.docx"'},
-                    )
-                bytes_io = BytesIO(raw.encode("utf-8"))
-                headers = {"Content-Disposition": f'attachment; filename="{base_name}.txt"'}
-                return StreamingResponse(bytes_io, media_type="text/plain; charset=utf-8", headers=headers)
-            raise HTTPException(status_code=500, detail="Failed to download file")
-    
-    # Serve the persisted file if we have it (legacy local storage)
+            await asyncio.to_thread(get_storage_service().download_file, cv_id, "cv", file_ext, tmp_path)
+            return FileResponse(tmp_path, media_type=mime_type, filename=filename,
+                                background=BackgroundTask(lambda: os.path.exists(tmp_path) and os.unlink(tmp_path)))
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Failed to download from storage: {e}")
     elif filepath and os.path.exists(filepath):
-        # Get the original filename from structured data if available
-        original_filename = filename
-        structured_res = q.retrieve("cv_structured", ids=[cv_id], with_payload=CV_PAYLOAD, with_vectors=False)
-        if structured_res and structured_res[0].payload:
-            structured_payload = structured_res[0].payload
-            if structured_payload.get("is_job_application"):
-                # Use the original CV filename for job applications
-                cv_filename = structured_payload.get("cv_filename")
-                if cv_filename:
-                    original_filename = cv_filename
-            else:
-                # For regular CVs, use the filename from structured data
-                structured_filename = structured_payload.get("filename")
-                if structured_filename:
-                    original_filename = structured_filename
-        
-        # Determine MIME type
-        mime_type = payload.get("mime_type") or mimetypes.guess_type(filepath)[0] or "application/octet-stream"
-        
-        return FileResponse(
-            filepath, 
-            media_type=mime_type, 
-            filename=original_filename
-        )
+        return FileResponse(filepath, media_type=mime_type, filename=filename)
 
-    # Fallback: stream raw_content as a .txt download (helps older records)
-    raw = get_decompressed_content(payload)
+    raw = doc["raw_text"]
     if raw:
-        # Try to preserve original filename extension if available
-        fallback_filename = filename
-        structured_res = q.retrieve("cv_structured", ids=[cv_id], with_payload=CV_PAYLOAD, with_vectors=False)
-        if structured_res and structured_res[0].payload:
-            structured_payload = structured_res[0].payload
-            if structured_payload.get("is_job_application"):
-                cv_filename = structured_payload.get("cv_filename")
-                if cv_filename:
-                    # Keep original extension if it's a text-based format, otherwise convert to .txt
-                    original_ext = os.path.splitext(cv_filename)[1].lower()
-                    if original_ext in ['.txt', '.md']:
-                        fallback_filename = cv_filename
-                    else:
-                        fallback_filename = f"{os.path.splitext(cv_filename)[0]}.txt"
-            else:
-                structured_filename = structured_payload.get("filename")
-                if structured_filename:
-                    original_ext = os.path.splitext(structured_filename)[1].lower()
-                    if original_ext in ['.txt', '.md']:
-                        fallback_filename = structured_filename
-                    else:
-                        fallback_filename = f"{os.path.splitext(structured_filename)[0]}.txt"
-        
-        # Some legacy records stored the *raw file bytes* (not extracted text) in
-        # raw_content. Serving those as text/plain makes the preview dump "%PDF-…"
-        # on screen. Detect the real format from the magic bytes and serve it with
-        # the correct content type + extension so the PDF/DOCX preview works.
-        stripped = raw.lstrip()
-        base_name = os.path.splitext(fallback_filename)[0]
-        if stripped.startswith("%PDF-"):
-            data = raw.encode("latin-1", "ignore")
-            return StreamingResponse(
-                BytesIO(data), media_type="application/pdf",
-                headers={"Content-Disposition": f'inline; filename="{base_name}.pdf"'},
-            )
-        if stripped[:4] == "PK\x03\x04":
-            data = raw.encode("latin-1", "ignore")
-            return StreamingResponse(
-                BytesIO(data),
-                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                headers={"Content-Disposition": f'attachment; filename="{base_name}.docx"'},
-            )
-
-        bytes_io = BytesIO(raw.encode("utf-8"))
-        headers = {
-            "Content-Disposition": f'attachment; filename="{fallback_filename}"'
-        }
-        return StreamingResponse(bytes_io, media_type="text/plain; charset=utf-8", headers=headers)
-
+        base_name, ext = os.path.splitext(filename)
+        text_name = filename if ext.lower() in (".txt", ".md") else f"{base_name}.txt"
+        return StreamingResponse(BytesIO(raw.encode("utf-8")), media_type="text/plain; charset=utf-8",
+                                 headers={"Content-Disposition": f'attachment; filename="{text_name}"'})
     raise HTTPException(status_code=404, detail="File not found on server")
 
 
@@ -1372,203 +719,51 @@ async def download_cv(cv_id: str, _: User = Depends(require_core_app)):
 
 @router.post("/{cv_id}/note")
 async def add_or_update_note(cv_id: str, request: NoteRequest, user: User = Depends(require_core_app)) -> JSONResponse:
-    """
-    Add or update a note for a specific CV.
-    Notes are stored in the cv_structured collection under the 'hr_notes' field.
-    """
+    """Add or update the signed-in recruiter's note on a CV (one note per recruiter)."""
     try:
-        logger.info(f"Adding/updating note for CV: {cv_id}")
-        qdrant = get_qdrant_utils()
-        
-        # Check if CV exists
-        s = qdrant.client.retrieve("cv_structured", ids=[cv_id], with_payload=True, with_vectors=False)
-        if not s:
+        note = await asyncio.to_thread(get_store().upsert_note, cv_id, user.username, request.note)
+        if note is None:
             raise HTTPException(status_code=404, detail=f"CV not found: {cv_id}")
-        
-        # Get current structured data
-        current_payload = s[0].payload or {}
-        structured_info = current_payload.get("structured_info", {})
-        
-        # IMPORTANT: Preserve job application metadata at root level
-        # This ensures job posting links remain intact
-        is_job_application = current_payload.get("is_job_application", False)
-        job_posting_id = current_payload.get("job_posting_id")
-        applicant_email = current_payload.get("applicant_email")
-        application_id = current_payload.get("application_id")
-        cv_filename = current_payload.get("cv_filename")
-        
-        # Add/update note
-        if "hr_notes" not in structured_info:
-            structured_info["hr_notes"] = []
-        
-        author = user.username
-        # Check if note already exists for this HR user
-        existing_note_index = None
-        for i, note in enumerate(structured_info["hr_notes"]):
-            if note.get("hr_user") == author:
-                existing_note_index = i
-                break
-        
-        note_data = {
-            "note": request.note,
-            "hr_user": author,
-            "created_at": _now_iso(),
-            "updated_at": _now_iso()
-        }
-        
-        if existing_note_index is not None:
-            # Update existing note
-            structured_info["hr_notes"][existing_note_index] = note_data
-            logger.info(f"Updated note for CV {cv_id} by HR user {author}")
-        else:
-            # Add new note
-            structured_info["hr_notes"].append(note_data)
-            logger.info(f"Added new note for CV {cv_id} by HR user {author}")
-        
-        # Build updated payload - PRESERVE all job application metadata
-        updated_payload = {
-            **current_payload,
-            "structured_info": structured_info
-        }
-        
-        # Explicitly preserve job application fields to ensure they're not lost
-        if is_job_application:
-            updated_payload["is_job_application"] = is_job_application
-            if job_posting_id:
-                updated_payload["job_posting_id"] = job_posting_id
-            if applicant_email:
-                updated_payload["applicant_email"] = applicant_email
-            if application_id:
-                updated_payload["application_id"] = application_id
-            if cv_filename:
-                updated_payload["cv_filename"] = cv_filename
-            
-            logger.info(f"Preserved job application link: job_posting_id={job_posting_id}")
-        
-        # Store updated data
-        qdrant.store_structured_data(cv_id, "cv", updated_payload)
-        
-        return JSONResponse({
-            "status": "success",
-            "message": "Note added/updated successfully",
-            "cv_id": cv_id,
-            "note": note_data
-        })
-        
+        return JSONResponse({"status": "success", "message": "Note added/updated successfully", "cv_id": cv_id, "note": note})
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to add/update note for CV {cv_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to add/update note: {e}")
+        raise HTTPException(status_code=500, detail="Failed to add/update note. Please try again or contact support.")
 
 
 @router.get("/{cv_id}/note")
 async def get_cv_note(cv_id: str, _: User = Depends(require_core_app)) -> JSONResponse:
-    """
-    Get all notes for a specific CV.
-    """
+    """Get all notes for a specific CV."""
     try:
-        logger.info(f"Getting notes for CV: {cv_id}")
-        qdrant = get_qdrant_utils()
-        
-        # Get CV structured data
-        s = qdrant.client.retrieve("cv_structured", ids=[cv_id], with_payload=CV_PAYLOAD, with_vectors=False)
-        if not s:
+        notes = await asyncio.to_thread(get_store().list_notes, cv_id)
+        if notes is None:
             raise HTTPException(status_code=404, detail=f"CV not found: {cv_id}")
-        
-        structured_info = s[0].payload.get("structured_info", {})
-        notes = structured_info.get("hr_notes", [])
-        
-        return JSONResponse({
-            "status": "success",
-            "cv_id": cv_id,
-            "notes": notes,
-            "notes_count": len(notes)
-        })
-        
+        return JSONResponse({"status": "success", "cv_id": cv_id, "notes": notes, "notes_count": len(notes)})
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get notes for CV {cv_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get notes: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get notes. Please try again or contact support.")
 
 
 @router.delete("/{cv_id}/note/{hr_user}")
 async def delete_cv_note(cv_id: str, hr_user: str, user: User = Depends(require_core_app)) -> JSONResponse:
+    """Delete a recruiter's note on a CV (your own, or any if you are an admin)."""
     if hr_user != user.username and user.role != "admin":
         raise HTTPException(status_code=403, detail="You can only delete your own notes")
-    """
-    Delete a note for a specific CV by HR user.
-    """
     try:
-        logger.info(f"Deleting note for CV: {cv_id} by HR user: {hr_user}")
-        qdrant = get_qdrant_utils()
-        
-        # Check if CV exists
-        s = qdrant.client.retrieve("cv_structured", ids=[cv_id], with_payload=True, with_vectors=False)
-        if not s:
+        deleted = await asyncio.to_thread(get_store().delete_note, cv_id, hr_user)
+        if deleted is None:
             raise HTTPException(status_code=404, detail=f"CV not found: {cv_id}")
-        
-        # Get current structured data
-        current_payload = s[0].payload or {}
-        structured_info = current_payload.get("structured_info", {})
-        
-        # IMPORTANT: Preserve job application metadata at root level
-        # This ensures job posting links remain intact
-        is_job_application = current_payload.get("is_job_application", False)
-        job_posting_id = current_payload.get("job_posting_id")
-        applicant_email = current_payload.get("applicant_email")
-        application_id = current_payload.get("application_id")
-        cv_filename = current_payload.get("cv_filename")
-        
-        # Remove note for this HR user
-        if "hr_notes" in structured_info:
-            original_count = len(structured_info["hr_notes"])
-            structured_info["hr_notes"] = [
-                note for note in structured_info["hr_notes"] 
-                if note.get("hr_user") != hr_user
-            ]
-            
-            if len(structured_info["hr_notes"]) == original_count:
-                raise HTTPException(status_code=404, detail=f"No note found for HR user: {hr_user}")
-        
-        # Build updated payload - PRESERVE all job application metadata
-        updated_payload = {
-            **current_payload,
-            "structured_info": structured_info
-        }
-        
-        # Explicitly preserve job application fields to ensure they're not lost
-        if is_job_application:
-            updated_payload["is_job_application"] = is_job_application
-            if job_posting_id:
-                updated_payload["job_posting_id"] = job_posting_id
-            if applicant_email:
-                updated_payload["applicant_email"] = applicant_email
-            if application_id:
-                updated_payload["application_id"] = application_id
-            if cv_filename:
-                updated_payload["cv_filename"] = cv_filename
-            
-            logger.info(f"Preserved job application link: job_posting_id={job_posting_id}")
-        
-        # Store updated data
-        qdrant.store_structured_data(cv_id, "cv", updated_payload)
-        
-        logger.info(f"Deleted note for CV {cv_id} by HR user {hr_user}")
-        
-        return JSONResponse({
-            "status": "success",
-            "message": "Note deleted successfully",
-            "cv_id": cv_id,
-            "hr_user": hr_user
-        })
-        
+        if deleted is False:
+            raise HTTPException(status_code=404, detail=f"No note found for HR user: {hr_user}")
+        return JSONResponse({"status": "success", "message": "Note deleted successfully", "cv_id": cv_id, "hr_user": hr_user})
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to delete note for CV {cv_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete note: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete note. Please try again or contact support.")
 
 
 # ------------------------------
@@ -1576,7 +771,7 @@ async def delete_cv_note(cv_id: str, hr_user: str, user: User = Depends(require_
 # ------------------------------
 
 class NotesSummaryRequest(BaseModel):
-    cv_ids: List[str]
+    cv_ids: List[str] = Field(..., max_length=1000)     # one page of a list, never the whole database
 
 
 @router.post("/notes/summary")
@@ -1588,83 +783,11 @@ async def get_notes_summary(payload: NotesSummaryRequest, _: User = Depends(requ
     - Does NOT include full notes array
     """
     try:
-        if not payload.cv_ids:
-            return JSONResponse({
-                "status": "success",
-                "summaries": [],
-                "count": 0
-            })
-
-        # Deduplicate while preserving order
-        seen = set()
-        ordered_ids: List[str] = []
-        for cv_id in payload.cv_ids:
-            if cv_id and cv_id not in seen:
-                seen.add(cv_id)
-                ordered_ids.append(cv_id)
-
-        qdrant = get_qdrant_utils()
-
-        # Prepare defaults for all requested IDs
-        summaries_map: Dict[str, Dict[str, Any]] = {
-            cv_id: {
-                "cv_id": cv_id,
-                "has_notes": False,
-                "notes_count": 0,
-                "latest_note": None,
-            }
-            for cv_id in ordered_ids
-        }
-
-        # Qdrant retrieve supports multiple IDs; chunk for safety
-        CHUNK_SIZE = 256
-        for i in range(0, len(ordered_ids), CHUNK_SIZE):
-            chunk = ordered_ids[i:i + CHUNK_SIZE]
-            try:
-                results = qdrant.client.retrieve(
-                    "cv_structured",
-                    ids=chunk,
-                    with_payload=CV_PAYLOAD,
-                    with_vectors=False,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to retrieve notes summary chunk {i}-{i+len(chunk)}: {e}")
-                continue
-
-            for point in results or []:
-                try:
-                    payload = point.payload or {}
-                    structured_info = payload.get("structured_info", {})
-                    notes = structured_info.get("hr_notes", []) or []
-
-                    summary = summaries_map.get(str(point.id))
-                    # Some deployments may store UUIDs as strings; ensure both lookups
-                    if summary is None:
-                        summary = summaries_map.get(point.id)  # type: ignore[index]
-
-                    if summary is not None:
-                        summary["has_notes"] = len(notes) > 0
-                        summary["notes_count"] = len(notes)
-                        if notes:
-                            latest_note = max(
-                                notes,
-                                key=lambda x: x.get("updated_at", x.get("created_at", ""))
-                            )
-                            summary["latest_note"] = latest_note
-                except Exception as inner_e:
-                    logger.warning(f"Failed to process summary for point {getattr(point, 'id', 'unknown')}: {inner_e}")
-
-        # Preserve original order in response
-        summaries_list = [summaries_map[cid] for cid in ordered_ids]
-
-        return JSONResponse({
-            "status": "success",
-            "summaries": summaries_list,
-            "count": len(summaries_list)
-        })
-
-    except HTTPException:
-        raise
+        ordered_ids = list(dict.fromkeys(i for i in payload.cv_ids if i))
+        if not ordered_ids:
+            return JSONResponse({"status": "success", "summaries": [], "count": 0})
+        summaries = await asyncio.to_thread(get_store().notes_summary, ordered_ids)
+        return JSONResponse({"status": "success", "summaries": [summaries[i] for i in ordered_ids], "count": len(ordered_ids)})
     except Exception as e:
-        logger.error(f"Failed to get notes summary: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get notes summary: {e}")
+        logger.error(f"Failed to build notes summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to build notes summary. Please try again or contact support.")

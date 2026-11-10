@@ -36,7 +36,7 @@ TRACKER_FIELDS: Dict[str, Tuple[Tuple[str, str, int], ...]] = {
 }
 TRACKER_WRITERS: Dict[str, FrozenSet[str]] = {"follow-ups": TRACKER_ALL, "job-openings": TRACKER_MANAGE, "candidates": TRACKER_MANAGE, "applications": TRACKER_MANAGE}
 TRACKER_LABEL = {"follow-ups": "follow-up", "job-openings": "job opening", "candidates": "tracker candidate", "applications": "tracker application"}
-JOB_FIELDS = ("job_title", "job_location", "job_summary", "key_responsibilities", "qualifications", "company_name")
+JOB_FIELDS = ("job_title", "job_location", "job_summary", "key_responsibilities", "qualifications")
 
 
 def clean_fields(resource: str, raw: Any) -> Dict[str, Any]:

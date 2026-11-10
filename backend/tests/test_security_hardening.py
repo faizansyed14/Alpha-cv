@@ -1,4 +1,5 @@
 """Regression tests for the security review fixes (each one was reproduced against a running stack first)."""
+import json
 import time
 
 import pytest
@@ -81,13 +82,25 @@ def test_lockout_is_per_client_not_per_account(fake_redis, monkeypatch):
 
 
 def test_cv_list_ids_only_has_no_contact_data():
-    from app.api.routers.cvs import CV_LIST_PAGE, _cv_list_page
+    import asyncio
 
-    cvs = [{"id": f"cv{i}", "full_name": "N", "email": "e@x", "phone": "1"} for i in range(1200)]
-    page = _cv_list_page(cvs, CV_LIST_PAGE, 0, None, None, ids_only=False)
-    assert len(page["cvs"]) == CV_LIST_PAGE == 200 and page["total"] == 1200
-    ids = _cv_list_page(cvs, 1200, 0, None, None, ids_only=True)
-    assert "cvs" not in ids and ids["ids"][:2] == ["cv0", "cv1"] and len(ids["ids"]) == 1200
+    from app.api.routers.cvs import CV_LIST_PAGE, list_cvs
+    from app.store import get_store
+
+    store = get_store()
+    for i in range(1, 251):
+        store.save_candidate({"id": f"00000000-0000-0000-0000-{i:012d}", "content_sha256": f"{i:064d}", "filename": f"cv{i}.pdf",
+                              "facts": {"full_name": "N", "email": f"e{i}@x.com", "phone": "1"}})
+
+    def call(**kw):
+        args = dict(limit=None, offset=0, category=None, categories=None, q=None, ids_only=False, _=None)
+        args.update(kw)
+        return json.loads(asyncio.run(list_cvs(**args)).body)
+
+    page = call()
+    assert len(page["cvs"]) == CV_LIST_PAGE == 200 and page["total"] == 250       # one page, never the whole database
+    ids = call(ids_only=True)
+    assert "cvs" not in ids and len(ids["ids"]) == 250 and "e1@x.com" not in json.dumps(ids)
 
 
 def test_public_health_hides_internals():
@@ -105,18 +118,18 @@ def test_document_previews_require_login(test_client, path):
     assert test_client.get(path).status_code in (401, 403)
 
 
-def test_public_recent_jobs_do_not_expose_poster(monkeypatch):
+def test_public_recent_jobs_do_not_expose_poster():
     """The unauthenticated /jobs/recent list must not reveal who posted a job."""
-    from app.api.routers import careers
-
-    class FakeQdrant:
-        def list_job_postings_lightweight_page(self, **_):
-            return ([{"id": "j1", "structured_info": {"job_title": "Dev"}, "public_token": "t",
-                      "posted_by_user": "admin", "posted_by_role": "admin"}], 1)
-
-    monkeypatch.setattr(careers, "get_qdrant_utils", lambda: FakeQdrant())
     import asyncio
+
+    from app.api.routers import careers
+    from app.store import get_store
+
+    store = get_store()
+    jd = store.save_job_description({"id": "jd1", "filename": "dev.pdf", "raw_text": "Dev", "standardized": {"job_title": "Dev"}})
+    store.create_job_posting({"job_description_id": jd, "public_token": "tok1", "posted_by_user": "admin", "posted_by_role": "admin"})
     rows = asyncio.run(careers.get_recent_job_postings(limit=6))
+    assert len(rows) == 1 and rows[0].job_title == "Dev"
     dumped = rows[0].model_dump() if hasattr(rows[0], "model_dump") else rows[0].dict()
     assert dumped.get("posted_by_user") in (None, "")
     assert dumped.get("posted_by_role") in (None, "")

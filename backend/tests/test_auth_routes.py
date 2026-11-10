@@ -26,7 +26,7 @@ class TestLoginEndpoint:
                             role="admin", is_active=True))
         db_session.commit()
 
-        response = test_client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+        response = test_client.post("/api/auth/login", json={"email": "admin@example.com", "password": "admin123"})
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert "access_token" not in response.json()
@@ -46,7 +46,7 @@ class TestLoginEndpoint:
         
         response = test_client.post(
             "/api/auth/login",
-            json={"username": "user1", "password": "user123"}
+            json={"email": "user1@example.com", "password": "user123"}
         )
         
         assert response.status_code == status.HTTP_403_FORBIDDEN
@@ -56,7 +56,7 @@ class TestLoginEndpoint:
         """Test login with invalid credentials."""
         response = test_client.post(
             "/api/auth/login",
-            json={"username": "nonexistent", "password": "wrong"}
+            json={"email": "nobody@example.com", "password": "wrong"}
         )
         
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -75,7 +75,7 @@ class TestLoginEndpoint:
         
         response = test_client.post(
             "/api/auth/login",
-            json={"username": "inactive", "password": "pass123"}
+            json={"email": "inactive@example.com", "password": "pass123"}
         )
         
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -88,17 +88,17 @@ class TestVerifyPasswordEndpoint:
     
     def test_verify_password_admin_user_requires_captcha(self, test_client, db_session):
         """Admins get the CAPTCHA step (no email needed), and can complete the flow that issues the CAPTCHA."""
-        db_session.add(User(username="admin", password_hash=hash_password("admin123"), role="admin", is_active=True))
+        db_session.add(User(username="admin", password_hash=hash_password("admin123"), email="admin@example.com", role="admin", is_active=True))
         db_session.commit()
 
-        response = test_client.post("/api/auth/verify-password", json={"username": "admin", "password": "admin123"})
+        response = test_client.post("/api/auth/verify-password", json={"email": "admin@example.com", "password": "admin123"})
 
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert data["success"] is True and data["requires_otp"] is True and data["auth_mode"] == "captcha"
 
         # the CAPTCHA endpoint no longer turns admins away
-        challenge = test_client.post("/api/auth/captcha", json={"username": "admin", "password": "admin123"})
+        challenge = test_client.post("/api/auth/captcha", json={"email": "admin@example.com", "password": "admin123"})
         assert challenge.status_code == status.HTTP_200_OK and challenge.json()["captcha_id"]
 
     def test_verify_password_regular_user(self, test_client, db_session):
@@ -115,7 +115,7 @@ class TestVerifyPasswordEndpoint:
         
         response = test_client.post(
             "/api/auth/verify-password",
-            json={"username": "user1", "password": "user123"}
+            json={"email": "user1@example.com", "password": "user123"}
         )
         
         assert response.status_code == status.HTTP_200_OK
@@ -128,31 +128,36 @@ class TestVerifyPasswordEndpoint:
         """Test password verification with invalid credentials."""
         response = test_client.post(
             "/api/auth/verify-password",
-            json={"username": "nonexistent", "password": "wrong"}
+            json={"email": "nobody@example.com", "password": "wrong"}
         )
         
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
     
-    def test_verify_password_user_without_email(self, test_client, db_session):
-        """Test password verification for user without email (should fail for regular users)."""
-        user_no_email = User(
-            username="noemail",
-            password_hash=hash_password("pass123"),
-            email=None,  # No email
-            role="user",
-            is_active=True
-        )
-        db_session.add(user_no_email)
+    def test_verify_password_ignores_capitals_and_spaces_in_the_email(self, test_client, db_session):
+        db_session.add(User(username="user1", password_hash=hash_password("user123"), email="user1@example.com", role="user", is_active=True))
         db_session.commit()
-        
-        response = test_client.post(
-            "/api/auth/verify-password",
-            json={"username": "noemail", "password": "pass123"}
-        )
-        
-        # Should fail because user has no email for OTP
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "email" in response.json()["detail"].lower()
+
+        response = test_client.post("/api/auth/verify-password", json={"email": "  User1@Example.COM ", "password": "user123"})
+
+        assert response.status_code == status.HTTP_200_OK and response.json()["success"] is True
+
+    def test_the_username_is_not_a_way_to_sign_in(self, test_client, db_session):
+        """The username is only the name shown in the app: typing it where the email goes is a failed sign-in."""
+        db_session.add(User(username="user1", password_hash=hash_password("user123"), email="user1@example.com", role="user", is_active=True))
+        db_session.commit()
+
+        response = test_client.post("/api/auth/verify-password", json={"email": "user1", "password": "user123"})
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert test_client.post("/api/auth/verify-password", json={"username": "user1", "password": "user123"}).status_code == 422
+
+    def test_an_account_without_an_email_cannot_be_signed_in_to(self, test_client, db_session):
+        db_session.add(User(username="noemail", password_hash=hash_password("pass123"), email=None, role="user", is_active=True))
+        db_session.commit()
+
+        for typed in ("", "noemail", "None"):
+            response = test_client.post("/api/auth/verify-password", json={"email": typed, "password": "pass123"})
+            assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 @pytest.mark.integration
@@ -185,7 +190,7 @@ class TestSendOTPEndpoint:
             
             response = test_client.post(
                 "/api/auth/send-otp",
-                json={"username": "user1", "password": "user123"}
+                json={"email": "user1@example.com", "password": "user123"}
             )
         
         assert response.status_code == status.HTTP_200_OK
@@ -199,30 +204,10 @@ class TestSendOTPEndpoint:
         # send-otp requires password field
         response = test_client.post(
             "/api/auth/send-otp",
-            json={"username": "nonexistent", "password": "wrong"}
+            json={"email": "nobody@example.com", "password": "wrong"}
         )
         
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
-    
-    def test_send_otp_user_without_email(self, test_client, db_session):
-        """Test OTP sending for user without email."""
-        user_no_email = User(
-            username="noemail",
-            password_hash=hash_password("pass123"),
-            email=None,
-            role="user",
-            is_active=True
-        )
-        db_session.add(user_no_email)
-        db_session.commit()
-        
-        response = test_client.post(
-            "/api/auth/send-otp",
-            json={"username": "noemail", "password": "pass123"}
-        )
-        
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "email" in response.json()["detail"].lower()
 
 
 @pytest.mark.integration
@@ -248,7 +233,7 @@ class TestVerifyOTPEndpoint:
             
             response = test_client.post(
                 "/api/auth/verify-otp",
-                json={"username": "user1", "otp": "123456"}
+                json={"email": "user1@example.com", "otp": "123456"}
             )
         
         assert response.status_code == status.HTTP_200_OK
@@ -275,7 +260,7 @@ class TestVerifyOTPEndpoint:
             
             response = test_client.post(
                 "/api/auth/verify-otp",
-                json={"username": "user1", "otp": "wrong123"}
+                json={"email": "user1@example.com", "otp": "wrong123"}
             )
         
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -285,7 +270,7 @@ class TestVerifyOTPEndpoint:
         """An unknown user gets the same answer as a wrong code, so the endpoint cannot be used to list usernames."""
         response = test_client.post(
             "/api/auth/verify-otp",
-            json={"username": "nonexistent", "otp": "123456"}
+            json={"email": "nobody@example.com", "otp": "123456"}
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -321,7 +306,7 @@ class TestGetCurrentUserEndpoint:
         data = response.json()
         assert data["username"] == "user1"
         assert data["role"] == "user"
-        assert data["email"] == "user1@example.com"
+        assert "email" not in data and set(data) == {"id", "username", "role", "is_active"}      # the email is not sent back
     
     def test_get_current_user_unauthorized(self, test_client):
         """Test getting current user without token."""

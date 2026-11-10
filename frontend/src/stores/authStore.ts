@@ -15,12 +15,12 @@ interface AuthState {
 
 interface AuthActions {
   initFromStorage: () => Promise<void>;
-  login: (username: string, password: string) => Promise<{ success: boolean; role?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager'; error?: string }>;
-  verifyPassword: (username: string, password: string) => Promise<{ success: boolean; requires_otp?: boolean; auth_mode?: 'none' | 'otp' | 'captcha'; error?: string }>;
-  sendOTP: (username: string, password: string) => Promise<{ success: boolean; masked_email?: string; error?: string }>;
-  verifyOTP: (username: string, otp: string) => Promise<{ success: boolean; role?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager'; error?: string }>;
-  getCaptcha: (username: string, password: string) => Promise<{ success: boolean; captcha_id?: string; image?: string; error?: string }>;
-  verifyCaptcha: (username: string, captchaId: string, answer: string) => Promise<{ success: boolean; role?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager'; error?: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; role?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager'; error?: string }>;
+  verifyPassword: (email: string, password: string) => Promise<{ success: boolean; requires_otp?: boolean; auth_mode?: 'none' | 'otp' | 'captcha'; error?: string }>;
+  sendOTP: (email: string, password: string) => Promise<{ success: boolean; masked_email?: string; error?: string }>;
+  verifyOTP: (email: string, otp: string) => Promise<{ success: boolean; role?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager'; error?: string }>;
+  getCaptcha: (email: string, password: string) => Promise<{ success: boolean; captcha_id?: string; image?: string; error?: string }>;
+  verifyCaptcha: (email: string, captchaId: string, answer: string) => Promise<{ success: boolean; role?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager'; error?: string }>;
   logout: () => void;
   clearError: () => void;
 }
@@ -65,11 +65,11 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
-  login: async (username: string, password: string) => {
+  login: async (email: string, password: string) => {
     set({ loading: true, error: null });
     try {
       logger.info('Attempting login');
-      const response = await api.login(username, password);
+      const response = await api.login(email, password);
       
       // Store token
       setToken(response.access_token);
@@ -95,11 +95,11 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
-  verifyPassword: async (username: string, password: string) => {
+  verifyPassword: async (email: string, password: string) => {
     set({ loading: true, error: null });
     try {
       logger.info('Verifying password');
-      const response = await api.verifyPassword(username, password);
+      const response = await api.verifyPassword(email, password);
       
       if (response.success) {
         set({ loading: false, error: null });
@@ -116,11 +116,11 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
-  sendOTP: async (username: string, password: string) => {
+  sendOTP: async (email: string, password: string) => {
     set({ loading: true, error: null });
     try {
       logger.info('Sending OTP');
-      const response = await api.sendOTP(username, password);
+      const response = await api.sendOTP(email, password);
       
       if (response.success) {
         set({ loading: false, error: null });
@@ -137,11 +137,11 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
-  verifyOTP: async (username: string, otp: string) => {
+  verifyOTP: async (email: string, otp: string) => {
     set({ loading: true, error: null });
     try {
       logger.info('Verifying OTP');
-      const response = await api.verifyOTP(username, otp);
+      const response = await api.verifyOTP(email, otp);
       
       // Store token
       setToken(response.access_token);
@@ -167,10 +167,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
-  getCaptcha: async (username: string, password: string) => {
+  getCaptcha: async (email: string, password: string) => {
     set({ loading: true, error: null });
     try {
-      const response = await api.getCaptcha(username, password);
+      const response = await api.getCaptcha(email, password);
       set({ loading: false, error: null });
       return { success: true, captcha_id: response.captcha_id, image: response.image };
     } catch (error: any) {
@@ -181,10 +181,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
-  verifyCaptcha: async (username: string, captchaId: string, answer: string) => {
+  verifyCaptcha: async (email: string, captchaId: string, answer: string) => {
     set({ loading: true, error: null });
     try {
-      const response = await api.verifyCaptcha(username, captchaId, answer);
+      const response = await api.verifyCaptcha(email, captchaId, answer);
       setToken(response.access_token);
       const user = await api.me(response.access_token);
       set({ token: response.access_token, user, loading: false, error: null, authHydrated: true });

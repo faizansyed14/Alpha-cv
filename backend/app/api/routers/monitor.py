@@ -77,11 +77,9 @@ def _system() -> Dict[str, Any]:
 
 def _library() -> Dict[str, Any]:
     try:
-        from app.providers.vectorstore.qdrant import get_qdrant_utils
+        from app.store import get_store
 
-        client = get_qdrant_utils().client
-        counts = {name: int(client.count(name, exact=False).count) for name in ("cv_structured", "jd_structured")}
-        return {"cvs": counts["cv_structured"], "jds": counts["jd_structured"]}
+        return get_store().library_counts()
     except Exception:  # noqa: BLE001
         return {"cvs": None, "jds": None}
 

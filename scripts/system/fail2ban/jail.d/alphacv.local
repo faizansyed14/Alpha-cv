@@ -1,0 +1,50 @@
+# AlphaCV: ban abusive client addresses at the firewall, so they stop costing nginx and the application anything.
+# Installed by scripts/system/setup-fail2ban.sh. Reads the nginx access log written to /var/log/alphacv-nginx/access.log.
+#
+# Docker publishes ports 80/443 through the FORWARD path, so the ban rules go into the DOCKER-USER chain (INPUT would not see them).
+# ipset keeps thousands of banned addresses as one fast lookup instead of thousands of rules.
+
+[DEFAULT]
+# Never ban these (this machine and private networks). No office address is listed on purpose: the application is public
+# (candidates apply from anywhere), and the thresholds below are high enough that normal use never reaches them.
+# Add an address here only if one shared address (a campus, a company gateway) keeps getting banned; `unban IP` also lifts a ban.
+ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+banaction = iptables-ipset-proto6-allports
+banaction_allports = iptables-ipset-proto6-allports
+chain = DOCKER-USER
+blocktype = DROP
+backend = auto
+logpath = /var/log/alphacv-nginx/access.log
+
+# Wrong passwords: 15 refused sign-in answers in a minute (the application already locks an address after 30 failures)
+[alphacv-auth]
+enabled  = true
+filter   = alphacv-auth
+findtime = 60
+maxretry = 15
+bantime  = 1h
+
+# Scanners probing for files and admin pages: 40 misses in a minute
+[alphacv-scan]
+enabled  = true
+filter   = alphacv-scan
+findtime = 60
+maxretry = 40
+bantime  = 1h
+
+# Kept hammering the rate limit: 300 throttled requests in a minute (high on purpose: an office behind one address can brush the limit)
+[alphacv-flood]
+enabled  = true
+filter   = alphacv-flood
+findtime = 60
+maxretry = 300
+bantime  = 1h
+
+# Anyone banned three times in a day is banned for a week
+[recidive]
+enabled   = true
+logpath   = /var/log/fail2ban.log
+banaction = iptables-ipset-proto6-allports
+bantime   = 1w
+findtime  = 1d
+maxretry  = 3

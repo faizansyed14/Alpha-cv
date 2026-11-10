@@ -19,15 +19,9 @@ def test_a_match_that_names_no_cvs_scores_only_the_newest_ten_thousand(monkeypat
     asked = {}
 
     class Q:
-        def uploaded_at_ready(self):
-            return True
-
-        def list_cv_ids_newest_first(self, offset, limit, category=None):
+        def list_candidate_ids(self, offset, limit, categories=None):
             asked["limit"] = limit
             return [f"c{i}" for i in range(limit)]
-
-        def list_all_cvs(self):
-            raise AssertionError("must not read every CV in the database")
 
     ids = runner._candidate_ids(Q(), None)
     assert asked["limit"] == 10_000 and len(ids) == 10_000

@@ -7,7 +7,7 @@ nurses and marketers in one folder; it is now split by function. "Non IT" is sti
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
 IT_CATEGORIES: List[str] = [
     "Cloud & Infrastructure Engineering",

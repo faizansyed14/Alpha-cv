@@ -14,12 +14,11 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-from qdrant_client.http.models import FieldCondition, Filter, MatchValue
 from scipy.optimize import linear_sum_assignment
 
 from app.config.settings import settings
 from app.providers.embeddings.service import get_embedding_service
-from app.providers.vectorstore.qdrant import CV_PAYLOAD, get_qdrant_utils
+from app.store import get_store
 logger = logging.getLogger(__name__)
 
 # ----------------------------
@@ -173,7 +172,7 @@ class MatchingService:
     
     def __init__(self):
         self.embedding_service = get_embedding_service()
-        self.qdrant = get_qdrant_utils()
+        self.store = get_store()
 
         # In-process TTL cache for Qdrant docs/embeddings used during matching
         self._doc_cache = _TTLCache(
@@ -470,56 +469,11 @@ class MatchingService:
         return modifier
 
     # ---------- Public APIs ----------
-    def match_cv_against_jd_exact(self, cv_id: str, jd_id: str) -> dict:
-        """
-        EXACT vector matching (32 vectors) using {cv,jd}_embeddings.
-        Enhanced weights: 50% skills, 20% responsibilities, 20% title, 10% experience.
-        """
-        try:
-            logger.info(f"EXACT 32-vector matching: CV {cv_id} vs JD {jd_id}")
-            t0 = time.time()
-            cv_vecs = self._get_exact_vectors(cv_id, "cv")
-            jd_vecs = self._get_exact_vectors(jd_id, "jd")
-            if not cv_vecs or not jd_vecs:
-                raise Exception("Missing embeddings for CV or JD")
-            # 50% - Skills (average best alignment of each CV skill to JD skills)
-            skills_score = self._avg_best_similarity(cv_vecs["skill_vectors"], jd_vecs["skill_vectors"])
-            # 20% - Responsibilities
-            resp_score = self._avg_best_similarity(cv_vecs["responsibility_vectors"], jd_vecs["responsibility_vectors"])
-            # 10% - Experience (1 vs 1)
-            exp_score = self._cos_sim_list(cv_vecs["experience_vector"][0], jd_vecs["experience_vector"][0]) if (cv_vecs["experience_vector"] and jd_vecs["experience_vector"]) else 0.0
-            # 20% - Title (1 vs 1)
-            title_score = self._cos_sim_list(cv_vecs["job_title_vector"][0], jd_vecs["job_title_vector"][0]) if (cv_vecs["job_title_vector"] and jd_vecs["job_title_vector"]) else 0.0
-            final = skills_score * self.SCORING_WEIGHTS["skills"] + resp_score * self.SCORING_WEIGHTS["responsibilities"] + exp_score * self.SCORING_WEIGHTS["experience"] + title_score * self.SCORING_WEIGHTS["job_title"]
-            dt = time.time() - t0
-            return {
-                "cv_id": cv_id,
-                "jd_id": jd_id,
-                "final_score": final,
-                "final_score_percentage": final * 100.0,
-                "breakdown": {
-                    "skills_score": skills_score * self.SCORING_WEIGHTS["skills"],
-                    "responsibilities_score": resp_score * self.SCORING_WEIGHTS["responsibilities"],
-                    "experience_score": exp_score * self.SCORING_WEIGHTS["experience"],
-                    "job_title_score": title_score * self.SCORING_WEIGHTS["job_title"],
-                },
-                "processing_time": dt,
-                "vector_counts": {
-                    "cv_skill_vectors": len(cv_vecs.get("skill_vectors", [])),
-                    "cv_responsibility_vectors": len(cv_vecs.get("responsibility_vectors", [])),
-                    "jd_skill_vectors": len(jd_vecs.get("skill_vectors", [])),
-                    "jd_responsibility_vectors": len(jd_vecs.get("responsibility_vectors", [])),
-                },
-            }
-        except Exception as e:
-            logger.error(f"EXACT matching failed: {e}")
-            raise Exception(f"CV-JD exact matching failed: {e}")
-
     def match_cv_against_jd(self, cv_id: str, jd_id: str) -> MatchResult:
         """
         Explainable matching:
         - Pulls structured text from {cv,jd}_structured
-        - Uses vectors from {cv,jd}_embeddings if present; else generates & stores exact 32 vectors.
+        - Uses vectors from {cv,jd}_embeddings if present; else generates & stores exact 31 vectors.
         - Produces % scores for skills/responsibilities and combines with title/experience into weighted overall.
         """
         try:
@@ -533,7 +487,7 @@ class MatchingService:
                 raise Exception(f"CV not found: {cv_id}")
             if not jd_std:
                 raise Exception(f"JD not found: {jd_id}")
-            # ---- embeddings (prefer stored; otherwise generate + persist exact 32) ----
+            # ---- embeddings (prefer stored; otherwise generate + persist exact 31) ----
             cv_emb = self._get_or_generate_embeddings(cv_id, "cv", cv_std)
             jd_emb = self._get_or_generate_embeddings(jd_id, "jd", jd_std)
             # ---- similarities ----
@@ -640,11 +594,11 @@ class MatchingService:
     def match_by_ids(self, cv_id: str, jd_id: str, weights: dict = None,
                      cv_embeddings: Optional[dict] = None, cv_structured: Optional[dict] = None) -> MatchResult:
         """
-        Match CV against JD using stored embeddings from Qdrant (OPTIMIZED).
+        Match CV against JD using the stored embeddings (the vectors in Qdrant, the text from the database).
         This is the preferred method as it uses pre-computed embeddings.
 
         ``cv_embeddings`` / ``cv_structured`` may be passed in when the caller already fetched them in a batch (the
-        match runner does, per chunk); otherwise they are read from Qdrant here. The scoring is identical either way.
+        match runner does, per chunk); otherwise they are read here. The scoring is identical either way.
 
         Results are cached in Redis keyed by (cv_id, jd_id, weights). A CV/JD
         reprocess regenerates embeddings under the same id, so cached scores
@@ -673,34 +627,34 @@ class MatchingService:
             logger.debug(f"---------- MATCHING START (using stored embeddings) ---------- CV {cv_id} | JD {jd_id}")
 
             # Stored embeddings from Qdrant. The JD's are cached (every CV in a job needs them); a CV's are not: a job
-            # reads each CV once, and its 32 vectors are ~800 KB as Python lists, so caching them made a large match
+            # reads each CV once, and its 31 vectors are ~800 KB as Python lists, so caching them made a large match
             # grow by ~1 GB per 1,000 CVs. Repeat matches are served by the Redis result cache instead.
             if cv_embeddings is None:
-                cv_embeddings = self.qdrant.retrieve_embeddings(cv_id, "cv")
+                cv_embeddings = self.store.retrieve_embeddings(cv_id, "cv")
             jd_embeddings = self._cached_fetch(
-                "emb", jd_id, "jd", lambda i: self.qdrant.retrieve_embeddings(i, "jd")
+                "emb", jd_id, "jd", lambda i: self.store.retrieve_embeddings(i, "jd")
             )
 
             # Fallback: if embeddings not found, get structured data and generate them
             if not cv_embeddings:
                 logger.warning(f"CV embeddings not found for {cv_id}, falling back to generation")
-                cv_structured = self.qdrant.get_structured_cv(cv_id)
+                cv_structured = self.store.get_structured_cv(cv_id)
                 if not cv_structured:
                     raise ValueError(f"CV {cv_id} not found in database")
                 cv_embeddings = self._generate_embeddings_from_structured(cv_structured, "cv")
 
             if not jd_embeddings:
                 logger.warning(f"JD embeddings not found for {jd_id}, falling back to generation")
-                jd_structured = self.qdrant.get_structured_jd(jd_id)
+                jd_structured = self.store.get_structured_jd(jd_id)
                 if not jd_structured:
                     raise ValueError(f"JD {jd_id} not found in database")
                 jd_embeddings = self._generate_embeddings_from_structured(jd_structured, "jd")
 
             # Get structured data for text content (TTL-cached in-process)
             if cv_structured is None:
-                cv_structured = self._cached_fetch("structured", cv_id, "cv", self.qdrant.get_structured_cv)
+                cv_structured = self._cached_fetch("structured", cv_id, "cv", self.store.get_structured_cv)
             jd_structured = self._cached_fetch(
-                "structured", jd_id, "jd", self.qdrant.get_structured_jd
+                "structured", jd_id, "jd", self.store.get_structured_jd
             )
             
             if not cv_structured or not jd_structured:
@@ -1075,133 +1029,29 @@ class MatchingService:
 
     # ---------- Data access helpers ----------
     def _get_structured(self, doc_id: str, doc_type: str) -> Dict[str, Any]:
-        """
-        Fetch structured JSON from {doc_type}_structured by id.
-        """
+        """The CV or JD as the scoring code reads it (title, years, skills and responsibility sentences ...)."""
         try:
-            res = self.qdrant.client.retrieve(f"{doc_type}_structured", ids=[doc_id], with_payload=CV_PAYLOAD, with_vectors=False)
-            if not res:
-                return {}
-            payload = res[0].payload or {}
-            return payload.get("structured_info", payload)
+            got = self.store.get_structured_cv(doc_id) if doc_type == "cv" else self.store.get_structured_jd(doc_id)
+            return got or {}
         except Exception as e:
             logger.error(f"Structured fetch failed for {doc_type} {doc_id}: {e}")
-            return {}
-
-    def _get_exact_vectors(self, doc_id: str, doc_type: str) -> Dict[str, Any]:
-        """
-        Pull vectors from {doc_type}_embeddings using optimized single-point retrieval.
-        Returns dict with lists: skill_vectors[20], responsibility_vectors[10], experience_vector[1], job_title_vector[1].
-        """
-        try:
-            # Try optimized single-point retrieval first
-            try:
-                point = self.qdrant.client.retrieve(
-                    collection_name=f"{doc_type}_embeddings",
-                    ids=[doc_id],
-                    with_payload=True,
-                    with_vectors=False
-                )
-                
-                if point and len(point) > 0:
-                    payload = point[0].payload
-                    if payload and "vector_structure" in payload:
-                        logger.debug(f"OPTIMIZED: Retrieved 32 vectors as single point for {doc_id}")
-                        return payload["vector_structure"]
-            except Exception as e:
-                logger.debug(f"Optimized retrieval failed for {doc_id}, trying legacy method: {e}")
-
-            # Fallback to legacy method for backward compatibility
-            logger.debug(f"FALLBACK: Using legacy retrieval for {doc_id}")
-            points, _ = self.qdrant.client.scroll(
-                collection_name=f"{doc_type}_embeddings",
-                scroll_filter=Filter(must=[FieldCondition(key="document_id", match=MatchValue(value=doc_id))]),
-                limit=2000,
-                with_payload=True,
-                with_vectors=True
-            )
-            if not points:
-                return {}
-            out = {
-                "skill_vectors": [],
-                "responsibility_vectors": [],
-                "experience_vector": [],
-                "job_title_vector": []
-            }
-            # Pre-size arrays to keep ordering if indices exist
-            skill_temp: Dict[int, List[float]] = {}
-            resp_temp: Dict[int, List[float]] = {}
-            for p in points:
-                pl = p.payload or {}
-                vtype = pl.get("vector_type")
-                vidx = int(pl.get("vector_index", 0))
-                vec = p.vector if isinstance(p.vector, list) else p.vector  # already list
-                if vtype == "skill":
-                    skill_temp[vidx] = vec
-                elif vtype == "responsibility":
-                    resp_temp[vidx] = vec
-                elif vtype == "experience":
-                    out["experience_vector"] = [vec]
-                elif vtype == "job_title":
-                    out["job_title_vector"] = [vec]
-            # Order by index and clip to required counts
-            out["skill_vectors"] = [skill_temp[i] for i in sorted(skill_temp.keys())][:20]
-            out["responsibility_vectors"] = [resp_temp[i] for i in sorted(resp_temp.keys())][:10]
-            return out
-        except Exception as e:
-            logger.error(f"Exact vectors fetch failed for {doc_type} {doc_id}: {e}")
             return {}
 
     def _get_or_generate_embeddings(self, doc_id: str, doc_type: str, std: Dict[str, Any]) -> Dict[str, Any]:
         """
         Returns sentence->vector maps for skills/responsibilities + single vectors for title/experience.
-        Prefers stored {doc_type}_embeddings; if absent, generates and stores exactly 32 vectors.
+        Prefers the stored vectors (position n is the n-th skill / responsibility); if absent, generates and stores exactly 31.
         """
-        # Try to reconstruct maps from stored embeddings first
-        points, _ = self.qdrant.client.scroll(
-            collection_name=f"{doc_type}_embeddings",
-            scroll_filter=Filter(must=[FieldCondition(key="document_id", match=MatchValue(value=doc_id))]),
-            limit=2000,
-            with_payload=True,
-            with_vectors=True
-        )
-        if points:
-            skills_map: Dict[str, np.ndarray] = {}
-            resp_map: Dict[str, np.ndarray] = {}
-            title_vec: Optional[np.ndarray] = None
-            exp_vec: Optional[np.ndarray] = None
-            for p in points:
-                pl = p.payload or {}
-                vtype = pl.get("vector_type")
-                content = pl.get("content", "")
-                vec = np.array(p.vector) if isinstance(p.vector, list) else np.array(p.vector)
-                if vtype == "skill" and content:
-                    skills_map[content] = vec
-                elif vtype == "responsibility" and content:
-                    resp_map[content] = vec
-                elif vtype == "job_title":
-                    title_vec = vec
-                elif vtype == "experience":
-                    exp_vec = vec
-            return {"skills": skills_map, "responsibilities": resp_map, "title": title_vec, "experience": exp_vec}
+        stored = self.store.retrieve_embeddings(doc_id, doc_type)
+        if stored:
+            return self._convert_stored_embeddings_to_format(stored, std)
         # No stored vectors? Generate and persist exact 32
-        emb = self.embedding_service
-        doc_emb = emb.generate_document_embeddings(std)
-        self.qdrant.store_embeddings_exact(doc_id, doc_type, doc_emb)
-        # Build maps from generated content lists
-        skills_map = {}
-        for s, v in zip(doc_emb.get("skills", []), doc_emb.get("skill_vectors", [])):
-            # Skip empty skills to avoid false matches
-            if s and s.strip():
-                skills_map[s] = np.array(v)
-        resp_map = {}
-        for r, v in zip(doc_emb.get("responsibilities", []), doc_emb.get("responsibility_vectors", [])):
-            # Skip empty responsibilities to avoid false matches
-            if r and r.strip():
-                resp_map[r] = np.array(v)
+        doc_emb = self.embedding_service.generate_document_embeddings(std)
+        self.store.store_embeddings(doc_type, doc_id, doc_emb)
+        skills_map = {s_: np.array(v) for s_, v in zip(doc_emb.get("skills", []), doc_emb.get("skill_vectors", [])) if s_ and s_.strip()}
+        resp_map = {r: np.array(v) for r, v in zip(doc_emb.get("responsibilities", []), doc_emb.get("responsibility_vectors", [])) if r and r.strip()}
         title_vec = np.array(doc_emb["job_title_vector"][0]) if doc_emb.get("job_title_vector") else None
-        exp_vec = np.array(doc_emb["experience_vector"][0]) if doc_emb.get("experience_vector") else None
-        return {"skills": skills_map, "responsibilities": resp_map, "title": title_vec, "experience": exp_vec}
+        return {"skills": skills_map, "responsibilities": resp_map, "title": title_vec}
 
     def _convert_stored_embeddings_to_format(self, stored_embeddings: dict, structured_data: dict) -> dict:
         """
@@ -1239,21 +1089,12 @@ class MatchingService:
                 # Fallback for missing vectors
                 resp_map[resp] = np.zeros(settings.EMBEDDING_DIM)  # Default embedding dimension of the configured model
         
-        # Get title and experience vectors
+        # Get the title vector
         title_vec = None
         if stored_embeddings.get("job_title_vector") and len(stored_embeddings["job_title_vector"]) > 0:
             title_vec = np.array(stored_embeddings["job_title_vector"][0])
-        
-        exp_vec = None
-        if stored_embeddings.get("experience_vector") and len(stored_embeddings["experience_vector"]) > 0:
-            exp_vec = np.array(stored_embeddings["experience_vector"][0])
-        
-        return {
-            "skills": skills_map,
-            "responsibilities": resp_map,
-            "title": title_vec,
-            "experience": exp_vec
-        }
+
+        return {"skills": skills_map, "responsibilities": resp_map, "title": title_vec}
 
     def _generate_embeddings_from_structured(self, structured_data: dict, doc_type: str) -> dict:
         """
@@ -1272,70 +1113,14 @@ class MatchingService:
             resp_map[r] = np.array(v)
         
         title_vec = np.array(doc_emb["job_title_vector"][0]) if doc_emb.get("job_title_vector") else None
-        exp_vec = np.array(doc_emb["experience_vector"][0]) if doc_emb.get("experience_vector") else None
-        
-        return {
-            "skills": skills_map,
-            "responsibilities": resp_map,
-            "title": title_vec,
-            "experience": exp_vec
-        }
+
+        return {"skills": skills_map, "responsibilities": resp_map, "title": title_vec}
 
     def _list_all_cv_ids(self, category_filter: str = None) -> List[str]:
-        """
-        Returns all CV ids from cv_structured, optionally filtered by category.
-        """
-        ids: List[str] = []
-        offset = None
-        
-        # Build filter if category is specified
-        scroll_filter = None
-        if category_filter:
-            from qdrant_client.http.models import Filter, FieldCondition, MatchValue
-            scroll_filter = Filter(
-                must=[FieldCondition(key="structured_info.category", match=MatchValue(value=category_filter))]
-            )
-        
-        while True:
-            points, next_off = self.qdrant.client.scroll(
-                collection_name="cv_structured",
-                scroll_filter=scroll_filter,
-                limit=500,
-                offset=offset,
-                with_payload=CV_PAYLOAD,
-                with_vectors=False
-            )
-            for p in points:
-                pl = p.payload or {}
-                ids.append(pl.get("id") or pl.get("document_id") or str(p.id))
-            if not next_off:
-                break
-            offset = next_off
-        return ids
+        """Every CV id (newest first), optionally only those of one category."""
+        return self.store.list_candidate_ids(0, 1_000_000, [category_filter] if category_filter else None)
 
     # ---------- Similarity helpers ----------
-    def _avg_best_similarity(self, A: List[List[float]], B: List[List[float]]) -> float:
-        """
-        For each vector in A, take the best cosine similarity against all
-        vectors in B; then average. Vectorized on CPU.
-        """
-        if not A or not B:
-            return 0.0
-        try:
-            similarity_matrix = self.embedding_service.calculate_batch_cosine_similarity(
-                np.array(A), np.array(B)
-            )
-            result = float(np.mean(np.max(similarity_matrix, axis=1)))
-            self._cleanup_memory()
-            return result
-        except Exception as e:
-            self._cleanup_memory(force=True)
-            logger.warning(f"avg best similarity calculation failed: {str(e)}")
-            raise
-
-    def _cos_sim_list(self, v1: List[float], v2: List[float]) -> float:
-        """Cosine similarity between two vectors."""
-        return self.embedding_service.calculate_cosine_similarity(np.array(v1), np.array(v2))
 
     def _skills_similarity(self, jd_emb: Dict[str, np.ndarray], cv_emb: Dict[str, np.ndarray],
                            jd_skills: List[str], cv_skills: List[str]) -> Dict[str, Any]:

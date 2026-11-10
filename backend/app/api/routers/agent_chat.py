@@ -21,7 +21,7 @@ from app.agents.scope import MAX_MESSAGE_CHARS
 from app.api.deps import require_core_app
 from app.db.database import get_session
 from app.models.user import User
-from app.providers.vectorstore.qdrant import get_decompressed_content, get_qdrant_utils, resolve_candidate_full_name
+from app.store import get_store
 
 
 class ChatRequest(BaseModel):
@@ -51,28 +51,19 @@ def conversation_dto(c) -> Dict[str, Any]:
 
 def _library_jd(jd_id: str) -> Dict[str, str]:
     """The text and title of a job description that is already in the library (read only)."""
-    client = get_qdrant_utils().client
-    docs = client.retrieve("jd_documents", ids=[jd_id], with_payload=True, with_vectors=False)
-    if not docs:
+    doc = get_store().jd_document(jd_id)
+    if not doc:
         raise AgentError("That job description was not found.", 404)
-    text = get_decompressed_content(docs[0].payload or {}) or ""
-    structured = client.retrieve("jd_structured", ids=[jd_id], with_payload=True, with_vectors=False)
-    info = ((structured[0].payload or {}).get("structured_info") or {}) if structured else {}
-    return {"text": text, "title": str(info.get("job_title") or (docs[0].payload or {}).get("filename") or "")}
+    detail = get_store().jd_detail(jd_id) or {}
+    return {"text": doc["raw_text"] or "", "title": str(detail.get("job_title") or doc.get("filename") or "")}
 
 
 def _library_cv(cv_id: str) -> Dict[str, str]:
     """The text and the candidate's name of a CV that is already in the library (read only)."""
-    client = get_qdrant_utils().client
-    docs = client.retrieve("cv_documents", ids=[cv_id], with_payload=True, with_vectors=False)
-    if not docs:
+    doc = get_store().candidate_document(cv_id)
+    if not doc:
         raise AgentError("That CV was not found.", 404)
-    payload = docs[0].payload or {}
-    text = get_decompressed_content(payload) or ""
-    structured = client.retrieve("cv_structured", ids=[cv_id], with_payload=True, with_vectors=False)
-    spayload = (structured[0].payload or {}) if structured else {}
-    name = resolve_candidate_full_name(spayload or payload, (spayload.get("structured_info") or {}) if spayload else {})
-    return {"text": text, "title": str(name or payload.get("filename") or "")}
+    return {"text": doc["raw_text"] or "", "title": str(doc.get("full_name") or doc.get("filename") or "")}
 
 
 def build_agent_router(agent: AgentSpec) -> APIRouter:

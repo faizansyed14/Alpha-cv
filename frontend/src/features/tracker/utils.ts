@@ -41,36 +41,11 @@ export function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function isJoinedStatus(s?: string | null) {
-  const k = String(s || '').toLowerCase();
-  return k.includes('joined') && !k.includes('pending');
-}
-
 export function _norm(s?: string | null) {
   return String(s || '')
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-export function isBackoutStatus(s?: string | null) {
-  const k = _norm(s);
-  return (
-    k === 'backout' ||
-    k === 'backouts' ||
-    k === 'back out' ||
-    k === 'back-out' ||
-    k === 'backed out' ||
-    k.replace(/\s/g, '') === 'backedout' ||
-    k.replace(/[\s-]/g, '') === 'backout' ||
-    k.includes('backout') ||
-    k.includes('backed out')
-  );
-}
-
-export function isOfferReleasedStatus(s?: string | null) {
-  const k = _norm(s);
-  return k === 'offer released' || k.includes('offer released');
 }
 
 export function statusColor(s: string) {

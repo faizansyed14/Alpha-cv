@@ -11,7 +11,6 @@ LLM Service - Deterministic, Cached, Structured Extraction
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -123,12 +122,13 @@ ROLE FAMILY: Identify the role family such as (Engineering/Management/Sales/Fina
 CATEGORY: Classify the job's primary domain as EXACTLY one of (<<CATEGORIES>>). Copy the name exactly as written; never invent a new category. Choose by the job's main function: an accountant or auditor role is "Finance & Accounting", a sales role "Sales & Business Development", an HR role "Human Resources & Administration", and so on. Only IT roles get an IT category. Use "Other" only when nothing fits. Base this on the required skills, technologies, and job responsibilities.
 REQUIRED LANGUAGES: languages the job asks for, each as {"name": "English", "mandatory": true|false}. mandatory is true ONLY when the text makes it a requirement ("must", "required", "mandatory", "essential", "fluent X is a must", or it is listed under requirements/qualifications); false when it is a plus ("preferred", "advantage", "desirable", "nice to have"). Language names only (e.g. "Arabic", "English"), no levels. [] if the job states none; never infer a language from the country or company.
 REQUIRED CERTIFICATIONS: professional certifications or licences the job asks for, each as {"name": "...", "mandatory": true|false}, with the same rule for mandatory. Use the full official name with the acronym in parentheses, e.g. "Association of Chartered Certified Accountants (ACCA)". When the job accepts alternatives (e.g. "ACCA or CPA"), put them in ONE entry joined with " OR ". Do NOT list degrees or experience. [] if the job states none.
-BOOLEAN SEARCH STRING: Build ONE recruiter-style Boolean search string that recruiters can paste directly into Naukri Gulf (and similar job portals) to find matching candidates. Rules for it:
-  - Combine the most important job title(s) and core skills using uppercase boolean operators AND / OR and parentheses.
-  - Wrap multi-word phrases in double quotes, e.g. ("Project Manager" OR "Program Manager").
-  - Group synonyms/alternatives with OR inside parentheses, and join distinct mandatory requirement groups with AND.
-  - Keep it practical and not overly long (roughly 4-8 grouped terms); use the role's real skills/title, do not invent unrelated terms.
-  - Example: ("DevOps Engineer" OR "Site Reliability Engineer") AND (Kubernetes OR Docker) AND (Terraform OR Ansible) AND (AWS OR Azure)
+BOOLEAN SEARCH STRING: Build ONE SHORT recruiter Boolean search string for Naukri Gulf / job portals. Keep it SMALL and LOOSE so it returns more candidates (not a strict filter).
+  - Pattern: ("Job Title") AND (skill1 OR skill2 OR skill3 OR skill4 OR skill5) — title once, then up to 5 core skills joined with OR.
+  - Prefer OR over AND. Do NOT stack many AND groups (that makes the search too strict and long).
+  - Max ~1 title + 5 skills. No synonyms lists, no seniority words, no certifications, no location, no soft skills.
+  - Wrap multi-word phrases in double quotes. Use only real title/skills from the JD; do not invent terms.
+  - Example (good, short): ("DevOps Engineer") AND (Kubernetes OR Terraform OR Azure OR Docker OR Ansible)
+  - Example (bad, too long/strict): ("DevOps Engineer" OR "SRE") AND (Kubernetes OR Docker) AND (Terraform OR Ansible) AND (AWS OR Azure)
 General Rules:
 Output valid JSON only. No markdown, no comments, no trailing commas.
 Use English only.

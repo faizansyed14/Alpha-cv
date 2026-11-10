@@ -1,4 +1,5 @@
 'use client';
+import { sanitizeDom, sanitizeHtml } from '@/lib/sanitizeDom';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { X, Download, FileText, FileWarning, ZoomIn, ZoomOut } from '@/components/icons';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -87,10 +88,11 @@ function WordPreview({ blob, zoom, onFail }: { blob: Blob; zoom: number; onFail:
                 if (stage === 'docx-preview') {
                     const { renderAsync } = await import('docx-preview');
                     await renderAsync(blob, box);
+                    sanitizeDom(box, { allowStyle: true });       // the file is a stranger's: no scripts, no javascript: links
                 } else {
                     const mammoth = (await import('mammoth')).default;
                     const result = await mammoth.convertToHtml({ arrayBuffer: await blob.arrayBuffer() });
-                    if (!cancelled) box.innerHTML = `<div class="mammoth-fallback">${result.value}</div>`;
+                    if (!cancelled) box.innerHTML = `<div class="mammoth-fallback">${sanitizeHtml(result.value)}</div>`;
                 }
             } catch {
                 if (cancelled) return;

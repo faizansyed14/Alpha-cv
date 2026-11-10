@@ -11,9 +11,14 @@ import time
 
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("OPENAI_API_KEY", "stub-key-for-smoke-test")
-os.environ.setdefault("DATABASE_URL", "sqlite:///./smoke2_auth.db")
+os.environ["DATABASE_URL"] = "sqlite:///./smoke2_auth.db"      # always its own throwaway file, whatever the environment says: never a real database
+os.environ["ADMIN_EMAIL"] = "admin@harness.test"        # the harness admin signs in with this (see harness_login.ADMIN_EMAIL)
+os.environ["REDIS_HOST"], os.environ["REDIS_PORT"] = "127.0.0.1", "1"       # nothing listens there: the in-memory cache is used, never the real Redis
+os.environ["ENABLE_MATCH_QUEUE"] = "false"       # no worker here: the match runs inside the API process
+for _stale in ("smoke2_auth.db", "smoke2_tracker.db"):          # a fresh database every run (an earlier run left its users behind)
+    if os.path.exists(_stale):
+        os.remove(_stale)
 os.environ.setdefault("ENABLE_CANDIDATE_TRACKER", "true")
-os.environ.setdefault("ENABLE_APPLICATION_QUEUE", "false")  # inline/background apply path
 os.environ.setdefault("LOCAL_STORAGE_DIR", "/tmp/smoke2_uploads")
 os.environ.setdefault("CV_UPLOAD_DIR", "/tmp/smoke2_uploads/cv")
 os.environ.setdefault("OTP_DISABLE_EMAIL", "true")
@@ -52,19 +57,12 @@ import app.providers.embeddings.service as emb_mod
 emb_mod._shared_model = _FakeSentenceTransformer()
 emb_mod._model_device = "cpu"
 
-import app.providers.vectorstore.qdrant as qu
+import app.store as _store_mod
+from app.store import TalentStore
+from app.store.vectors import VectorStore
 
 _mem_client = QdrantClient(":memory:")
-
-
-def _patched_client(self):
-    if self._client is None:
-        self._client = _mem_client
-        self._ensure_collections_exist()
-    return self._client
-
-
-qu.QdrantUtils.client = property(_patched_client)
+_store_mod._store = TalentStore(vectors=VectorStore(client=_mem_client))   # the vectors live in memory; the tables in the sqlite file
 
 import app.providers.llm.service as llm_mod
 
@@ -97,6 +95,7 @@ llm_mod.LLMService.standardize_cv = lambda self, raw, filename="cv.txt": dict(CV
 
 from fastapi.testclient import TestClient
 from app.main import app
+from harness_login import ADMIN_EMAIL, login_with_captcha
 
 failures = []
 
@@ -110,7 +109,7 @@ def check(name, cond, extra=""):
 def main() -> int:
     with TestClient(app) as client:
         # --- login as admin ---
-        r = client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
+        r = login_with_captcha(client, ADMIN_EMAIL, "admin")
         check("admin login", r.status_code == 200, f"status={r.status_code}")
         admin = {"Authorization": f"Bearer {r.json()['access_token']}"}
 
@@ -122,18 +121,18 @@ def main() -> int:
         check("create manager user", r.status_code in (200, 201), f"status={r.status_code} {r.text[:120]}")
 
         # --- OTP login flow for the manager ---
-        r = client.post("/api/auth/verify-password", json={"username": "mgr1", "password": "Mgr1Pass!234"})
+        r = client.post("/api/auth/verify-password", json={"email": "mgr1@alphadata-test.org", "password": "Mgr1Pass!234"})
         check("manager verify-password", r.status_code == 200 and r.json().get("success"), f"status={r.status_code}")
         requires_otp = r.json().get("requires_otp", True)
         if requires_otp:
-            r = client.post("/api/auth/send-otp", json={"username": "mgr1", "password": "Mgr1Pass!234"})
+            r = client.post("/api/auth/send-otp", json={"email": "mgr1@alphadata-test.org", "password": "Mgr1Pass!234"})
             check("manager send-otp (email disabled, dev code returned)", r.status_code == 200, f"status={r.status_code} {r.text[:120]}")
             dev_otp = (r.json() or {}).get("dev_otp", "")
-            r = client.post("/api/auth/verify-otp", json={"username": "mgr1", "otp": dev_otp})
+            r = client.post("/api/auth/verify-otp", json={"email": "mgr1@alphadata-test.org", "otp": dev_otp})
             check("manager verify-otp", r.status_code == 200, f"status={r.status_code} {r.text[:160]}")
             mgr = {"Authorization": f"Bearer {r.json().get('access_token', '')}"}
         else:
-            r = client.post("/api/auth/login", json={"username": "mgr1", "password": "Mgr1Pass!234"})
+            r = client.post("/api/auth/login", json={"email": "mgr1@alphadata-test.org", "password": "Mgr1Pass!234"})
             mgr = {"Authorization": f"Bearer {r.json().get('access_token', '')}"}
 
         # =====================================================================

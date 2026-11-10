@@ -103,8 +103,8 @@ class _FakeQdrant:
     def __init__(self, scores):
         self.scores = scores
 
-    def list_all_cvs(self):
-        return [{"id": i} for i in self.scores]
+    def list_candidate_ids(self, offset, limit, categories=None):
+        return list(self.scores)[offset:offset + limit]
 
     def get_structured_cvs_batch(self, ids):
         return [{"id": i, "name": i} for i in ids]
@@ -119,7 +119,7 @@ def match(monkeypatch):
 
     def build(scores, *, min_score, top_n=50):
         sent = []
-        monkeypatch.setattr(runner, "get_qdrant_utils", lambda: _FakeQdrant(scores))
+        monkeypatch.setattr(runner, "get_store", lambda: _FakeQdrant(scores))
         monkeypatch.setattr(runner, "get_matching_service", lambda: object())
         monkeypatch.setattr(runner, "_resolve_jd", lambda *_a: {"id": "jd1", "job_title": "Dev"})
         monkeypatch.setattr(settings, "LLM_MATCH_MIN_SCORE", min_score)

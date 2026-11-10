@@ -6,12 +6,14 @@ queue. A submission differs only in *where it came from* (``source``) and in the
 candidate (``candidate``: nationality, current location, notice period, expected salary ...) and the job (``job``).
 Those facts are joined into the CV's single record:
 
-* the record is the CV; every source adds to it and none overwrites it with blanks;
-* candidate-supplied values (what the person typed on the job page) win over values the LLM read from the CV;
-* the same file arriving again (same SHA-256) is merged into the existing record instead of being stored twice, unless
-  that record already belongs to a different job, in which case it is a new application with its own record.
+* the record is the candidate row; every source adds to it and none overwrites it with blanks;
+* candidate-supplied values (what the person typed on the job page) win over values the LLM read from the CV, and land in the
+  same columns, so a CV from the upload page and one from the job page look exactly alike;
+* the same file arriving again (same SHA-256) is joined to the existing candidate instead of being stored twice; applying to a
+  job adds an application row for that candidate (one per job).
 
-``ingest_cv`` is blocking (parsing, OCR, LLM, embeddings, Qdrant); call it with ``asyncio.to_thread``.
+Everything about the person is written to PostgreSQL (app/store); only the 31 vectors go to Qdrant.
+``ingest_cv`` is blocking (parsing, OCR, LLM, embeddings, database); call it with ``asyncio.to_thread``.
 """
 
 from __future__ import annotations
@@ -24,22 +26,22 @@ import tempfile
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
+
+from sqlalchemy.exc import IntegrityError
 
 from app.config.settings import settings
 from app.ingestion.autofill import cached_standardized
 from app.ingestion.contact import resolve_name
 from app.ingestion.cv_parser import get_parsing_service
-from app.ingestion.search_index import index_cv
+from app.ingestion.profile_links import pick_github, pick_linkedin
 from app.monitoring.recorder import timed
-from app.providers.cache.memory import get_cache_service
 from app.providers.embeddings.service import get_embedding_service
 from app.providers.llm.service import get_llm_service
 from app.providers.storage import get_storage_service
-from app.providers.vectorstore.qdrant import get_qdrant_utils
+from app.store import get_store
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ SOURCE_JOB_PAGE = "website"          # the public job-page apply form
 
 # Facts a door can supply about the candidate. They are joined into the record; empty values never overwrite.
 CANDIDATE_FIELDS = ("name", "email", "phone", "linkedin_url", "github_url", "nationality", "location", "notice_period", "expected_salary",
-                    "years_of_experience", "cover_letter", "experience_warning")
+                    "years_of_experience")
 
 MIN_TEXT_CHARS = 50
 
@@ -109,10 +111,6 @@ class IngestResult:
     merged: bool = False                     # True when an existing record was updated instead of a new one created
     standardized: Dict[str, Any] = field(default_factory=dict)
     stats: Dict[str, Any] = field(default_factory=dict)
-
-
-def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
 
 
 def _present(value: Any) -> bool:
@@ -224,8 +222,9 @@ def _candidate_facts(sub: CVSubmission, standardized: Dict[str, Any], pii: Dict[
         "name": standardized.get("name"),
         "email": (pii.get("email") or [None])[0] or contact.get("email"),
         "phone": (pii.get("phone") or [None])[0] or contact.get("phone"),
-        "linkedin_url": (pii.get("linkedin") or [None])[0],
-        "github_url": (pii.get("github") or [None])[0],
+        "linkedin_url": pick_linkedin(pii.get("linkedin") or [], standardized.get("name"), (pii.get("email") or [None])[0] or contact.get("email")),
+        "github_url": pick_github(pii.get("github") or [], pii.get("github_repo_only") or [], standardized.get("name"),
+                                  (pii.get("email") or [None])[0] or contact.get("email")),
         "nationality": standardized.get("nationality"),
         "location": standardized.get("location") or standardized.get("current_location"),
         "notice_period": standardized.get("notice_period"),
@@ -237,74 +236,37 @@ def _candidate_facts(sub: CVSubmission, standardized: Dict[str, Any], pii: Dict[
     return facts
 
 
-def _build_record(sub: CVSubmission, standardized: Dict[str, Any], pii: Dict[str, Any], sha: Optional[str]) -> Dict[str, Any]:
+def _person(sub: CVSubmission, standardized: Dict[str, Any], pii: Dict[str, Any]) -> Dict[str, Any]:
+    """The columns of the candidate row: the joined facts plus what the CV itself says about the job."""
     facts = _candidate_facts(sub, standardized, pii)
-    # Flat copy of the standardised CV plus the joined facts: the shape the search, applications list and matching read.
-    record: Dict[str, Any] = {**standardized, **facts}
-    record.update({
-        "document_type": "cv",
-        "source": sub.source,
-        "sources": [sub.source],
-        "cv_filename": sub.filename,
-        "stored_source_at": _now_iso(),
-    })
-    if sha:
-        record["content_sha256"] = sha
-    if sub.job:
-        record.update({"is_job_application": True, "job_posting_id": sub.job.get("job_id"),
-                       **_clean({k: v for k, v in sub.job.items() if k in ("subject_id",)})})
-    return record
+    person = {k: v for k, v in facts.items() if k != "name"}
+    person["full_name"] = facts.get("name")
+    person["job_title"] = standardized.get("job_title")
+    person["category"] = standardized.get("category")
+    person["gender"] = standardized.get("gender")
+    return person
 
 
 def _application_data(sub: CVSubmission, facts: Dict[str, Any]) -> Dict[str, Any]:
-    """What link_application_to_job stores on the record: applicant facts + whatever the door knows about the job."""
-    data = {
-        "applicant_name": facts.get("name"), "applicant_email": facts.get("email"), "applicant_phone": facts.get("phone"),
-        **{k: facts.get(k) for k in ("cover_letter", "expected_salary", "years_of_experience", "location",
-                                      "notice_period", "nationality", "experience_warning")},
-        "source": sub.source,
-    }
-    data.update({k: v for k, v in (sub.job or {}).items() if k != "job_id"})
-    return data
+    """What the application row stores: which door it came through and when (the person's own details live on the candidate)."""
+    return {"source": sub.source,
+            "applied_at": datetime.utcnow()}
 
 
 # ---------------------------------------------------------------------------------------------------------------------
-# merging into an existing record
+# merging into an existing candidate
 # ---------------------------------------------------------------------------------------------------------------------
-def _find_mergeable(qdrant, sha: Optional[str], job_id: Optional[str]) -> Optional[Dict[str, Any]]:
-    """The same file already stored, unless it already belongs to a *different* job (then this is a new application)."""
-    if not sha:
-        return None
-    existing = qdrant.find_cv_by_content_hash(sha)
-    if not existing:
-        return None
-    existing_job = existing.get("job_id") or existing.get("job_posting_id")
-    if job_id and existing_job and existing_job != job_id:
-        return None
-    return existing
-
-
-def _merge_into(qdrant, existing: Dict[str, Any], sub: CVSubmission) -> IngestResult:
-    cv_id = existing.get("id")
+def _merge_into(store, existing: Dict[str, Any], sub: CVSubmission) -> IngestResult:
+    cv_id = existing["id"]
     facts = _clean(sub.candidate)
-    sources = list(dict.fromkeys([*(existing.get("sources") or [existing.get("source")]), sub.source]))
-    sources = [s for s in sources if s]
-    update = {**facts, "sources": sources}
-    # Keep the record's structured_info in step so searches that read either place see the joined facts.
-    info = dict(existing.get("structured_info") or {})
-    info.update(facts)
-    info["sources"] = sources
-    update["structured_info"] = info
-    qdrant.client.set_payload(collection_name="cv_structured", payload=update, points=[cv_id])
+    person = {k: v for k, v in facts.items() if k != "name"}
+    if facts.get("name"):
+        person["full_name"] = facts["name"]
+    store.merge_candidate_facts(cv_id, person)
     if sub.job and sub.job.get("job_id"):
-        merged_facts = {**_clean(sub.hints), **{k: existing.get(k) for k in CANDIDATE_FIELDS if _present(existing.get(k))}, **facts}
-        qdrant.link_application_to_job(cv_id, sub.job["job_id"], _application_data(sub, merged_facts),
-                                       sub.filename, _now_iso())
-    index_cv(qdrant, cv_id)   # the joined facts (location, nationality, experience) are searchable
-    get_cache_service().delete("cv_list", namespace="cv_data")
-    logger.info(f"CV {cv_id} already stored; joined data from {sub.source} into the existing record")
-    return IngestResult(cv_id=cv_id, merged=True, standardized=info,
-                        stats={"merged_fields": sorted(facts), "sources": sources})
+        store.link_application(sub.job["job_id"], cv_id, _application_data(sub, facts))
+    logger.info(f"CV {cv_id} already stored; joined data from {sub.source} into the existing candidate")
+    return IngestResult(cv_id=cv_id, merged=True, standardized={}, stats={"merged_fields": sorted(person), "source": sub.source})
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -333,7 +295,7 @@ def ingest_cv(sub: CVSubmission) -> IngestResult:
 
 
 def _ingest(sub: CVSubmission, step: Progress) -> IngestResult:
-    qdrant = get_qdrant_utils()
+    store = get_store()
     step(5, "Reading the document")
     parsed = _read(sub)
     text = parsed.get("clean_text") or ""
@@ -344,20 +306,22 @@ def _ingest(sub: CVSubmission, step: Progress) -> IngestResult:
     sha = sub.content_sha256
     if not sha and sub.file_path and os.path.exists(sub.file_path):
         sha = sha256_of_file(sub.file_path)
+    if not sha:                                                   # pasted text, or a file we cannot reopen: the text identifies it
+        sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
     job_id = (sub.job or {}).get("job_id")
 
     # One application per person per job, whichever door it arrives by. The applicant's e-mail is what the door
     # supplied, or the one read from the CV when it supplied none.
     applicants = [normalize_email(e) for e in (sub.candidate.get("email"), (pii.get("email") or [None])[0], sub.hints.get("email"))]
     for applicant in dict.fromkeys(a for a in applicants if a):
-        prior = qdrant.check_existing_application(applicant, job_id) if job_id else None
+        prior = store.check_existing_application(applicant, job_id) if job_id else None
         if prior and prior.get("id") != sub.cv_id:
             raise DuplicateApplication(prior["id"], prior.get("application_date"))
 
-    existing = _find_mergeable(qdrant, sha, job_id)
+    existing = store.find_candidate_by_hash(sha)
     if existing:
         step(95, "Already in the database - joining the new details")
-        return _merge_into(qdrant, existing, sub)
+        return _merge_into(store, existing, sub)
 
     step(25, "Standardising with AI")
     # The public form's autofill may already have read this very CV a moment ago; reuse that answer, same prompt.
@@ -376,10 +340,13 @@ def _ingest(sub: CVSubmission, step: Progress) -> IngestResult:
         contact["email"] = standardized["email"] = pii["email"][0]
     if pii.get("phone"):
         contact["phone"] = standardized["phone"] = pii["phone"][0]
-    if pii.get("linkedin"):
-        contact["linkedin"] = standardized["linkedin_url"] = pii["linkedin"][0]
-    if pii.get("github"):
-        contact["github"] = standardized["github_url"] = pii["github"][0]
+    own_email = (pii.get("email") or [None])[0] or contact.get("email")
+    own_linkedin = pick_linkedin(pii.get("linkedin") or [], name, own_email)
+    own_github = pick_github(pii.get("github") or [], pii.get("github_repo_only") or [], name, own_email)
+    if own_linkedin:
+        contact["linkedin"] = standardized["linkedin_url"] = own_linkedin
+    if own_github:
+        contact["github"] = standardized["github_url"] = own_github
 
     step(50, "Generating embeddings")
     with _embed_slots:
@@ -388,26 +355,42 @@ def _ingest(sub: CVSubmission, step: Progress) -> IngestResult:
     step(70, "Storing")
     ext = os.path.splitext(sub.filename)[1].lower() or ".txt"
     persisted = sub.persisted_path or _persist_original(sub, text, ext)
-    record = _build_record(sub, standardized, pii, sha)
+    meta = standardized.get("processing_metadata") or {}
     facts = _candidate_facts(sub, standardized, pii)
-
-    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="ingest-store") as pool:
-        futures = [
-            pool.submit(qdrant.store_document, sub.cv_id, "cv", sub.filename, ext.lstrip("."), text, _now_iso(),
-                        persisted, sub.mime_type or mimetypes.guess_type(sub.filename)[0] or "application/octet-stream"),
-            pool.submit(qdrant.store_structured_data, sub.cv_id, "cv", record),
-            pool.submit(qdrant.store_embeddings_exact, sub.cv_id, "cv", embeddings),
-        ]
-        if not all(f.result() for f in futures):
-            raise IngestError("The CV could not be saved to the database", 500)
+    try:
+        store.save_candidate({
+            "id": sub.cv_id, "content_sha256": sha, "filename": sub.filename, "file_format": ext.lstrip("."),
+            "mime_type": sub.mime_type or mimetypes.guess_type(sub.filename)[0] or "application/octet-stream",
+            "file_path": persisted, "source": sub.source, "raw_text": text, "facts": _person(sub, standardized, pii),
+            "skills": [x for x in standardized.get("skills_sentences", standardized.get("skills", [])) if x],
+            "responsibilities": [x for x in standardized.get("responsibility_sentences", standardized.get("responsibilities", [])) if x],
+            "keywords": standardized.get("keywords") or [], "languages": standardized.get("languages") or [],
+            "certifications": standardized.get("certifications") or [],
+            "llm_model": meta.get("model_used"),
+            "extraction_ms": int(float(meta["processing_time"]) * 1000) if meta.get("processing_time") is not None else None,
+        })
+        if not store.store_embeddings("cv", sub.cv_id, embeddings):
+            raise IngestError("The CV's embeddings could not be saved", 500)
+    except IngestError:
+        store.delete_candidate(sub.cv_id)                         # never leave a candidate without its vectors
+        raise
+    except IntegrityError as exc:
+        # the same file was stored a moment ago by another worker (the file hash is unique): join this submission into that candidate
+        store.delete_candidate(sub.cv_id)
+        winner = store.find_candidate_by_hash(sha)
+        if not winner:
+            raise IngestError(f"The CV could not be saved to the database: {exc}", 500) from exc
+        logger.info(f"CV {sub.cv_id} was stored at the same moment by another worker; joining the details into {winner['id']}")
+        return _merge_into(store, winner, sub)
+    except Exception as exc:  # noqa: BLE001
+        store.delete_candidate(sub.cv_id)
+        raise IngestError(f"The CV could not be saved to the database: {exc}", 500) from exc
 
     if job_id:
         step(90, "Linking to the job")
-        if not qdrant.link_application_to_job(sub.cv_id, job_id, _application_data(sub, facts), sub.filename, _now_iso()):
+        if not store.link_application(job_id, sub.cv_id, _application_data(sub, facts)):
             logger.warning(f"CV {sub.cv_id} stored but could not be linked to job {job_id}")
 
-    index_cv(qdrant, sub.cv_id, text)   # after linking, so the advanced search sees the final record
-    get_cache_service().delete("cv_list", namespace="cv_data")
     step(100, "Done")
     return IngestResult(
         cv_id=sub.cv_id, standardized=standardized,
@@ -416,7 +399,7 @@ def _ingest(sub: CVSubmission, step: Progress) -> IngestResult:
             "skills_count": len(standardized.get("skills_sentences", standardized.get("skills", []))),
             "responsibilities_count": len(standardized.get("responsibility_sentences",
                                                            standardized.get("responsibilities", []))),
-            "embeddings_generated": 32,
+            "embeddings_generated": 31,
             "pii_extracted": {"emails": len(pii.get("email", [])), "phones": len(pii.get("phone", [])),
                               "linkedin": len(pii.get("linkedin", [])), "github": len(pii.get("github", []))},
         })

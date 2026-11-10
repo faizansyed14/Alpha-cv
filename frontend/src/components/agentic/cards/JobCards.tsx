@@ -6,8 +6,8 @@ import type { AgenticCard } from '@/lib/types';
 import { Action, CardShell, Pill, type Send } from './ui';
 
 const FIELDS: Array<[string, string]> = [
-  ['job_title', 'Job title'], ['job_location', 'Location'], ['company_name', 'Company'], ['job_summary', 'Summary'],
-  ['key_responsibilities', 'Responsibilities'], ['qualifications', 'Qualifications'], ['additional_info', 'Additional information'],
+  ['job_title', 'Job title'], ['job_location', 'Location'], ['job_summary', 'Summary'],
+  ['key_responsibilities', 'Responsibilities'], ['qualifications', 'Qualifications'],
 ];
 
 /**

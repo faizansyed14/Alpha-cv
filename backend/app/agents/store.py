@@ -2,7 +2,6 @@
 database refuses both): the history is a record."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func
@@ -46,10 +45,6 @@ def hide_conversation(session: Session, conversation_id: str, username: str) -> 
         session.add(AgentConversationHidden(conversation_id=conversation_id, username=username))
         session.commit()
     return True
-
-
-def message_count(session: Session, conversation_id: str) -> int:
-    return int(session.exec(select(func.count()).select_from(AgentMessage).where(AgentMessage.conversation_id == conversation_id)).one())
 
 
 def append_message(session: Session, conversation_id: str, role: str, content: str, **fields: Any) -> AgentMessage:

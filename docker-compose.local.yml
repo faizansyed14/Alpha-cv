@@ -9,9 +9,9 @@
 # Configuration comes from ./.env.local (scripts/start.sh creates it from .env.local.example on first run).
 # Start:  ./scripts/start.sh local          Stop: ./scripts/stop.sh local
 # Reset:  ./scripts/clean.sh local          (removes this stack's containers, volumes and images)
-# Resources: sized like docker-compose.prod.yml but smaller so the whole stack fits in 8 GB of Docker memory.
-#   memory limits add up to ~6.3 GB (a ceiling per service, not a reservation); idle use is about 1.5 GB.
-#   Raise them (and the match worker's MATCH_THREAD_POOL_WORKERS) if your Docker VM has more memory.
+# Resources (measured idle: about 2.1 GB of RAM and almost no CPU; the limits below are ceilings, not reservations):
+#   memory limits add up to ~7.6 GB, so the whole stack fits in an 8 GB Docker VM even if every service peaks at once.
+#   Raise them (and MATCH_WORKER_REPLICAS) if your Docker VM has more memory; docker-compose.prod.yml has the production sizes.
 # Ports (same as dev, so run one of the two at a time):
 #   3000 frontend, 8000 backend, 80 nginx, 5434 postgres, 6335 qdrant, 6380 redis
 # =============================================================================
@@ -33,6 +33,8 @@ x-local-storage: &local-storage
   REDIS_HOST: redis-local
   REDIS_PORT: "6379"
   EMBEDDING_SERVICE_URL: http://model-server-local:8080
+  # shared secret between the backend processes and the model server (empty = off; set MODEL_SERVER_TOKEN in the env file to turn it on)
+  EMBEDDING_SERVICE_TOKEN: ${MODEL_SERVER_TOKEN:-}
 
 services:
   frontend-local:
@@ -75,6 +77,8 @@ services:
       - .env.local
     environment:
       <<: *local-storage
+      # 2 API processes, like production (the API only enqueues the heavy work, so more would just share the same cores)
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
     volumes:
       - ./backend:/app
       - uploads-local-data:/data/uploads
@@ -162,7 +166,7 @@ services:
     networks:
       - local-network
     deploy:
-      replicas: ${MATCH_WORKER_REPLICAS:-3}
+      replicas: ${MATCH_WORKER_REPLICAS:-2}
       resources:
         limits:
           memory: 1024M
@@ -185,7 +189,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1280M
+          memory: 1536M
           cpus: '1.5'
         reservations:
           memory: 384M
@@ -193,12 +197,25 @@ services:
 
   postgres-local:
     image: postgres:15
+    # Memory settings: the defaults below are PostgreSQL's own (small, fine for a few thousand CVs). With more data raise them in
+    # .env.local, together with POSTGRES_MEMORY_LIMIT (shared_buffers + work_mem x connections must fit inside it). A common rule:
+    # shared_buffers = 25% of the memory you give the container, effective_cache_size = 50-75%.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-128MB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-4GB}
+      - -c
+      - work_mem=${POSTGRES_WORK_MEM:-4MB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-64MB}
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB=${POSTGRES_DB:-cv_analyzer_dev}
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432"
     volumes:
       - postgres-local-data:/var/lib/postgresql/data
     networks:
@@ -206,7 +223,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 384M
+          memory: ${POSTGRES_MEMORY_LIMIT:-384M}
           cpus: '1.0'
         reservations:
           memory: 128M
@@ -220,7 +237,7 @@ services:
   qdrant-local:
     image: qdrant/qdrant:v1.12.4
     ports:
-      - "6335:6333"
+      - "127.0.0.1:6335:6333"
     volumes:
       - qdrant-local-data:/qdrant/storage
     networks:
@@ -238,7 +255,7 @@ services:
   redis-local:
     image: redis:7-alpine
     ports:
-      - "6380:6379"
+      - "127.0.0.1:6380:6379"
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy volatile-lru
     volumes:
       - redis-local-data:/data

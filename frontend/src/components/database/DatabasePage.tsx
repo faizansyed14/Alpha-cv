@@ -1,36 +1,32 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import {
   Users,
   FileText,
   RefreshCw,
   Search,
-  Target,
-  Eye,
   Loader2,
-  Trash2,
   X,
   Code2,
-  FileText as FileTextIcon,
   GripVertical,
   Upload,
   Copy,
   Check,
   Code,
   SlidersHorizontal,
-  Megaphone,
 } from '@/components/icons';
 import { useRouter } from 'next/navigation';
 import { canUseAgents, linkedinHref } from '@/lib/agentLinks';
 import { useAppStore } from '@/stores/appStore';
+import { useSavedCvsStore } from '@/stores/savedCvsStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useWorkspaceNav } from '@/hooks/useWorkspaceNav';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table';
 import { PageHeader, EmptyState } from '@/components/ui/page';
+import { InfiniteScrollSentinel } from '@/components/ui/infinite-scroll';
 import { Segmented } from '@/components/ui/segmented';
 import { Avatar } from '@/components/ui/avatar';
 import { CVAdvancedSearchParams, CVListItem, JDListItem, CVSearchResult } from '@/lib/types';
@@ -38,7 +34,9 @@ import { CandidatesListSkeleton, JobsTableSkeleton } from '@/components/skeleton
 import AdvancedSearchModal from '@/components/database/AdvancedSearchModal';
 import ContactActions from '@/components/common/ContactActions';
 import CandidateCard from '@/components/database/CandidateCard';
+import JobCard from '@/components/database/JobCard';
 import FilterSidebar, { type FilterGroupDef } from '@/components/common/FilterSidebar';
+import { restoreScroll, saveScroll, SCROLL_KEYS } from '@/lib/scrollRestore';
 
 const FilePreviewModal = dynamic(
   () => import('@/components/ui/file-preview-modal').then((mod) => mod.FilePreviewModal),
@@ -48,7 +46,7 @@ const FilePreviewModal = dynamic(
 const ITEMS_PER_PAGE = 200;   // same as the API page size (200 per call)
 const CATEGORY_ALL = '__all__';
 
-function getCVDisplay(cv: CVListItem) {
+export function getCVDisplay(cv: CVListItem) {
   const contactEmail =
     cv.email ||
     (cv as any).job_application?.applicant_email ||
@@ -97,12 +95,19 @@ function getCVDisplay(cv: CVListItem) {
 }
 
 function getJDDisplay(jd: JDListItem) {
+  const skills = (jd.skills && jd.skills.length > 0) ? jd.skills.filter(Boolean).slice(0, 20) : [];
+  const skillKeywords = (jd.skill_keywords && jd.skill_keywords.length > 0)
+    ? jd.skill_keywords.filter(Boolean).slice(0, 20)
+    : skills.slice(0, 12);
   return {
     title: jd.job_title || jd.filename || 'Untitled',
-    skillsCount: jd.skills_count ?? 0,
-    skillKeywords: (jd.skill_keywords && jd.skill_keywords.length > 0)
-      ? jd.skill_keywords
-      : (jd.skills || []).slice(0, 12),
+    filename: jd.filename || '',
+    years: jd.years_of_experience ?? '-',
+    skillsCount: jd.skills_count ?? skills.length,
+    skills,
+    skillKeywords,
+    responsibilitiesCount: jd.responsibilities_count ?? 0,
+    uploadDate: formatDate(jd.upload_date),
   };
 }
 
@@ -148,6 +153,28 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     loadingStates, databaseActiveTab,
   } = useAppStore();
   const { user } = useAuthStore();
+  const savedIds = useSavedCvsStore((st) => st.ids);
+  const saveCvs = useSavedCvsStore((st) => st.save);
+  const unsaveCvs = useSavedCvsStore((st) => st.unsave);
+  const canSave = user?.role !== 'account_manager';
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+
+  const toggleSaved = (id: string) => {
+    const wasSaved = savedIds.includes(id);
+    void (wasSaved ? unsaveCvs([id]) : saveCvs([id])).catch(() => setSaveNotice('Could not update your saved CVs. Please try again.'));
+  };
+
+  const saveSelected = async () => {
+    const before = savedIds.length;
+    try {
+      await saveCvs(selectedCVs);
+      const added = useSavedCvsStore.getState().ids.length - before;
+      setSaveNotice(added > 0 ? `${added.toLocaleString()} CV${added === 1 ? '' : 's'} added to Saved CVs` : 'Those CVs are already in Saved CVs');
+    } catch {
+      setSaveNotice('Could not save the selected CVs. Please try again.');
+    }
+    setTimeout(() => setSaveNotice(null), 4000);
+  };
 
   const [search, setSearch] = useState('');
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
@@ -156,7 +183,6 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   const [categories, setCategories] = useState<Record<string, number>>({});
   const [folderCVs, setFolderCVs] = useState<Record<string, { items: CVListItem[]; total: number | null }>>({});
   const [loadingFolderCVs, setLoadingFolderCVs] = useState<Record<string, boolean>>({});
-  const [page, setPage] = useState(1);
   // Document preview, same approach as the Matching page (always render the
   // original file as a PDF via a blob URL; the modal sniffs the bytes so DOCX
   // and text also work).
@@ -217,11 +243,14 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
   };
-  const [serverSearchCVs, setServerSearchCVs] = useState<{ items: CVListItem[]; total: number | null }>({
+  const [serverSearchCVs, setServerSearchCVs] = useState<{ items: CVListItem[]; total: number | null; more: boolean }>({
     items: [],
     total: null,
+    more: false,
   });
   const [serverSearching, setServerSearching] = useState(false);
+  const [loadingMoreSearch, setLoadingMoreSearch] = useState(false);
+  const [loadMoreFailed, setLoadMoreFailed] = useState(false);
   /** Left filter rail: multi-select facets */
   const [sidebarFilters, setSidebarFilters] = useState<Record<string, string[]>>({
     category: [],
@@ -234,6 +263,16 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   const [languageFacets, setLanguageFacets] = useState<{ value: string; count: number }[]>([]);
   const [geoFilterCVs, setGeoFilterCVs] = useState<CVListItem[] | null>(null);
   const [geoFilterLoading, setGeoFilterLoading] = useState(false);
+  /** Paging of the server-filtered lists (checkbox filters, advanced search): the next page is fetched when the reader gets to the end. */
+  const [geoCursor, setGeoCursor] = useState<string | null>(null);
+  const [geoTotal, setGeoTotal] = useState<{ count: number; estimate: boolean } | null>(null);
+  const [advancedCursor, setAdvancedCursor] = useState<string | null>(null);
+  const [loadingMoreFiltered, setLoadingMoreFiltered] = useState(false);
+  const geoQueryRef = useRef<CVAdvancedSearchParams | null>(null);
+  /** Job descriptions found by the server for the search box (every JD, not only the ones loaded so far). */
+  const [serverJDs, setServerJDs] = useState<JDListItem[] | null>(null);
+  const [jdSearchMore, setJdSearchMore] = useState(false);
+  const [loadingMoreJDs, setLoadingMoreJDs] = useState(false);
   /** Advanced / boolean search results shown in place of the normal CV list. */
   const [advancedResults, setAdvancedResults] = useState<CVSearchResult[] | null>(null);
   const [advancedSearching, setAdvancedSearching] = useState(false);
@@ -405,46 +444,66 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     }
   }, [sidebarFilters.category]);
 
-  /** Server-side filter when location / nationality / language checkboxes are used. */
+  /** Server-side filter: the checkboxes (location, nationality, language, two or more categories) and the notes filter. */
+  const notesParam: 'with' | 'without' | undefined = notesFilter === 'with_notes' ? 'with' : notesFilter === 'without_notes' ? 'without' : undefined;
   useEffect(() => {
     const locations = sidebarFilters.location || [];
     const nationalities = sidebarFilters.nationality || [];
     const languages = sidebarFilters.language || [];
-    if (locations.length === 0 && nationalities.length === 0 && languages.length === 0) {
+    const cats = sidebarFilters.category || [];
+    // with an advanced search on screen the notes filter is part of that search instead (see below)
+    const active = locations.length > 0 || nationalities.length > 0 || languages.length > 0 || cats.length >= 2 || (!!notesParam && !advancedQuery);
+    if (!active) {
+      geoQueryRef.current = null;
       setGeoFilterCVs(null);
+      setGeoCursor(null);
+      setGeoTotal(null);
       setGeoFilterLoading(false);
       return;
     }
+    const query: CVAdvancedSearchParams = {
+      // the filter lists countries; search the locations stored behind the ticked ones
+      locations: locations.length ? locations.flatMap((c) => locationFacets.find((f) => f.value === c)?.members || [c]) : undefined,
+      nationalities: nationalities.length ? nationalities : undefined,
+      languages: languages.length ? languages : undefined,
+      categories: cats.length ? cats : undefined,
+      notes: advancedQuery ? undefined : notesParam,
+      limit: 100,
+    };
+    geoQueryRef.current = query;
     let cancelled = false;
     setGeoFilterLoading(true);
     (async () => {
       try {
-        const collected: CVListItem[] = [];
-        let cursor: string | null = null;
-        let pages = 0;
-        do {
-          const res = await api.searchCVsAdvanced({
-            // the filter lists countries; search the locations stored behind the ticked ones
-            locations: locations.length ? locations.flatMap((c) => locationFacets.find((f) => f.value === c)?.members || [c]) : undefined,
-            nationalities: nationalities.length ? nationalities : undefined,
-            languages: languages.length ? languages : undefined,
-            limit: 100,
-            cursor,
-          });
-          collected.push(...(res.results || []));
-          cursor = res.next_cursor;
-          pages += 1;
-        } while (cursor && pages < 10 && !cancelled);
-        if (!cancelled) setGeoFilterCVs(collected);
+        const res = await api.searchCVsAdvanced({ ...query, cursor: null });
+        if (cancelled) return;
+        setGeoFilterCVs(res.results || []);
+        setGeoCursor(res.next_cursor);
+        setGeoTotal(res.total != null ? { count: res.total, estimate: !!res.total_is_estimate } : null);
       } catch {
-        if (!cancelled) setGeoFilterCVs([]);
+        if (cancelled) return;
+        setGeoFilterCVs([]);
+        setGeoCursor(null);
+        setGeoTotal({ count: 0, estimate: false });
       } finally {
         if (!cancelled) setGeoFilterLoading(false);
       }
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarFilters.location, sidebarFilters.nationality, sidebarFilters.language]);
+  }, [sidebarFilters.location, sidebarFilters.nationality, sidebarFilters.language, sidebarFilters.category, notesParam, advancedQuery === null]);
+
+  // With an advanced search on screen, a change of the notes filter runs that same search again with the filter added (the server applies it).
+  const skipFirstNotes = useRef(true);
+  useEffect(() => {
+    if (skipFirstNotes.current) {
+      skipFirstNotes.current = false;
+      return;
+    }
+    if (!advancedQuery || advancedQuery.notes === notesParam) return;
+    void runAdvancedSearch({ ...advancedQuery, notes: notesParam });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notesParam]);
 
   const loadFolderCVPage = async (category: string, offset: number) => {
     setLoadingFolderCVs((s) => ({ ...s, [category]: true }));
@@ -472,10 +531,10 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
 
   const isServerSearchMode = !!search.trim();
 
-  // Server-side search across ALL CVs (avoids missing results due to local 200/50-item pagination)
+  // Server-side search across ALL CVs: the first page here, the next pages as the reader scrolls (loadMoreRows)
   useEffect(() => {
     if (!isServerSearchMode) {
-      setServerSearchCVs({ items: [], total: null });
+      setServerSearchCVs({ items: [], total: null, more: false });
       setServerSearching(false);
       return;
     }
@@ -483,17 +542,17 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     let cancelled = false;
     setServerSearching(true);
     const t = setTimeout(() => {
-      const offset = (page - 1) * ITEMS_PER_PAGE;
       const category = activeFolder === CATEGORY_ALL ? undefined : activeFolder;
       api
-        .listCVs({ q: search.trim(), category, limit: ITEMS_PER_PAGE, offset })
+        .listCVs({ q: search.trim(), category, limit: ITEMS_PER_PAGE, offset: 0 })
         .then((res) => {
           if (cancelled) return;
-          setServerSearchCVs({ items: res.cvs ?? [], total: typeof res.total === 'number' ? res.total : null });
+          const found = res.cvs ?? [];
+          setServerSearchCVs({ items: found, total: typeof res.total === 'number' ? res.total : null, more: found.length >= ITEMS_PER_PAGE });
         })
         .catch(() => {
           if (cancelled) return;
-          setServerSearchCVs({ items: [], total: 0 });
+          setServerSearchCVs({ items: [], total: 0, more: false });
         })
         .finally(() => {
           if (cancelled) return;
@@ -505,24 +564,35 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [search, activeFolder, page, isServerSearchMode]);
+  }, [search, activeFolder, isServerSearchMode]);
+
+  const loadMoreSearch = async () => {
+    if (loadingMoreSearch || !serverSearchCVs.more) return;
+    setLoadingMoreSearch(true);
+    setLoadMoreFailed(false);
+    try {
+      const category = activeFolder === CATEGORY_ALL ? undefined : activeFolder;
+      const res = await api.listCVs({ q: search.trim(), category, limit: ITEMS_PER_PAGE, offset: serverSearchCVs.items.length });
+      const found = res.cvs ?? [];
+      setServerSearchCVs((prev) => ({
+        items: [...prev.items, ...found],
+        total: typeof res.total === 'number' ? res.total : prev.total,
+        more: found.length >= ITEMS_PER_PAGE,
+      }));
+    } catch {
+      setLoadMoreFailed(true);
+    } finally {
+      setLoadingMoreSearch(false);
+    }
+  };
 
   const filteredCVs = useMemo(() => {
-    if (advancedResults) {
-      let list: CVListItem[] = advancedResults;
-      if (notesFilter === 'with_notes') {
-        list = list.filter((cv) => (notesSummary[cv.id]?.count ?? 0) > 0);
-      } else if (notesFilter === 'without_notes') {
-        list = list.filter((cv) => (notesSummary[cv.id]?.count ?? 0) === 0);
-      }
-      return list;
-    }
+    if (advancedResults) return advancedResults;      // the server applied the search and the notes filter
 
     if (isServerSearchMode) {
       return serverSearchCVs.items;
     }
 
-    const selectedCategories = sidebarFilters.category || [];
     let list: CVListItem[];
 
     if (geoFilterCVs) {
@@ -533,20 +603,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       list = folderCVs[activeFolder]?.items ?? [];
     }
 
-    // Multi-category (or geo results): filter by category when any checked
-    if (selectedCategories.length > 0) {
-      list = list.filter((cv) => {
-        const cat = (cv.category || 'General').trim() || 'General';
-        return selectedCategories.includes(cat);
-      });
-    }
-
-    if (notesFilter === 'with_notes') {
-      list = list.filter((cv) => (notesSummary[cv.id]?.count ?? 0) > 0);
-    } else if (notesFilter === 'without_notes') {
-      list = list.filter((cv) => (notesSummary[cv.id]?.count ?? 0) === 0);
-    }
-    return list;
+    return list;      // categories, locations, nationalities, languages and notes were applied by the server
   }, [
     cvs,
     activeFolder,
@@ -568,23 +625,14 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     setAdvancedError(null);
     setAdvancedResults(null);
     setAdvancedTotal(null);
-    setPage(1);
+    setAdvancedCursor(null);
     try {
-      const collected: CVSearchResult[] = [];
-      let cursor: string | null = null;
-      let pages = 0;
-      let firstTotal: { count: number; estimate: boolean } | null = null;
-      do {
-        const res = await api.searchCVsAdvanced({ ...query, limit: query.limit || 100, cursor });
-        collected.push(...(res.results || []));
-        if (pages === 0 && res.total != null) {
-          firstTotal = { count: res.total, estimate: !!res.total_is_estimate };
-        }
-        cursor = res.next_cursor;
-        pages += 1;
-      } while (cursor && pages < 10);
-      setAdvancedResults(collected);
-      setAdvancedTotal(firstTotal ?? { count: collected.length, estimate: false });
+      // The first page only; the next ones are fetched when the reader reaches the end (see loadMoreFiltered), so every match is reachable.
+      const res = await api.searchCVsAdvanced({ ...query, limit: query.limit || 100, cursor: null });
+      const found = res.results || [];
+      setAdvancedResults(found);
+      setAdvancedCursor(res.next_cursor);
+      setAdvancedTotal(res.total != null ? { count: res.total, estimate: !!res.total_is_estimate } : { count: found.length, estimate: false });
     } catch (e: any) {
       setAdvancedResults([]);
       setAdvancedTotal({ count: 0, estimate: false });
@@ -612,24 +660,62 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
 
   const clearAdvancedSearch = () => {
     setAdvancedResults(null);
+    setAdvancedCursor(null);
     setAdvancedTotal(null);
     setAdvancedError(null);
     setAdvancedSearching(false);
     setAdvancedQuery(null);
     setBooleanEdit('');
-    setPage(1);
+  };
+
+  // Typing in the search box on the job descriptions tab asks the server, which searches every JD (not only the ones loaded so far).
+  useEffect(() => {
+    const q = search.trim();
+    if (view !== 'jobs' || !q) {
+      setServerJDs(null);
+      setJdSearchMore(false);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api
+        .listJDs({ q, limit: 200, offset: 0 })
+        .then((res) => {
+          if (cancelled) return;
+          setServerJDs(res.jds ?? []);
+          setJdSearchMore((res.jds ?? []).length >= 200);
+        })
+        .catch(() => { if (!cancelled) { setServerJDs([]); setJdSearchMore(false); } });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [search, view]);
+
+  const loadMoreJDSearch = async () => {
+    if (loadingMoreJDs || !jdSearchMore || !serverJDs) return;
+    setLoadingMoreJDs(true);
+    try {
+      const res = await api.listJDs({ q: search.trim(), limit: 200, offset: serverJDs.length });
+      const found = res.jds ?? [];
+      setServerJDs((prev) => [...(prev ?? []), ...found]);
+      setJdSearchMore(found.length >= 200);
+    } catch {
+      setJdSearchMore(false);
+    } finally {
+      setLoadingMoreJDs(false);
+    }
   };
 
   const filteredJDs = useMemo(() => {
     if (!search.trim()) return jds;
-    const q = search.toLowerCase();
+    if (serverJDs) return serverJDs;
+    const q = search.toLowerCase();       // until the server answers
     return jds.filter(
       (jd) =>
         jd.job_title?.toLowerCase().includes(q) ||
         jd.filename?.toLowerCase().includes(q) ||
         jd.id.toLowerCase().includes(q)
     );
-  }, [jds, search]);
+  }, [jds, search, serverJDs]);
 
   const activeTotalCount =
     isServerSearchMode
@@ -645,29 +731,33 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         ? cvs.length
         : (folderCVs[activeFolder]?.items?.length ?? 0);
 
-  // When not searching, the server knows the true total for folders; client may have partial list loaded.
-  // Geo / advanced search results are finite client lists — page against that length.
-  const totalItemsForPaging =
-    advancedResults || geoFilterCVs
-      ? filteredCVs.length
+  // Every mode shows ALL the rows loaded so far; the next page is fetched when the reader scrolls to the end of the list.
+  const filteredTotal = advancedResults
+    ? (advancedTotal?.count ?? advancedResults.length)
+    : geoFilterCVs
+      ? (geoTotal?.count ?? geoFilterCVs.length)
+      : null;
+  const moreOnServer = advancedResults ? !!advancedCursor : geoFilterCVs ? !!geoCursor : false;
+  const filteredIsEstimate = advancedResults ? !!advancedTotal?.estimate : geoFilterCVs ? !!geoTotal?.estimate : false;
+  const totalItemsForPaging = isServerSearchMode
+    ? Math.max(serverSearchCVs.total ?? 0, serverSearchCVs.items.length)
+    : filteredTotal != null
+      ? Math.max(filteredTotal, filteredCVs.length)
       : (activeTotalCount ?? filteredCVs.length);
-  const totalPages = Math.ceil(totalItemsForPaging / ITEMS_PER_PAGE) || 1;
-  const paginatedCVs = useMemo(() => {
-    if (isServerSearchMode) return filteredCVs;
-    const start = (page - 1) * ITEMS_PER_PAGE;
-    return filteredCVs.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredCVs, page, isServerSearchMode]);
+  const pagedTotalLabel = totalItemsForPaging.toLocaleString() + (filteredIsEstimate ? '+' : '');
+  const paginatedCVs = filteredCVs;
+  const allOnPageSelected = paginatedCVs.length > 0 && paginatedCVs.every((cv) => selectedCVs.includes(cv.id));
 
-  useEffect(() => {
-    if (page > totalPages && totalPages > 0) setPage(1);
-  }, [page, totalPages]);
+  // Instant restore before paint — list should appear already at the saved spot.
+  useLayoutEffect(() => {
+    if (view !== 'candidates' || paginatedCVs.length === 0) return;
+    return restoreScroll(SCROLL_KEYS.candidates) || undefined;
+  }, [view, paginatedCVs.length]);
 
   const toggleCV = (id: string) => {
     if (selectedCVs.includes(id)) deselectCV(id);
     else selectCV(id);
   };
-
-  const allOnPageSelected = paginatedCVs.length > 0 && paginatedCVs.every((cv) => selectedCVs.includes(cv.id));
 
   const selectAllInFolder = () => {
     if (allOnPageSelected) {
@@ -680,41 +770,45 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   };
 
   const loadMoreActiveFolder = async () => {
-    // In server-search mode, pagination is handled by (page -> API fetch) not by loading more into memory.
-    if (isServerSearchMode) return;
     if (activeFolder === CATEGORY_ALL) return loadMoreCVs();
     return loadFolderCVPage(activeFolder, activeLoadedCount);
   };
 
-  const handleNextPage = async () => {
-    if (isServerSearchMode) {
-      if (page < totalPages) setPage((p) => Math.min(totalPages, p + 1));
-      return;
-    }
-    const nextPageEndIndex = page * ITEMS_PER_PAGE;
-    const hasNextPageLocally = filteredCVs.length > nextPageEndIndex;
-
-    // If we already have enough items locally to render the next page, just advance.
-    if (hasNextPageLocally) {
-      setPage((p) => Math.min(totalPages, p + 1));
-      return;
-    }
-
-    // Otherwise, fetch more from server if we know there's more to load, then advance.
-    if (activeTotalCount != null && activeLoadedCount < activeTotalCount) {
-      await loadMoreActiveFolder();
-      setPage((p) => Math.min(totalPages, p + 1));
-      return;
-    }
-
-    // Fallback: if totals are unknown, still allow advancing within computed pages.
-    if (page < totalPages) {
-      setPage((p) => Math.min(totalPages, p + 1));
+  const loadMoreFiltered = async () => {
+    if (loadingMoreFiltered) return;
+    setLoadingMoreFiltered(true);
+    try {
+      if (advancedResults && advancedCursor && advancedQuery) {
+        const res = await api.searchCVsAdvanced({ ...advancedQuery, limit: advancedQuery.limit || 100, cursor: advancedCursor });
+        setAdvancedResults((prev) => [...(prev || []), ...(res.results || [])]);
+        setAdvancedCursor(res.next_cursor);
+      } else if (!advancedResults && geoFilterCVs && geoCursor && geoQueryRef.current) {
+        const res = await api.searchCVsAdvanced({ ...geoQueryRef.current, cursor: geoCursor });
+        setGeoFilterCVs((prev) => [...(prev || []), ...(res.results || [])]);
+        setGeoCursor(res.next_cursor);
+      }
+    } catch {
+      // keep what is loaded; the reader can press Next again
+    } finally {
+      setLoadingMoreFiltered(false);
     }
   };
 
-  const pagingStart = paginatedCVs.length > 0 ? (page - 1) * ITEMS_PER_PAGE + 1 : 0;
-  const pagingEnd = paginatedCVs.length > 0 ? (page - 1) * ITEMS_PER_PAGE + paginatedCVs.length : 0;
+  const hasMoreRows = isServerSearchMode
+    ? serverSearchCVs.more
+    : advancedResults || geoFilterCVs
+      ? moreOnServer
+      : activeTotalCount != null && activeLoadedCount < activeTotalCount;
+  const loadingMoreRows = isServerSearchMode
+    ? loadingMoreSearch || serverSearching
+    : advancedResults || geoFilterCVs
+      ? loadingMoreFiltered || advancedSearching || geoFilterLoading
+      : !!loadingFolderCVs[activeFolder] || loadingStates.cvs.isLoading;
+  const loadMoreRows = async () => {
+    if (isServerSearchMode) return loadMoreSearch();
+    if (advancedResults || geoFilterCVs) return loadMoreFiltered();
+    return loadMoreActiveFolder();
+  };
 
   const openPreview = (id: string, type: 'cv' | 'jd', name: string, item?: CVListItem | JDListItem) => {
     const rawName = item?.filename || name;
@@ -810,7 +904,6 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   }, [folderList, locationFacets, nationalityFacets, languageFacets]);
 
   const toggleSidebarFilter = (groupKey: string, value: string) => {
-    setPage(1);
     setSidebarFilters((prev) => {
       const current = prev[groupKey] || [];
       const next = current.includes(value)
@@ -821,7 +914,6 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   };
 
   const clearSidebarFilters = () => {
-    setPage(1);
     setSidebarFilters({ category: [], location: [], nationality: [], language: [] });
   };
 
@@ -849,9 +941,14 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         noteAuthor={noteMeta?.author || null}
         noteSaving={cardNoteSavingId === cv.id}
         onToggleSelect={() => toggleCV(cv.id)}
-        onOpenDetails={() => router.push(`/candidates/${cv.id}`)}
+        onOpenDetails={() => {
+          saveScroll(SCROLL_KEYS.candidates, cv.id);
+          router.push(`/candidates/${cv.id}`);
+        }}
         onPreview={() => openPreview(cv.id, 'cv', d.name, cv)}
         onDelete={() => handleDeleteCV(cv.id)}
+        saved={canSave ? savedIds.includes(cv.id) : undefined}
+        onToggleSave={canSave ? () => toggleSaved(cv.id) : undefined}
         onSaveNote={(text) => handleCardSaveNote(cv.id, text)}
         onDeleteNote={() => handleCardDeleteNote(cv.id, noteMeta?.author)}
       />
@@ -925,58 +1022,39 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
               checked={allOnPageSelected}
               onChange={selectAllInFolder}
               className="h-4 w-4 cursor-pointer rounded accent-navy-600"
-              aria-label="Select all on this page"
+              aria-label="Select all loaded candidates"
             />
-            {allOnPageSelected ? 'Deselect this page' : 'Select this page'}
+            {allOnPageSelected ? 'Deselect all loaded' : 'Select all loaded'}
           </label>
           <div className="flex items-center gap-3 text-xs text-slate-500">
-            {pagingStart > 0 && (
-              <span className="tabular-nums">
-                {pagingStart}–{pagingEnd} of {((advancedResults || geoFilterCVs) ? filteredCVs.length : totalItemsForPaging).toLocaleString()}
-              </span>
+            <span className="tabular-nums">
+              {paginatedCVs.length.toLocaleString()} of {pagedTotalLabel}
+            </span>
+            {selectedCVs.length > 0 && canSave && (
+              <button type="button" onClick={() => void saveSelected()} className="font-semibold text-navy-600 hover:underline">
+                Save {selectedCVs.length} selected
+              </button>
             )}
             {selectedCVs.length > 0 && (
               <button type="button" onClick={() => deselectAllCVs()} className="font-semibold text-navy-600 hover:underline">
                 Clear {selectedCVs.length} selected
               </button>
             )}
+            {saveNotice && <span className="font-medium text-emerald-700" role="status">{saveNotice}</span>}
           </div>
         </div>
 
         <div className="space-y-2.5">
-          {paginatedCVs.map((cv, i) => renderCandidateCard(cv, pagingStart + i))}
+          {paginatedCVs.map((cv, i) => renderCandidateCard(cv, i))}
         </div>
 
-        {(totalPages > 1 || (activeTotalCount != null && activeLoadedCount < activeTotalCount && !geoFilterCVs)) && (
-          <div className="mt-3 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-            <div className="flex items-center gap-3">
-              <p className="text-[13px] text-slate-500 tabular-nums">
-                Showing {pagingStart}–{pagingEnd} of {((advancedResults || geoFilterCVs) ? filteredCVs.length : totalItemsForPaging).toLocaleString()}
-              </p>
-              <Button variant="secondary" size="sm" onClick={selectAllInFolder}>
-                {allOnPageSelected ? 'Deselect page' : 'Select page'}
-              </Button>
-            </div>
-            {totalPages > 1 && (
-              <div className="flex items-center gap-2">
-                <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-                  Previous
-                </Button>
-                <span className="min-w-[88px] text-center text-xs font-semibold text-slate-600 tabular-nums">
-                  Page {page} of {totalPages}
-                </span>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleNextPage}
-                  disabled={page >= totalPages && !(activeTotalCount != null && activeLoadedCount < activeTotalCount && !geoFilterCVs)}
-                >
-                  Next
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
+        <InfiniteScrollSentinel
+          hasMore={hasMoreRows}
+          loading={loadingMoreRows}
+          error={loadMoreFailed}
+          itemCount={paginatedCVs.length}
+          onLoadMore={() => { setLoadMoreFailed(false); return loadMoreRows(); }}
+        />
       </>
     );
   };
@@ -1030,7 +1108,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
               type="button"
               onClick={() => {
                 if (lockedView) go(t.id);
-                else { setView(t.id); setPage(1); }
+                else { setView(t.id); }
               }}
               className={`relative -mb-px inline-flex items-center gap-2 border-b-2 px-3 pb-2.5 pt-1 text-[13px] font-semibold transition-colors ${
                 active ? 'border-navy-600 text-navy-700' : 'border-transparent text-slate-500 hover:text-slate-900'
@@ -1060,7 +1138,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
             type="text"
             placeholder={view === 'candidates' ? 'Search candidates by name, title, skill…' : 'Search job descriptions…'}
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            onChange={(e) => { setSearch(e.target.value); }}
             className="h-9 w-full rounded-lg border border-transparent bg-slate-50 pl-9 pr-9 text-[13px] text-slate-900 placeholder:text-slate-400 transition-colors hover:bg-slate-100/70 focus:border-navy-500 focus:bg-white focus:outline-none focus:shadow-glow"
           />
           {view === 'candidates' && serverSearching && search.trim() ? (
@@ -1073,7 +1151,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
             <Segmented
               size="sm"
               value={notesFilter}
-              onChange={(v) => { setNotesFilter(v); setPage(1); }}
+              onChange={(v) => { setNotesFilter(v); }}
               items={[
                 { value: 'all', label: 'All' },
                 { value: 'with_notes', label: 'With notes' },
@@ -1081,24 +1159,6 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
               ]}
             />
 
-            {totalPages > 1 && (
-              <div className="ml-auto flex items-center gap-1.5">
-                <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-                  Prev
-                </Button>
-                <span className="min-w-[88px] text-center text-xs font-semibold text-slate-600 tabular-nums">
-                  Page {page} of {totalPages}
-                </span>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleNextPage}
-                  disabled={page >= totalPages && !(activeTotalCount != null && activeLoadedCount < activeTotalCount && !geoFilterCVs)}
-                >
-                  Next
-                </Button>
-              </div>
-            )}
           </>
         )}
       </div>
@@ -1106,7 +1166,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       {view === 'candidates' && (
         <div className="mb-4 flex flex-wrap items-center gap-2 px-1">
           <span className="text-[13px] font-medium text-slate-700 tabular-nums">
-            {((advancedResults || geoFilterCVs) ? filteredCVs.length : totalItemsForPaging).toLocaleString()} candidates
+            {pagedTotalLabel} candidates
           </span>
           {Object.entries(sidebarFilters).flatMap(([group, vals]) =>
             (vals || []).map((v) => (
@@ -1205,88 +1265,32 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
           />
         ) : (
           <>
-            <Table>
-              <THead>
-                <TR>
-                  <TH className="w-14">S.No</TH>
-                  <TH>Job title</TH>
-                  <TH className="w-28">Uploaded</TH>
-                  <TH className="w-[400px] text-right">Actions</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {filteredJDs.map((jd, jdIndex) => {
-                  const d = getJDDisplay(jd);
-                  const isSelected = selectedJD === jd.id;
-                  return (
-                    <TR key={jd.id} className={isSelected ? 'bg-navy-50/60 hover:bg-navy-50/80' : undefined}>
-                      <TD className="w-14 text-xs font-semibold tabular-nums text-slate-500">{jdIndex + 1}</TD>
-                      <TD>
-                        <div className="flex min-w-0 items-center gap-3">
-                          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${isSelected ? 'bg-navy-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                            {isSelected ? <Check className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                          </span>
-                          <div className="min-w-0">
-                            <button
-                              type="button"
-                              onClick={() => setDetailJDId(jd.id)}
-                              className="block max-w-[360px] truncate text-left text-[13px] font-semibold text-slate-900 hover:text-navy-600"
-                              title={d.title}
-                            >
-                              {d.title}
-                            </button>
-                            <p className="max-w-[360px] truncate text-xs text-slate-400" title={jd.filename || ''}>{jd.filename || '-'}</p>
-                          </div>
-                        </div>
-                      </TD>
-                      <TD className="text-slate-500">{formatDate(jd.upload_date)}</TD>
-                      <TD>
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            onClick={() => selectJD(isSelected ? null : jd.id)}
-                            className={`mr-1 inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition-colors ${
-                              isSelected
-                                ? 'bg-navy-600 text-white hover:bg-navy-700'
-                                : 'border border-surface-strong bg-white text-slate-700 hover:border-navy-300 hover:bg-navy-50 hover:text-navy-700'
-                            }`}
-                            title={isSelected ? 'Deselect this job description' : 'Use this job description for matching'}
-                          >
-                            {isSelected ? <><Check className="h-3.5 w-3.5" /> Selected</> : <><Target className="h-3.5 w-3.5" /> Use for match</>}
-                          </button>
-                          {canUseAgents(user?.role) && (
-                            <button
-                              type="button"
-                              onClick={() => router.push(linkedinHref({ jdId: jd.id, jdTitle: d.title }))}
-                              className="mr-1 inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-surface-strong bg-white px-3 text-xs font-semibold text-slate-700 transition-colors hover:border-navy-300 hover:bg-navy-50 hover:text-navy-700"
-                              title="Open the LinkedIn post agent with this job description"
-                            >
-                              <Megaphone className="h-3.5 w-3.5" /> LinkedIn post
-                            </button>
-                          )}
-                          <button onClick={() => openPreview(jd.id, 'jd', d.title, jd)} title="View raw document"className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900">
-                            <FileTextIcon className="h-4 w-4 text-indigo-600" />
-                          </button>
-                          <button onClick={() => setDetailJDId(jd.id)} title="View details & analysis" className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900">
-                            <Eye className="h-4 w-4 text-blue-600" />
-                          </button>
-                          <button onClick={() => handleDeleteJD(jd.id)} title="Delete" className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600">
-                            <Trash2 className="h-4 w-4 text-rose-500" />
-                          </button>
-                        </div>
-                      </TD>
-                    </TR>
-                  );
-                })}
-              </TBody>
-            </Table>
-            {totalJDs != null && jds.length < totalJDs && (
-              <div className="mt-3">
-                <Button variant="secondary" className="w-full" onClick={() => loadMoreJDs()} loading={loadingStates.jds.isLoading}>
-                  Load more job descriptions ({jds.length} of {totalJDs} loaded)
-                </Button>
-              </div>
-            )}
+            <div className="space-y-2.5">
+              {filteredJDs.map((jd, jdIndex) => {
+                const d = getJDDisplay(jd);
+                const isSelected = selectedJD === jd.id;
+                return (
+                  <JobCard
+                    key={jd.id}
+                    display={d}
+                    index={jdIndex + 1}
+                    selected={isSelected}
+                    showLinkedIn={canUseAgents(user?.role)}
+                    onSelect={() => selectJD(isSelected ? null : jd.id)}
+                    onOpenDetails={() => setDetailJDId(jd.id)}
+                    onPreview={() => openPreview(jd.id, 'jd', d.title, jd)}
+                    onDelete={() => handleDeleteJD(jd.id)}
+                    onLinkedIn={() => router.push(linkedinHref({ jdId: jd.id, jdTitle: d.title }))}
+                  />
+                );
+              })}
+            </div>
+            <InfiniteScrollSentinel
+              hasMore={search.trim() ? jdSearchMore : totalJDs != null && jds.length < totalJDs}
+              loading={search.trim() ? loadingMoreJDs : loadingStates.jds.isLoading}
+              itemCount={filteredJDs.length}
+              onLoadMore={search.trim() ? loadMoreJDSearch : () => loadMoreJDs()}
+            />
           </>
         )
       ) : (
@@ -1377,7 +1381,6 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                           phone={phone}
                           linkedin={linkedin}
                           github={github}
-                          privacy
                           className="mt-2"
                         />
                       );

@@ -4,6 +4,8 @@ Provides dependency callables to obtain the current user and enforce roles.
 Readability and docstrings improved without altering behavior.
 """
 
+import logging
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session, select
@@ -11,8 +13,9 @@ from sqlmodel import Session, select
 from app.config.settings import settings
 from app.db.database import get_session
 from app.models.user import User
-from app.security.auth import decode_token
+from app.security.auth import decode_token, issued_before_floor
 import app.services.presence as presence
+from app.security.logsafe import security_event
 
 bearer = HTTPBearer(auto_error=True)
 
@@ -29,7 +32,10 @@ def get_current_user(
     try:
         data = decode_token(token.credentials)
         username = data.get("sub")
+        if issued_before_floor(username, data.get("iat")):
+            raise ValueError("token issued before the account's credentials changed")
     except Exception:
+        security_event("token_rejected", logging.INFO)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
         )
@@ -79,6 +85,7 @@ def require_core_app(user: User = Depends(get_current_user)) -> User:
     Blocks tracker-only roles (account_manager) from CV/JD/match/careers/etc.
     """
     if user.role not in CORE_APP_ROLES:
+        security_event("access_denied", logging.WARNING, user=user.username, role=user.role, area="core_app")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This area is not available for your role.",
@@ -88,6 +95,7 @@ def require_core_app(user: User = Depends(get_current_user)) -> User:
 def require_admin(user: User = Depends(get_current_user)) -> User:
     """Require the current user to have the `admin` role."""
     if user.role != "admin":
+        security_event("access_denied", logging.WARNING, user=user.username, role=user.role, area="admin")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Admin only"
         )
@@ -102,6 +110,7 @@ def require_roles(*roles: str):
 
     def _dep(user: User = Depends(get_current_user)) -> User:
         if user.role not in allowed:
+            security_event("access_denied", logging.WARNING, user=user.username, role=user.role, area="roles:" + ",".join(sorted(allowed)))
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions",

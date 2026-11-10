@@ -57,11 +57,16 @@ export default function MatchingLiveOverlay({
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 8 }}
           transition={{ duration: 0.2 }}
-          className="fixed bottom-4 right-4 z-[110] w-[min(100vw-2rem,320px)] rounded-xl border border-surface-border bg-white px-4 py-3 shadow-card"
+          className="fixed bottom-4 right-4 z-[110] w-[min(100vw-2rem,320px)] rounded-xl border border-navy-100 bg-white px-4 py-3 shadow-card"
         >
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="text-[13px] font-semibold text-slate-900">{label}</p>
-            <p className="text-[13px] font-semibold tabular-nums text-slate-900">{displayPct}%</p>
+          <div className="flex items-center gap-3">
+            <img src="/icons/match/ai-robot.gif" alt="" aria-hidden className="h-9 w-9 shrink-0 object-contain" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-[13px] font-semibold text-slate-900">{label}</p>
+                <p className="text-[13px] font-semibold tabular-nums text-navy-800">{displayPct}%</p>
+              </div>
+            </div>
           </div>
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-100">
             <motion.div

@@ -162,7 +162,10 @@ class ProductionRateLimiter:
         if any(x in path_lower for x in ["/health", "/status", "/ping"]):
             return "health"
         
-        # Authentication endpoints
+        # Sign-in endpoints get the strict class. /me and /logout need a valid token and are cheap: every page load of every
+        # recruiter behind one office address calls /me, and they must not eat the sign-in allowance of that address.
+        if path_lower.rstrip("/") in ("/api/auth/me", "/api/auth/logout"):
+            return "general"
         if any(x in path_lower for x in ["/auth", "/login", "/logout", "/token"]):
             return "auth"
         

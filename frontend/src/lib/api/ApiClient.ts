@@ -38,6 +38,14 @@ import {
   JobApplicationListItem,
   NotesSummaryResponse,
   WeeklyAnalysisReport,
+  CareersOverview,
+  BugReport,
+  CVListItem,
+  AdminBugReport,
+  BugCreateRequest,
+  BugCounts,
+  BugStatus,
+  BugSeverity,
   NoticeData,
   UsersPresenceResponse,
   CVAdvancedSearchParams,
@@ -240,13 +248,6 @@ export class ApiClient {
     formDataObj.append('key_responsibilities', formData.keyResponsibilities || '');
     formDataObj.append('qualifications', formData.qualifications || '');
 
-    if (formData.companyName) {
-      formDataObj.append('company_name', formData.companyName);
-    }
-    if (formData.additionalInfo) {
-      formDataObj.append('additional_info', formData.additionalInfo);
-    }
-
     const token = localStorage.getItem('auth_token');
     const response = await this.client.post('/api/careers/admin/jobs/unified-update', formDataObj, {
       headers: {
@@ -342,9 +343,9 @@ export class ApiClient {
   }
 
   // Auth methods
-  async login(username: string, password: string): Promise<LoginResponse> {
+  async login(email: string, password: string): Promise<LoginResponse> {
     const response = await this.client.post<LoginResponse>('/api/auth/login', {
-      username,
+      email,
       password,
     }, {
       timeout: 10000, // 10 second timeout for auth
@@ -384,9 +385,9 @@ export class ApiClient {
   }
 
   // OTP methods
-  async verifyPassword(username: string, password: string): Promise<VerifyPasswordResponse> {
+  async verifyPassword(email: string, password: string): Promise<VerifyPasswordResponse> {
     const response = await this.client.post<VerifyPasswordResponse>('/api/auth/verify-password', {
-      username,
+      email,
       password,
     }, {
       timeout: 10000, // 10 second timeout for auth
@@ -394,9 +395,9 @@ export class ApiClient {
     return response.data;
   }
 
-  async sendOTP(username: string, password: string): Promise<OTPResponse> {
+  async sendOTP(email: string, password: string): Promise<OTPResponse> {
     const response = await this.client.post<OTPResponse>('/api/auth/send-otp', {
-      username,
+      email,
       password,
     }, {
       timeout: 30000, // 30 second timeout for email sending
@@ -404,9 +405,9 @@ export class ApiClient {
     return response.data;
   }
 
-  async verifyOTP(username: string, otp: string): Promise<LoginResponse> {
+  async verifyOTP(email: string, otp: string): Promise<LoginResponse> {
     const response = await this.client.post<LoginResponse>('/api/auth/verify-otp', {
-      username,
+      email,
       otp,
     }, {
       timeout: 10000, // 10 second timeout for auth
@@ -430,18 +431,18 @@ export class ApiClient {
     }
   }
 
-  async getCaptcha(username: string, password: string): Promise<CaptchaResponse> {
+  async getCaptcha(email: string, password: string): Promise<CaptchaResponse> {
     const response = await this.client.post<CaptchaResponse>('/api/auth/captcha', {
-      username,
+      email,
       password,
       fingerprint: this.getClientFingerprint(),
     }, { timeout: 15000 });
     return response.data;
   }
 
-  async verifyCaptcha(username: string, captchaId: string, answer: string): Promise<LoginResponse> {
+  async verifyCaptcha(email: string, captchaId: string, answer: string): Promise<LoginResponse> {
     const response = await this.client.post<LoginResponse>('/api/auth/captcha/verify', {
-      username,
+      email,
       captcha_id: captchaId,
       answer,
       fingerprint: this.getClientFingerprint(),
@@ -524,8 +525,12 @@ export class ApiClient {
     includeInactive?: boolean;
     limit?: number;
     offset?: number;
-  } = {}): Promise<{ jobs: JobPostingListItem[]; total: number }> {
-    const { includeInactive = false, limit, offset } = params;
+    /** Searched by the server across every posting: title, poster, e-mail subject, id. */
+    q?: string;
+    scope?: 'all' | 'mine' | 'others';
+    status?: 'all' | 'active' | 'inactive';
+  } = {}): Promise<{ jobs: JobPostingListItem[]; total: number; counts?: { all: number; active: number; inactive: number } }> {
+    const { includeInactive = false, limit, offset, q, scope, status } = params;
     const response = await this.client.get<any>(
       '/api/careers/admin/jobs',
       {
@@ -539,6 +544,9 @@ export class ApiClient {
           include_inactive: includeInactive,
           limit,
           offset,
+          q: q?.trim() || undefined,
+          scope: scope && scope !== 'all' ? scope : undefined,
+          status: status && status !== 'all' ? status : undefined,
           _t: Date.now()
         }
       }
@@ -560,7 +568,77 @@ export class ApiClient {
         ? data.total
         : jobs.length;
 
-    return { jobs, total };
+    return { jobs, total, counts: data.counts };
+  }
+
+  // ---- saved CVs (each recruiter's own list)
+  async getSavedCVs(params: { limit?: number; offset?: number; q?: string } = {}): Promise<{ cvs: CVListItem[]; total: number; count: number }> {
+    const response = await this.client.get<{ cvs: CVListItem[]; total: number; count: number }>('/api/cv/saved', {
+      params: { limit: params.limit, offset: params.offset, q: params.q?.trim() || undefined },
+    });
+    return response.data;
+  }
+
+  async getSavedCVIds(): Promise<string[]> {
+    const response = await this.client.get<{ ids: string[] }>('/api/cv/saved/ids');
+    return response.data.ids || [];
+  }
+
+  async saveCVs(cvIds: string[]): Promise<number> {
+    const response = await this.client.post<{ saved: number }>('/api/cv/saved', { cv_ids: cvIds });
+    return response.data.saved;
+  }
+
+  async unsaveCVs(cvIds: string[]): Promise<number> {
+    const response = await this.client.post<{ removed: number }>('/api/cv/saved/remove', { cv_ids: cvIds });
+    return response.data.removed;
+  }
+
+  // ---- bug reports
+  async submitBugReport(body: BugCreateRequest): Promise<BugReport> {
+    const response = await this.client.post<BugReport>('/api/bugs', body);
+    return response.data;
+  }
+
+  async listMyBugReports(params: { limit?: number; offset?: number } = {}): Promise<{ items: BugReport[]; total: number }> {
+    const response = await this.client.get<{ items: BugReport[]; total: number }>('/api/bugs/mine', { params });
+    return response.data;
+  }
+
+  async adminListBugReports(params: {
+    q?: string; status?: 'all' | BugStatus; severity?: 'all' | BugSeverity; area?: string; limit?: number; offset?: number;
+  } = {}): Promise<{ items: AdminBugReport[]; total: number; counts: BugCounts }> {
+    const { q, status, severity, area, limit, offset } = params;
+    const response = await this.client.get<{ items: AdminBugReport[]; total: number; counts: BugCounts }>('/api/admin/bugs', {
+      params: {
+        q: q?.trim() || undefined,
+        status: status && status !== 'all' ? status : undefined,
+        severity: severity && severity !== 'all' ? severity : undefined,
+        area: area || undefined,
+        limit,
+        offset,
+      },
+    });
+    return response.data;
+  }
+
+  async adminUpdateBugReport(id: string, body: { status?: BugStatus; severity?: BugSeverity; admin_note?: string }): Promise<AdminBugReport> {
+    const response = await this.client.patch<AdminBugReport>(`/api/admin/bugs/${id}`, body);
+    return response.data;
+  }
+
+  async adminDeleteBugReport(id: string): Promise<void> {
+    await this.client.delete(`/api/admin/bugs/${id}`);
+  }
+
+  async getOpenBugCount(): Promise<number> {
+    const response = await this.client.get<{ open: number }>('/api/admin/bugs/open-count');
+    return response.data.open;
+  }
+
+  async getCareersOverview(): Promise<CareersOverview> {
+    const response = await this.client.get<CareersOverview>('/api/careers/admin/overview');
+    return response.data;
   }
 
   async getJobTrends(days = 14): Promise<{ days: string[]; series: Record<string, number[]> }> {
@@ -622,6 +700,30 @@ export class ApiClient {
       logger.error('Failed to get recent job postings:', error);
       throw error;
     }
+  }
+
+  /** The open postings, searched and paged by the server (public, no login): title or location words, skills, region, areas. */
+  async searchOpenJobs(params: {
+    q?: string;
+    skills?: string[];
+    region?: 'UAE' | 'KSA' | 'Remote' | 'Not specified';
+    areas?: string[];
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<{ jobs: JobPostingListItem[]; total: number }> {
+    const response = await this.client.get<{ jobs: JobPostingListItem[]; total: number }>('/api/careers/jobs/open', {
+      params: {
+        q: params.q?.trim() || undefined,
+        skills: params.skills?.length ? params.skills : undefined,
+        region: params.region,
+        areas: params.areas?.length ? params.areas : undefined,
+        limit: params.limit,
+        offset: params.offset,
+      },
+      // lists go as repeated ?skills=a&skills=b (what the server reads)
+      paramsSerializer: { indexes: null },
+    });
+    return response.data;
   }
 
   async searchLocations(query: string): Promise<{ city: string; country: string; label: string }[]> {
@@ -789,7 +891,6 @@ export class ApiClient {
     job_summary: string;
     key_responsibilities: string;
     qualifications: string;
-    company_name: string;
     jd_id?: string;  // Include jd_id for matching
   }> {
     const response = await this.client.get<{
@@ -798,7 +899,6 @@ export class ApiClient {
       job_summary: string;
       key_responsibilities: string;
       qualifications: string;
-      company_name: string;
       jd_id?: string;  // Include jd_id for matching
     }>(`/api/careers/admin/jobs/${jobId}/match-data`, {
       headers: {
@@ -820,7 +920,6 @@ export class ApiClient {
     job_summary: string;
     key_responsibilities: string;
     qualifications: string;
-    company_name: string;
     jd_id?: string;  // Include jd_id for matching
   }> {
     const response = await this.client.get<{
@@ -829,7 +928,6 @@ export class ApiClient {
       job_summary: string;
       key_responsibilities: string;
       qualifications: string;
-      company_name: string;
       jd_id?: string;  // Include jd_id for matching
     }>(`/api/careers/admin/jobs/${jobId}/edit-data`, {
       headers: {

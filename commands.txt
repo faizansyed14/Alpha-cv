@@ -12,6 +12,16 @@ Three stacks (same code, different homes for the data):
   prod  : the deployment (docker-compose.prod.yml)
 dev and local use the same ports, so run one of them at a time.
 
+BACKUP AND RECOVERY (all three stacks; details in docs/BACKUP_AND_RECOVERY.md)
+---------------------------------------------------------------------------
+Back up (database + vector store + raw files; only reads the running stack; goes to ./backups/<stack>/<time>/):
+  ./scripts/backup.sh local|dev|prod
+  ./scripts/backup.sh prod --keep 14          (afterwards keep only the 14 newest)
+
+Check a backup without changing anything, then restore it (asks you to type RESTORE <stack>):
+  ./scripts/restore.sh prod backups/prod/<time> --check
+  ./scripts/restore.sh prod backups/prod/<time>
+
 LOCAL (all data in Docker volumes - no S3, no RDS)
 --------------------------------------------------
 Start local (first run creates .env.local from .env.local.example and
@@ -113,8 +123,8 @@ Check container status (prod):
   docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 
 Wipe application data only (keeps auth users + all volumes, asks to confirm):
-  ./db/reset_data.sh dev
-  ./db/reset_data.sh prod
+  ./scripts/db/reset_data.sh dev
+  ./scripts/db/reset_data.sh prod
 
 Run backend tests:
   cd backend

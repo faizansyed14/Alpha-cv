@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   Award,
@@ -14,8 +14,8 @@ import {
   Loader2,
   Mail,
   MapPin,
-  MessageCircle,
   Phone,
+  WhatsApp,
   Tags,
   UserRound,
   Wallet,
@@ -146,6 +146,17 @@ function NumberedList({
 /** Full-page candidate profile: contact unmasked, clear action icons, original CV below. */
 export default function CandidateProfilePage({ cvId }: { cvId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Safe internal return path (e.g. careers applicants). Falls back to /candidates.
+  const fromRaw = searchParams.get('from') || '';
+  const backHref = fromRaw.startsWith('/') && !fromRaw.startsWith('//') ? fromRaw : '/candidates';
+  const backLabel = backHref.startsWith('/saved-cvs')
+    ? 'Saved CVs'
+    : backHref.startsWith('/careers/applicants')
+    ? 'Applicants'
+    : backHref.startsWith('/careers')
+      ? 'Careers'
+      : 'Candidates';
   const [data, setData] = useState<CVDataResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -218,8 +229,8 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
       <div className="mx-auto max-w-lg rounded-2xl border border-surface-border bg-white p-8 text-center shadow-card">
         <p className="text-[15px] font-semibold text-slate-900">Candidate not found</p>
         <p className="mt-1.5 text-[13px] text-slate-500">{error || 'This CV could not be loaded.'}</p>
-        <Button type="button" variant="secondary" className="mt-4" onClick={() => router.push('/candidates')}>
-          Back to candidates
+        <Button type="button" variant="secondary" className="mt-4" onClick={() => router.push(backHref, { scroll: false })}>
+          Back to {backLabel.toLowerCase()}
         </Button>
       </div>
     );
@@ -231,8 +242,8 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 pb-12">
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="ghost" size="sm" icon={<ArrowLeft />} onClick={() => router.push('/candidates')}>
-          Candidates
+        <Button type="button" variant="ghost" size="sm" icon={<ArrowLeft />} onClick={() => router.push(backHref, { scroll: false })}>
+          {backLabel}
         </Button>
         <span className="text-[12px] text-slate-300">/</span>
         <span className="truncate text-[13px] font-medium text-slate-600">{view.name}</span>
@@ -287,7 +298,7 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
             {view.phone && wa.length >= 6 ? (
               <ContactLink
                 href={`https://wa.me/${wa}`}
-                icon={MessageCircle}
+                icon={WhatsApp}
                 label="WhatsApp"
                 value={view.phone}
                 tone="border-surface-border hover:border-emerald-400"

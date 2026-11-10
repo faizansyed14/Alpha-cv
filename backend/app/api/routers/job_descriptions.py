@@ -7,11 +7,9 @@ Single responsibility: Job Description document management through REST API.
 import asyncio
 import logging
 import re
-from qdrant_client.http.models import FieldCondition, Filter, MatchValue
 import os
 import uuid
-from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Form, Query
 from fastapi.responses import JSONResponse, Response
@@ -24,7 +22,7 @@ from app.models.user import User
 from app.ingestion.cv_parser import get_parsing_service
 from app.providers.llm.service import get_llm_service
 from app.providers.embeddings.service import get_embedding_service
-from app.providers.vectorstore.qdrant import get_decompressed_content, get_qdrant_utils
+from app.store import get_store
 from app.ingestion.preview import render_page_png
 from app.providers.storage import get_storage_service
 from app.providers.cache.memory import get_cache_service
@@ -45,10 +43,6 @@ class StandardizeJDRequest(BaseModel):
     jd_filename: str = "jd.txt"
 
 
-def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
-
-
 @router.post("/upload-jd")
 async def upload_jd(
     file: Optional[UploadFile] = File(None),
@@ -57,11 +51,8 @@ async def upload_jd(
 ) -> JSONResponse:
     """
     Upload and process Job Description file or text.
-    Pipeline: validate -> extract -> PII removal -> LLM standardization -> EXACT embeddings (32) -> store across 3 collections.
-    Collections used:
-      - jd_documents       (raw document + metadata)
-      - jd_structured      (standardized JSON)
-      - jd_embeddings      (exactly 32 vectors)
+    Pipeline: validate -> extract -> PII removal -> LLM standardization -> EXACT embeddings (31) -> store.
+    The description (text, title, skills, responsibilities, requirements) is rows in PostgreSQL; the 31 vectors are in Qdrant.
     """
     try:
         logger.info("---------- JD UPLOAD START ----------")
@@ -122,13 +113,13 @@ async def upload_jd(
         llm = get_llm_service()
         standardized = llm.standardize_jd(extracted_text, filename)
 
-        # ---- Step 2: EXACT embeddings (32 vectors) ----
-        logger.info("---------- STEP 2: EMBEDDING GENERATION (32 vectors) ----------")
+        # ---- Step 2: EXACT embeddings (31 vectors) ----
+        logger.info("---------- STEP 2: EMBEDDING GENERATION (31 vectors) ----------")
         emb_service = get_embedding_service()
         doc_embeddings = emb_service.generate_document_embeddings(standardized)
         # doc_embeddings contains:
-        #   skill_vectors[20], responsibility_vectors[10], experience_vector[1], job_title_vector[1]
-        #   plus: skills, responsibilities, experience_years, job_title
+        #   skill_vectors[20], responsibility_vectors[10], job_title_vector[1]
+        #   plus: skills, responsibilities, job_title
 
         # ---- Step 3: Store file in S3 (if uploaded as file) ----
         logger.info("---------- STEP 3: S3 STORAGE ----------")
@@ -172,40 +163,21 @@ async def upload_jd(
             except Exception as e:
                 logger.warning(f"Failed to upload JD text to S3: {e}")
         
-        # ---- Step 4: Store metadata in Qdrant ----
+        # ---- Step 4: store the description (PostgreSQL) and its vectors (Qdrant) ----
         logger.info("---------- STEP 4: DATABASE STORAGE ----------")
-        qdrant = get_qdrant_utils()
-        
+        store = get_store()
+
         import mimetypes
         mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        meta = standardized.get("processing_metadata") or {}
 
-        # 4a) Raw doc (with S3 reference)
-        qdrant.store_document(
-            doc_id=jd_id,
-            doc_type="jd",
-            filename=filename,
-            file_format=file_ext.lstrip("."),
-            raw_content=raw_content,
-            upload_date=_now_iso(),
-            file_path=persisted_path,
-            mime_type=mime_type
-        )
-
-        # 4b) Structured
-        qdrant.store_structured_data(
-            doc_id=jd_id,
-            doc_type="jd",
-            structured_data={
-                "structured_info": standardized
-            }
-        )
-
-        # 4c) EXACT embeddings
-        qdrant.store_embeddings_exact(
-            doc_id=jd_id,
-            doc_type="jd",
-            embeddings_data=doc_embeddings
-        )
+        store.save_job_description({
+            "id": jd_id, "filename": filename, "file_format": file_ext.lstrip("."), "mime_type": mime_type, "file_path": persisted_path,
+            "raw_text": extracted_text, "standardized": standardized, "llm_model": meta.get("model_used"),
+        })
+        if not store.store_embeddings("jd", jd_id, doc_embeddings):
+            store.delete_job_description(jd_id)
+            raise HTTPException(status_code=500, detail="The job description's embeddings could not be saved")
 
         logger.info(f"JD processed and stored: {jd_id}")
         _invalidate_jd_list_cache()
@@ -220,7 +192,7 @@ async def upload_jd(
                 "text_length": len(extracted_text),
                 "skills_count": len(standardized.get("skills_sentences", standardized.get("skills", []))),
                 "responsibilities_count": len(standardized.get("responsibility_sentences", standardized.get("responsibilities", []))),
-                "embeddings_generated": 32
+                "embeddings_generated": 31
             }
         })
 
@@ -228,7 +200,7 @@ async def upload_jd(
         raise
     except Exception as e:
         logger.error(f"JD upload failed: {e}")
-        raise HTTPException(status_code=500, detail=f"JD processing failed: {e}")
+        raise HTTPException(status_code=500, detail="JD processing failed. Please try again or contact support.")
 
 
 def _invalidate_jd_list_cache():
@@ -247,261 +219,57 @@ async def list_jds(
     q: Optional[str] = Query(None, description="Case-insensitive search across job title/filename/id"),
     _: User = Depends(require_core_app),
 ) -> JSONResponse:
-    """
-    List processed JDs with metadata. Supports optional pagination for faster loads.
-    Reads from jd_structured and jd_documents. CACHED 60s; cache invalidated on JD upload/delete/reprocess.
-    Optional ?q= (search) and ?category= filters are applied to the cached/full list.
-    """
+    """List job descriptions, newest first, one page per call. The database filters, counts and pages."""
     limit = min(limit or JD_LIST_PAGE, JD_LIST_PAGE)   # one call never returns more than a page; `total` says how many exist
-
-    def _filter_jds(items):
-        out = items
-        if category:
-            out = [jd for jd in out if (jd.get("category") or "General") == category]
-        if q and q.strip():
-            needle = q.strip().lower()
-            def _match(jd: dict) -> bool:
-                return (
-                    needle in str(jd.get("job_title") or "").lower()
-                    or needle in str(jd.get("filename") or "").lower()
-                    or needle in str(jd.get("id") or "").lower()
-                )
-            out = [jd for jd in out if _match(jd)]
-        return out
-
     try:
-        cache = get_cache_service()
-        cached_result = cache.get("jd_list", namespace="jd_data")
-
-        if cached_result is not None:
-            enhanced = _filter_jds(cached_result.get("jds", []))
-            total = len(enhanced)
-            if limit is not None:
-                page = enhanced[offset : offset + limit]
-                return JSONResponse({
-                    "status": "success",
-                    "count": len(page),
-                    "total": total,
-                    "jds": page,
-                    "limit": limit,
-                    "offset": offset,
-                    "category": category,
-                    "q": q,
-                })
-            if category or (q and q.strip()):
-                return JSONResponse({"status": "success", "count": total, "jds": enhanced})
-            return JSONResponse(cached_result)
-
-        logger.debug("JD list cache miss - fetching from database")
-        qdrant = get_qdrant_utils()
-
-        all_structured = []
-        scroll_offset = None
-        while True:
-            points, next_offset = qdrant.client.scroll(
-                collection_name="jd_structured",
-                limit=200,
-                offset=scroll_offset,
-                with_payload=True,
-                with_vectors=False
-            )
-            all_structured.extend(points)
-            if not next_offset:
-                break
-            scroll_offset = next_offset
-
-        docs_map: Dict[str, Dict[str, Any]] = {}
-        scroll_offset = None
-        while True:
-            points, next_offset = qdrant.client.scroll(
-                collection_name="jd_documents",
-                limit=500,
-                offset=scroll_offset,
-                with_payload=["id", "filename", "upload_date"],   # not the JD's full text
-                with_vectors=False
-            )
-            for p in points:
-                payload = p.payload or {}
-                docs_map[payload.get("id") or str(p.id)] = payload
-            if not next_offset:
-                break
-            scroll_offset = next_offset
-
-        enhanced = []
-        for p in all_structured:
-            payload = p.payload or {}
-            doc_id = str(p.id)
-            structured = payload.get("structured_info", {})
-            doc_meta = docs_map.get(doc_id, {})
-
-            skills = structured.get("skills_sentences", structured.get("skills", []))
-            resps = structured.get("responsibility_sentences", structured.get("responsibilities", []))
-
-            filename = doc_meta.get("filename", "Unknown")
-            if filename and "/" in filename:
-                filename = filename.split("/")[-1]
-            
-            enhanced.append({
-                "id": doc_id,
-                "filename": filename,
-                "upload_date": doc_meta.get("upload_date", "Unknown"),
-                "job_title": structured.get("job_title", "Not specified"),
-                "years_of_experience": structured.get("years_of_experience", structured.get("experience_years", "Not specified")),
-                "skill_keywords": extract_skill_keywords(skills, limit=20),
-                "skills_count": len(skills),
-                "responsibilities_count": len(resps),
-                "has_structured_data": True,
-                "category": structured.get("category", "General")
-            })
-
-        enhanced.sort(key=lambda x: x.get("upload_date", ""), reverse=True)
-        full_total = len(enhanced)
-        # Cache the FULL unfiltered list, then apply q/category filters to the response.
-        cache.set("jd_list", {"status": "success", "count": full_total, "jds": enhanced}, ttl_seconds=60, namespace="jd_data")
-        logger.debug(f"Cached JD list ({full_total} JDs) for 60 seconds")
-
-        enhanced = _filter_jds(enhanced)
-        total = len(enhanced)
-
-        if limit is not None:
-            page = enhanced[offset : offset + limit]
-            result = {
-                "status": "success",
-                "count": len(page),
-                "total": total,
-                "jds": page,
-                "limit": limit,
-                "offset": offset,
-                "category": category,
-                "q": q,
-            }
-        else:
-            result = {"status": "success", "count": total, "jds": enhanced}
-
-        return JSONResponse(result)
-
+        rows, total = await asyncio.to_thread(get_store().list_job_descriptions, q=q, category=category, offset=offset, limit=limit)
+        return JSONResponse({"status": "success", "count": len(rows), "total": total, "jds": rows, "limit": limit, "offset": offset,
+                             "category": category, "q": q})
     except Exception as e:
         logger.error(f"Failed to list JDs: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list JDs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list JDs. Please try again or contact support.")
 
 
 @router.get("/jd/{jd_id}")
 async def get_jd_details(jd_id: str, _: User = Depends(require_core_app)) -> JSONResponse:
-    """
-    Get details for a specific JD.
-    Combines jd_structured + jd_documents + jd_embeddings stats.
-    """
+    """Get details for a specific JD: its rows, plus what is stored in Qdrant for it."""
     try:
-        qdrant = get_qdrant_utils()
-
-        # Structured data
-        s = qdrant.client.retrieve("jd_structured", ids=[jd_id], with_payload=True, with_vectors=False)
-        if not s:
+        store = get_store()
+        d = await asyncio.to_thread(store.jd_detail, jd_id)
+        if not d:
             raise HTTPException(status_code=404, detail=f"JD not found: {jd_id}")
-        structured_payload = s[0].payload or {}
-        structured = structured_payload.get("structured_info", structured_payload)
-
-        # Doc meta
-        d = qdrant.client.retrieve("jd_documents", ids=[jd_id], with_payload=True, with_vectors=False)
-        doc_meta = (d[0].payload if d else {}) or {}
-
-        # Embedding info - handle both optimized and legacy storage
-        try:
-            # Try optimized single-point retrieval first
-            emb_point = qdrant.client.retrieve(
-                collection_name="jd_embeddings",
-                ids=[jd_id],
-                with_payload=True,
-                with_vectors=False
-            )
-            
-            if emb_point and len(emb_point) > 0:
-                payload = emb_point[0].payload
-                if payload and "vector_structure" in payload:
-                    # Optimized storage - single point with vector_structure
-                    vector_structure = payload["vector_structure"]
-                    skills_count = len(vector_structure.get("skill_vectors", []))
-                    resp_count = len(vector_structure.get("responsibility_vectors", []))
-                    has_title = len(vector_structure.get("job_title_vector", [])) > 0
-                    has_exp = len(vector_structure.get("experience_vector", [])) > 0
-                    # Get dimension from first skill vector if available
-                    dim = len(vector_structure.get("skill_vectors", [[]])[0]) if vector_structure.get("skill_vectors") else 0
-                else:
-                    # Legacy storage - multiple points
-                    emb_points, _ = qdrant.client.scroll(
-                        collection_name="jd_embeddings",
-                        scroll_filter=Filter(must=[FieldCondition(key="id", match=MatchValue(value=jd_id))]),
-                        limit=100,
-                        with_payload=True,
-                        with_vectors=True
-                    )
-                    skills_count = len([p for p in emb_points if (p.payload or {}).get("vector_type") == "skill"])
-                    resp_count = len([p for p in emb_points if (p.payload or {}).get("vector_type") == "responsibility"])
-                    has_title = any((p.payload or {}).get("vector_type") == "job_title" for p in emb_points)
-                    has_exp = any((p.payload or {}).get("vector_type") == "experience" for p in emb_points)
-                    dim = 0
-                    for p in emb_points:
-                        if isinstance(p.vector, list):
-                            dim = len(p.vector)
-                            break
-            else:
-                # No embeddings found
-                skills_count = resp_count = 0
-                has_title = has_exp = False
-                dim = 0
-        except Exception as e:
-            logger.warning(f"Failed to get embeddings info for {jd_id}: {e}")
-            skills_count = resp_count = 0
-            has_title = has_exp = False
-            dim = 0
-
-        # Handle both old and new data structures
-        skills = structured.get("skills_sentences", structured.get("skills", []))
-        responsibilities = structured.get("responsibility_sentences", structured.get("responsibilities", []))
-
-        # Create optimized structured_info without duplicates
-        optimized_structured = structured.copy()
-        # Remove duplicate skills and responsibilities from structured_info
-        # Frontend should use job_requirements.skills and job_requirements.responsibilities instead
-        if "skills" in optimized_structured:
-            del optimized_structured["skills"]
-        if "responsibilities" in optimized_structured:
-            del optimized_structured["responsibilities"]
-
+        emb = await asyncio.to_thread(store.embeddings_info, jd_id, "jd")
+        skills, responsibilities = d["skills"], d["responsibilities"]
+        years = d["years_of_experience"] if d["years_of_experience"] is not None else "Not specified"
         response = {
-            "id": jd_id,
-            "filename": doc_meta.get("filename", "Unknown"),
-            "upload_date": doc_meta.get("upload_date", "Unknown"),
-            "document_type": "jd",
+            "id": jd_id, "filename": d["filename"] or "Unknown", "upload_date": d["upload_date"], "document_type": "jd",
             "job_requirements": {
-                "job_title": structured.get("job_title", "Not specified"),
-                "years_of_experience": structured.get("years_of_experience", structured.get("experience_years", "Not specified")),
-                "skills": skills,
-                "skill_keywords": extract_skill_keywords(skills, limit=20),
-                "responsibilities": responsibilities,
-                "skills_count": len(skills),
-                "responsibilities_count": len(responsibilities),
-                "boolean_search_string": structured.get("boolean_search_string", ""),
+                "job_title": d["job_title"] or "Not specified", "years_of_experience": years, "skills": skills,
+                "skill_keywords": extract_skill_keywords(skills, limit=20), "responsibilities": responsibilities,
+                "skills_count": len(skills), "responsibilities_count": len(responsibilities),
+                "boolean_search_string": d["boolean_search_string"],
+                "required_languages": d["required_languages"], "required_certifications": d["required_certifications"],
             },
-            "boolean_search_string": structured.get("boolean_search_string", ""),
+            "boolean_search_string": d["boolean_search_string"],
             "embeddings_info": {
-                "skills_embeddings": skills_count,
-                "responsibilities_embeddings": resp_count,
-                "has_title_embedding": has_title,
-                "has_experience_embedding": has_exp,
-                "embedding_dimension": dim,
+                "skills_embeddings": emb["skills"], "responsibilities_embeddings": emb["responsibilities"],
+                "has_title_embedding": emb["has_title"], "embedding_dimension": emb["dimension"],
             },
-            "structured_info": optimized_structured,
-            "processing_metadata": structured.get("processing_metadata", {})
+            # the same facts under the names the page reads (built from the rows, not stored a second time)
+            "structured_info": {
+                "job_title": d["job_title"], "years_of_experience": d["years_of_experience"], "category": d["category"],
+                "skills_sentences": skills, "responsibility_sentences": responsibilities, "boolean_search_string": d["boolean_search_string"],
+                "required_languages": d["required_languages"], "required_certifications": d["required_certifications"],
+            },
+            "processing_metadata": {"model_used": d["llm_model"], "embedding_model": d["embedding_model"]},
         }
-
         return JSONResponse({"status": "success", "jd": response})
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get JD details: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get JD details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get JD details. Please try again or contact support.")
 
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -514,14 +282,13 @@ async def preview_jd(jd_id: str, page: int = Query(1, ge=1), scale: float = Quer
     (legacy .doc, RTF, ODT, HTML). Same as the CV preview. The page count is returned in ``X-Preview-Pages``."""
     if not _SAFE_ID_RE.match(jd_id or ""):
         raise HTTPException(status_code=400, detail="Invalid document id")
-    res = get_qdrant_utils().client.retrieve("jd_documents", ids=[jd_id], with_payload=True, with_vectors=False)
-    if not res:
+    doc = await asyncio.to_thread(get_store().jd_document, jd_id)
+    if not doc:
         raise HTTPException(status_code=404, detail="JD not found")
-    payload = res[0].payload or {}
-    text = get_decompressed_content(payload)
+    text = doc["raw_text"]
     if not text or not text.strip():
         raise HTTPException(status_code=404, detail="This JD has no extracted text to preview")
-    png, total = await asyncio.to_thread(render_page_png, text, page, label=payload.get("filename", ""), scale=scale)
+    png, total = await asyncio.to_thread(render_page_png, text, page, label=doc["filename"] or "", scale=scale)
     return Response(png, media_type="image/png", headers={
         "X-Preview-Pages": str(total), "Access-Control-Expose-Headers": "X-Preview-Pages",
         "Cache-Control": "private, max-age=300"})
@@ -529,108 +296,43 @@ async def preview_jd(jd_id: str, page: int = Query(1, ge=1), scale: float = Quer
 
 @router.delete("/jd/{jd_id}")
 async def delete_jd(jd_id: str, _: User = Depends(require_core_app)) -> JSONResponse:
-    """
-    Delete a JD and all associated data across:
-      - jd_documents
-      - jd_structured
-      - jd_embeddings (all vectors with document_id == jd_id)
-    """
+    """Delete a JD: its rows (skills, responsibilities, requirements) and its vectors in Qdrant. Job postings made from it stay."""
     try:
-        qdrant = get_qdrant_utils()
-
-        # Check existence
-        s = qdrant.client.retrieve("jd_structured", ids=[jd_id], with_payload=True)
-        if not s:
+        filename = await asyncio.to_thread(get_store().delete_job_description, jd_id)
+        if filename is None:
             raise HTTPException(status_code=404, detail=f"JD not found: {jd_id}")
-        filename = (qdrant.client.retrieve("jd_documents", ids=[jd_id], with_payload=True) or [{}])[0].payload.get("filename", jd_id)
-
-        # Delete embeddings points by collecting their ids
-        emb_points, _ = qdrant.client.scroll(
-            collection_name="jd_embeddings",
-            scroll_filter=Filter(must=[FieldCondition(key="id", match=MatchValue(value=jd_id))]),
-            limit=1000,
-            with_payload=False,
-            with_vectors=False
-        )
-        emb_ids = [str(p.id) for p in emb_points]
-        if emb_ids:
-            qdrant.client.delete(collection_name="jd_embeddings", points_selector=emb_ids)
-
-        # Delete structured + documents
-        qdrant.client.delete(collection_name="jd_structured", points_selector=[jd_id])
-        qdrant.client.delete(collection_name="jd_documents", points_selector=[jd_id])
         _invalidate_jd_list_cache()
-
-        return JSONResponse({
-            "status": "success",
-            "message": f"Job Description '{filename}' deleted successfully",
-            "deleted_jd_id": jd_id
-        })
+        return JSONResponse({"status": "success", "message": f"Job Description '{filename}' deleted successfully", "deleted_jd_id": jd_id})
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to delete JD: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete JD: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete JD. Please try again or contact support.")
 
 
 @router.get("/jd/{jd_id}/embeddings")
 async def get_jd_embeddings_info(jd_id: str, _: User = Depends(require_core_app)) -> JSONResponse:
-    """
-    Get detailed embeddings information for a Job Description from jd_embeddings.
-    """
+    """What is stored in Qdrant for a Job Description."""
     try:
-        qdrant = get_qdrant_utils()
-
-        # Verify JD exists
-        s = qdrant.client.retrieve("jd_structured", ids=[jd_id], with_payload=True)
-        if not s:
+        store = get_store()
+        if not await asyncio.to_thread(store.jd_detail, jd_id):
             raise HTTPException(status_code=404, detail=f"JD not found: {jd_id}")
-
-        # Pull embedding points
-        points, _ = qdrant.client.scroll(
-            collection_name="jd_embeddings",
-            scroll_filter=Filter(must=[FieldCondition(key="id", match=MatchValue(value=jd_id))]),
-            limit=2000,
-            with_payload=True,
-            with_vectors=True
-        )
-
+        e = await asyncio.to_thread(store.embeddings_info, jd_id, "jd")
         info = {
-            "jd_id": jd_id,
-            "embeddings_found": bool(points),
-            "skills": {"count": 0, "embedding_dimension": 0},
-            "responsibilities": {"count": 0, "embedding_dimension": 0},
-            "title_embedding": False,
-            "experience_embedding": False,
-            "total_embeddings": 0
+            "jd_id": jd_id, "embeddings_found": e["embeddings_found"],
+            "skills": {"count": e["skills"], "embedding_dimension": e["dimension"] if e["skills"] else 0},
+            "responsibilities": {"count": e["responsibilities"], "embedding_dimension": e["dimension"] if e["responsibilities"] else 0},
+            "title_embedding": e["has_title"],
+            "total_embeddings": e["skills"] + e["responsibilities"] + int(e["has_title"]),
         }
-
-        for p in points:
-            pld = p.payload or {}
-            vtype = pld.get("vector_type")
-            if vtype == "skill":
-                info["skills"]["count"] += 1
-                if isinstance(p.vector, list) and not info["skills"]["embedding_dimension"]:
-                    info["skills"]["embedding_dimension"] = len(p.vector)
-            elif vtype == "responsibility":
-                info["responsibilities"]["count"] += 1
-                if isinstance(p.vector, list) and not info["responsibilities"]["embedding_dimension"]:
-                    info["responsibilities"]["embedding_dimension"] = len(p.vector)
-            elif vtype == "job_title":
-                info["title_embedding"] = True
-            elif vtype == "experience":
-                info["experience_embedding"] = True
-
-        info["total_embeddings"] = info["skills"]["count"] + info["responsibilities"]["count"] + int(info["title_embedding"]) + int(info["experience_embedding"])
-
         return JSONResponse({"status": "success", "embeddings_info": info})
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get JD embeddings info: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get JD embeddings info: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get JD embeddings info. Please try again or contact support.")
 
 
 @router.post("/standardize-jd")
@@ -672,4 +374,4 @@ async def standardize_jd_text(request: StandardizeJDRequest, _: User = Depends(r
         raise
     except Exception as e:
         logger.error(f"JD text standardization failed: {e}")
-        raise HTTPException(status_code=500, detail=f"JD standardization failed: {e}")
+        raise HTTPException(status_code=500, detail="JD standardization failed. Please try again or contact support.")

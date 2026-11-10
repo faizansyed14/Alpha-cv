@@ -58,7 +58,7 @@ def propose_job_status(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
 
 
 _JOB_LABEL = {"job_title": "Title", "job_location": "Location", "job_summary": "Summary", "key_responsibilities": "Responsibilities",
-              "qualifications": "Qualifications", "company_name": "Company"}
+              "qualifications": "Qualifications"}
 
 
 def propose_job_changes(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
@@ -149,7 +149,7 @@ TOOLS = [
              required=["job_id", "open"]), CORE, propose_job_status, writes=True),
     Tool("propose_job_changes", "Change details of a job posting that exists (shown as before and after, for confirmation first). Pass only what changes.",
          obj(job_id={"type": "string"}, job_title={"type": "string"}, job_location={"type": "string"}, job_summary={"type": "string"},
-             key_responsibilities={"type": "string"}, qualifications={"type": "string"}, company_name={"type": "string"}, required=["job_id"]), CORE, propose_job_changes, writes=True),
+             key_responsibilities={"type": "string"}, qualifications={"type": "string"}, required=["job_id"]), CORE, propose_job_changes, writes=True),
     Tool("propose_tracker_add", "Add a row to the tracker: a follow-up, job opening, tracker candidate or application (shown for confirmation first). "
          "details holds the fields, for example for a follow-up: client_name, position, current_stage, next_follow_up_date (YYYY-MM-DD), remarks.",
          obj(area=_AREAS, details={"type": "object", "description": "Field names and values."}, required=["area", "details"]), TRACKER, propose_tracker_add, writes=True),

@@ -8,6 +8,7 @@ export type WorkspaceId =
   | 'upload'
   | 'database'
   | 'candidates'
+  | 'saved'
   | 'jobs'
   | 'match'
   | 'careers'
@@ -19,6 +20,8 @@ export type WorkspaceId =
   | 'agent-linkedin'
   | 'agent-usage'
   | 'tracker'
+  | 'report-bug'
+  | 'admin-bugs'
   | 'admin';
 
 /** Canonical URL for each workspace. */
@@ -27,6 +30,7 @@ export const WORKSPACE_PATHS: Record<WorkspaceId, string> = {
   upload: '/upload',
   database: '/candidates', // default database view
   candidates: '/candidates',
+  saved: '/saved-cvs',
   jobs: '/jobs',
   match: '/match',
   careers: '/careers-manage',
@@ -38,6 +42,8 @@ export const WORKSPACE_PATHS: Record<WorkspaceId, string> = {
   'agent-linkedin': '/agents/linkedin',
   'agent-usage': '/agents/usage',
   tracker: '/tracker',
+  'report-bug': '/report-bug',
+  'admin-bugs': '/admin/bugs',
   admin: '/admin/users',
 };
 
@@ -45,6 +51,7 @@ const PATH_TO_WORKSPACE: Record<string, WorkspaceId> = {
   '/dashboard': 'dashboard',
   '/upload': 'upload',
   '/candidates': 'candidates',
+  '/saved-cvs': 'saved',
   '/jobs': 'jobs',
   '/match': 'match',
   '/careers-manage': 'careers',
@@ -55,6 +62,8 @@ const PATH_TO_WORKSPACE: Record<string, WorkspaceId> = {
   '/agents/linkedin': 'agent-linkedin',
   '/agents/usage': 'agent-usage',
   '/tracker': 'tracker',
+  '/report-bug': 'report-bug',
+  '/admin/bugs': 'admin-bugs',
   '/admin/users': 'admin',
 };
 

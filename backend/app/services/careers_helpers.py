@@ -9,9 +9,8 @@ import re
 import os
 from datetime import datetime
 from typing import Optional
-from fastapi import UploadFile, HTTPException
 from app.config.settings import settings
-from app.providers.vectorstore.qdrant import get_qdrant_utils
+from app.store import get_store
 
 logger = logging.getLogger(__name__)
 
@@ -52,28 +51,6 @@ def generate_public_slug(job_title: str, subject_id: Optional[str] = None) -> st
             parts.append(code)
     parts.append("".join(secrets.choice(_SLUG_ALPHABET) for _ in range(6)))
     return "-".join(parts)
-
-
-def is_public_slug(token: Optional[str]) -> bool:
-    """True for the readable links (lower-case words and digits); the old random tokens contain capitals or _ ."""
-    return bool(token) and bool(_SLUG_RE.match(token)) and len(token) <= 90
-
-
-def validate_file_upload(file: UploadFile) -> None:
-    """Validate uploaded file meets requirements"""
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="Filename is required")
-    
-    # Check file extension
-    file_ext = '.' + file.filename.split('.')[-1].lower() if '.' in file.filename else ''
-    if file_ext not in SUPPORTED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"File type {file_ext} not supported. Supported types: {SUPPORTED_EXTENSIONS}"
-        )
-    
-    # Note: File size validation happens during read if needed
-    logger.info(f"File validation passed: {file.filename}")
 
 
 def now_iso() -> str:
@@ -154,8 +131,7 @@ def generate_email_subject_id(job_title: str) -> str:
     current_year = datetime.utcnow().year
     
     # Get next counter for this year and abbreviation
-    qdrant = get_qdrant_utils()
-    counter = qdrant.get_next_email_subject_counter(abbreviation, current_year)
+    counter = get_store().next_email_subject_counter(abbreviation, current_year)
     
     return f"{abbreviation}-{current_year}-{counter:03d}"
 
@@ -206,41 +182,19 @@ def _boolean_keywords(skills, limit: int = 8):
 
 def generate_boolean_search_string(job_title: str, skills=None) -> str:
     """
-    Build a Naukri-Gulf style boolean search string from a job title and skills.
+    Build a short, loose Naukri-Gulf boolean string: title + up to 5 skills (OR).
 
-    Example: ("Cloud Engineer", ["Azure", "Terraform", "Kubernetes"]) ->
-      ("Cloud Engineer") AND ("Azure" OR "Terraform" OR "Kubernetes")
+    Example: ("Cloud Engineer", ["Azure", "Terraform", "Kubernetes", "Docker", "CI/CD"]) ->
+      ("Cloud Engineer") AND ("Azure" OR "Terraform" OR "Kubernetes" OR "Docker" OR "CI/CD")
 
-    This is deterministic so the same job always yields the same string, and it does
-    not depend on the LLM returning a boolean field.
+    Kept short on purpose so portal search is not overly strict.
     """
     title = (job_title or "").strip()
     parts = []
     if title:
         parts.append(f'("{title}")')
-    keywords = _boolean_keywords(skills, limit=8)
+    keywords = _boolean_keywords(skills, limit=5)
     if keywords:
         quoted = " OR ".join(f'"{k}"' for k in keywords)
         parts.append(f"({quoted})")
     return " AND ".join(parts)
-
-
-def parse_email_subject(subject: str) -> tuple[Optional[str], Optional[str]]:
-    """
-    Parse email subject to extract job title and subject ID
-    Handles Re:/Fwd: prefixes automatically
-    Returns: (job_title, subject_id) or (None, None) if parsing fails
-    """
-    # Remove Re:/Fwd: prefixes (case insensitive, multiple possible)
-    cleaned_subject = re.sub(r'^(re|fwd|fw):\s*', '', subject.strip(), flags=re.IGNORECASE)
-    cleaned_subject = re.sub(r'^(re|fwd|fw):\s*', '', cleaned_subject, flags=re.IGNORECASE)  # Handle multiple prefixes
-    
-    # Look for pattern: "Job Title | ID-YYYY-NNN"
-    match = re.match(r'^(.+?)\s*\|\s*([A-Z]{2,4}-\d{4}-\d{3})$', cleaned_subject.strip())
-    
-    if match:
-        job_title = match.group(1).strip()
-        subject_id = match.group(2).strip()
-        return job_title, subject_id
-    
-    return None, None

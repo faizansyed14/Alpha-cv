@@ -23,14 +23,14 @@ async def process_job_application_async(application_data: Dict[str, Any]) -> Dic
     """
     from app.ingestion.pipeline import (SOURCE_JOB_PAGE, CVSubmission, DuplicateApplication, IngestError,
                                         ingest_cv, release_application)
-    from app.providers.vectorstore.qdrant import get_qdrant_utils
+    from app.store import get_store
 
     start_time = time.time()
     application_id = application_data.get("application_id", "unknown")
     job_id = None
     try:
         logger.info(f"Processing application {application_id}")
-        job = await asyncio.to_thread(get_qdrant_utils().get_job_posting_by_token, application_data["public_token"])
+        job = await asyncio.to_thread(get_store().get_job_posting_by_token, application_data["public_token"])
         if not job:
             raise IngestError(f"Job posting not found for token: {application_data['public_token']}", 404)
         job_id = job["id"]
@@ -44,14 +44,13 @@ async def process_job_application_async(application_data: Dict[str, Any]) -> Dic
             content_sha256=application_data.get("content_sha256"),
             candidate={
                 "name": application_data.get("applicant_name"), "email": application_data.get("applicant_email"),
-                "phone": application_data.get("applicant_phone"), "cover_letter": application_data.get("cover_letter"),
+                "phone": application_data.get("applicant_phone"),
                 "expected_salary": application_data.get("expected_salary"),
                 "years_of_experience": application_data.get("years_of_experience"),
                 "location": application_data.get("location"), "notice_period": application_data.get("notice_period"),
                 "nationality": application_data.get("nationality"),
-                "experience_warning": application_data.get("experience_warning"),
             },
-            job={"job_id": job["id"], "job_title": job.get("job_title"), "company_name": job.get("company_name"),
+            job={"job_id": job["id"], "job_title": job.get("job_title"),
                  "public_token": application_data["public_token"]},
         )
         result = await asyncio.to_thread(ingest_cv, submission)

@@ -1,12 +1,14 @@
 'use client';
 
-import dynamic from 'next/dynamic';
-import { CandidatesSkeleton } from '@/components/skeletons';
-
-const DatabasePage = dynamic(() => import('@/components/database/DatabasePage'), {
-  loading: () => <CandidatesSkeleton />,
-});
+import { useLayoutEffect } from 'react';
+import DatabasePage from '@/components/database/DatabasePage';
+import { restoreScroll, SCROLL_KEYS } from '@/lib/scrollRestore';
 
 export default function CandidatesRoute() {
+  // Apply before paint so Back never flashes the top of the list.
+  useLayoutEffect(() => {
+    return restoreScroll(SCROLL_KEYS.candidates) || undefined;
+  }, []);
+
   return <DatabasePage lockedView="candidates" />;
 }

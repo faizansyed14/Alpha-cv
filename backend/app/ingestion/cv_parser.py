@@ -245,7 +245,10 @@ class ParsingService:
         import xml.etree.ElementTree as ET
 
         with zipfile.ZipFile(file_path) as zf:
-            root = ET.fromstring(zf.read("content.xml"))
+            xml = zf.read("content.xml")
+            if b"<!DOCTYPE" in xml[:4096].upper() or b"<!ENTITY" in xml.upper():       # a real ODT has neither; both are how XML bombs are built
+                raise ValueError("The document's XML declares entities, which is not allowed")
+            root = ET.fromstring(xml)  # nosec B314: DTDs and entities are refused just above
         ns = "{urn:oasis:names:tc:opendocument:xmlns:text:1.0}"
         lines = []
         for el in root.iter():
@@ -380,7 +383,7 @@ class ParsingService:
         # Ranked, candidate-first lists (see app/ingestion/contact.py); every match is still redacted from the text.
         found = extract_contacts(text, link_text)
         extracted_pii = {"email": found["emails"], "phone": found["phones"],
-                         "linkedin": found["linkedin"], "github": found["github"]}
+                         "linkedin": found["linkedin"], "github": found["github"], "github_repo_only": found["github_repo_only"]}
         email_spans = found["email_spans"]
         phone_spans = found["redact"]
         link_placeholders = {s: placeholder for s, _, placeholder in found["link_spans"]}

@@ -18,7 +18,7 @@ export default function AuthenticatedAppLayout({ children }: { children: React.R
   const { user } = useAuthStore();
   const { systemHealth, loadSystemHealth, loadingStates } = useAppStore();
 
-  const trackerOnly = !!user && TRACKER_ONLY_ROLES.includes(user.role as string) && !pathname.startsWith('/agentic');
+  const trackerOnly = !!user && TRACKER_ONLY_ROLES.includes(user.role as string) && !pathname.startsWith('/agentic') && !pathname.startsWith('/report-bug');
 
   useEffect(() => {
     if (trackerOnly) router.replace('/tracker');

@@ -44,6 +44,8 @@ engine = create_engine(
     pool_pre_ping=True,   # verify connections before using them
     pool_recycle=3600,
     echo=False,
+    **({} if settings.DATABASE_URL.startswith("sqlite") else
+       {"pool_size": settings.DB_POOL_SIZE, "max_overflow": settings.DB_MAX_OVERFLOW, "pool_timeout": settings.DB_POOL_TIMEOUT_SECONDS}),
 )
 
 
@@ -68,6 +70,7 @@ def run_migrations() -> None:
     from sqlalchemy import inspect
 
     import app.models.agent  # noqa: F401  (registers the tables)
+    import app.models.bug_report  # noqa: F401
     import app.models.tracker.models  # noqa: F401
     import app.models.user  # noqa: F401
 
@@ -79,6 +82,51 @@ def run_migrations() -> None:
         command.stamp(cfg, "head")
     else:
         command.upgrade(cfg, "head")
+
+
+def clear_admin_team(session: Session) -> None:
+    """The admin has no team: remove one left over from before that was enforced."""
+    from app.models.user import User
+
+    for leftover in session.exec(select(User).where(User.role == "admin", User.team_location.is_not(None))).all():
+        leftover.team_location = None
+        session.add(leftover)
+    session.commit()
+
+
+def sync_admin_from_env(session: Session) -> None:
+    """The admin's email and password come from the environment (.env: ADMIN_EMAIL, ADMIN_PASSWORD) and nowhere else: they are applied at
+    every start, so changing them in .env and restarting is the only way to change them (the Users page and the API refuse). The account
+    is also kept an active admin. An address another account already uses is never taken. Nothing secret is written to the log."""
+    from sqlalchemy import func
+
+    from app.models.user import User
+    from app.security.auth import hash_password, verify_password
+
+    admin = session.exec(select(User).where(User.username == settings.ADMIN_USERNAME)).first()
+    if admin is None:
+        return
+    changed = []
+    if settings.ADMIN_PASSWORD and not verify_password(settings.ADMIN_PASSWORD, admin.password_hash):
+        admin.password_hash = hash_password(settings.ADMIN_PASSWORD)
+        changed.append("password")
+    wanted = settings.ADMIN_EMAIL.strip().lower()
+    if not wanted:
+        if not admin.email:
+            logger.error("The admin account has no email and ADMIN_EMAIL is not set: nobody can sign in as admin. Set ADMIN_EMAIL in the .env file.")
+    elif (admin.email or "").lower() != wanted:
+        if session.exec(select(User).where(func.lower(User.email) == wanted, User.id != admin.id)).first() is not None:
+            logger.error("ADMIN_EMAIL is used by another account, so the admin keeps its current email. Change that account's email first.")
+        else:
+            admin.email = wanted
+            changed.append("email")
+    if admin.role != "admin" or not admin.is_active:
+        admin.role, admin.is_active = "admin", True
+        changed.append("role/active")
+    if changed:
+        session.add(admin)
+        session.commit()
+        logger.info("The admin account was brought in line with the .env file (%s)", ", ".join(changed))
 
 
 def init_database() -> None:
@@ -93,9 +141,11 @@ def init_database() -> None:
                 session.add(User(
                     username=settings.ADMIN_USERNAME,
                     password_hash=hash_password(settings.ADMIN_PASSWORD),
+                    email=settings.ADMIN_EMAIL.strip().lower() or None,
                     role="admin",
                     is_active=True,
                 ))
                 session.commit()
                 logger.info("Seeded initial admin '%s'", settings.ADMIN_USERNAME)
-            # The admin password is NOT reset on startup: credentials are seeded once from the environment.
+            clear_admin_team(session)
+            sync_admin_from_env(session)

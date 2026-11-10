@@ -9,17 +9,16 @@ Grammar (operators are upper case so a lower-case "and" inside a phrase stays a 
     not     := NOT not | atom
     atom    := "( expr )" | "quoted phrase" | word
 
-Matching is exact, against the same normalised text the Advanced search uses (``search_text``): a word matches as a
+Matching is exact, against the normalised literal text of the CV: a word matches as a
 whole word and a quoted phrase as that exact phrase, ignoring case, so "Java" never matches a JavaScript-only CV.
-``to_filter`` builds a Qdrant filter that only NARROWS the candidates (a superset); ``evaluate`` makes the decision.
+``to_sql`` turns the expression into the same test as an SQL condition on the ``literal`` search text, so the database
+decides exactly; ``evaluate`` is the in-memory form of the same rule.
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
-
-from qdrant_client.models import FieldCondition, Filter, MatchText
+from typing import List, Tuple
 
 from app.ingestion.search_index import normalize
 
@@ -182,16 +181,37 @@ def positive_terms(node: Node, negated: bool = False) -> List[Node]:
     return out
 
 
-def to_filter(node: Node) -> Optional[Filter]:
-    """A Qdrant filter every matching CV passes (it may let more through; ``evaluate`` decides). None = no narrowing."""
+def to_sql(node: Node, column, fts: bool = False):
+    """The expression as an SQLAlchemy condition on a column holding the normalised text: the same rule as ``evaluate``
+    (a term is a whole word or exact phrase), so no second check is needed. ``column`` is e.g. CandidateSearch.literal.
+    With ``fts`` the column is a PostgreSQL tsvector (CandidateSearch.literal_tsv) and a term is a full-text phrase match."""
+    from sqlalchemy import and_, func, literal, literal_column, not_, or_
+
+    padded = literal(" ") + column + literal(" ")
     if node.kind == "term":
-        return Filter(must=[FieldCondition(key="search_text", match=MatchText(text=node.term))])
+        if fts:
+            return column.op("@@")(func.phraseto_tsquery(literal_column("'simple'::regconfig"), node.term))
+        return padded.like(f"% {node.term} %")
+    if node.kind == "and":
+        return and_(*[to_sql(c, column, fts) for c in node.children])
+    if node.kind == "or":
+        return or_(*[to_sql(c, column, fts) for c in node.children])
+    return not_(to_sql(node.children[0], column, fts))
+
+
+def to_narrowing(node: Node, column):
+    """A cheaper condition every matching CV passes (a superset), written so a trigram index can serve it: the positive
+    terms as plain substring tests. None = cannot narrow (e.g. a NOT-only expression). ``to_sql`` still decides."""
+    from sqlalchemy import and_, or_
+
+    if node.kind == "term":
+        return column.like(f"%{node.term}%")
     if node.kind == "not":
         return None
-    parts = [to_filter(c) for c in node.children]
+    parts = [to_narrowing(c, column) for c in node.children]
     if node.kind == "and":
         usable = [p for p in parts if p is not None]
-        return Filter(must=usable) if usable else None
-    if any(p is None for p in parts):   # an OR with an un-narrowable branch could match anything
+        return and_(*usable) if usable else None
+    if any(p is None for p in parts):
         return None
-    return Filter(should=parts)
+    return or_(*parts)

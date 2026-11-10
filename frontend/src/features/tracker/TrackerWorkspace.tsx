@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { trackerApi, type TrackerTeam } from '@/lib/trackerApi';
+import { trackerApi, type TrackerTeam, type TrackerSummary } from '@/lib/trackerApi';
+import { InfiniteScrollSentinel } from '@/components/ui/infinite-scroll';
 import { useAuthStore } from '@/stores/authStore';
 import type { TrackerApplication, TrackerCandidate, TrackerFollowUp, TrackerJobOpening, TrackerOption } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -36,9 +37,6 @@ import {
   _norm,
   downloadBlob,
   formatDdMmYy,
-  isBackoutStatus,
-  isJoinedStatus,
-  isOfferReleasedStatus,
   isOverdue,
   stageBadgeClass,
 } from './utils';
@@ -166,6 +164,13 @@ export default function TrackerWorkspace() {
   const [candidates, setCandidates] = useState<TrackerCandidate[]>([]);
   const [applications, setApplications] = useState<TrackerApplication[]>([]);
   const [followUps, setFollowUps] = useState<TrackerFollowUp[]>([]);
+  // Each list holds the rows loaded so far; the database searches, filters and pages every row, and counts what matches.
+  const [jobTotal, setJobTotal] = useState(0);
+  const [candTotal, setCandTotal] = useState(0);
+  const [fuTotal, setFuTotal] = useState(0);
+  const [summary, setSummary] = useState<TrackerSummary | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadedRef = useRef({ jobOpenings: 0, candidateProfiles: 0, followUps: 0 });
 
   const [filterStatus, setFilterStatus] = useState('all');
   // Location removed from Tracker
@@ -216,67 +221,94 @@ export default function TrackerWorkspace() {
   const [msFollowupEmailCc, setMsFollowupEmailCc] = useState('');
   const [msFollowupEmailSaving, setMsFollowupEmailSaving] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const TEAM_LABEL: Record<string, string> = { dubai: 'Dubai', abudhabi: 'Abu Dhabi' };
+  const teamParam: TrackerTeam | 'all' | undefined = isAllTeamsView ? 'all' : apiTeam;
+  const PAGE = 50;
+
+  /** One page of the list on screen, searched and filtered by the server. In the all-teams view each row is tagged with its team. */
+  const fetchPage = useCallback(async (offset: number, limit: number) => {
+    if (!token) return null;
+    const tag = (row: any) => (isAllTeamsView ? { ...row, id: `${row.team}:${row.id}`, __realId: row.id, __team: TEAM_LABEL[row.team] } : row);
+    if (view === 'jobOpenings') {
+      const res = await trackerApi.pageJobOpenings(token, { team: teamParam, q: search.trim(), status: filterStatus, date_from: jobDateFrom, date_to: jobDateTo, limit, offset });
+      return { total: res.total, jobs: res.items.map(tag) as any[] };
+    }
+    if (view === 'candidateProfiles') {
+      const res = await trackerApi.pageCandidateRows(token, { team: teamParam, q: search.trim(), status: filterStatus, date_from: candDateFrom, date_to: candDateTo, sort: sortOrder, limit, offset });
+      const cands: any[] = [];
+      const apps: any[] = [];
+      for (const r of res.items as any[]) {
+        const team = r.team;
+        const cand = isAllTeamsView ? { ...r.candidate, id: `${team}:${r.candidate.id}`, __realId: r.candidate.id, __team: TEAM_LABEL[team] } : r.candidate;
+        cands.push(cand);
+        if (r.application) {
+          apps.push(isAllTeamsView
+            ? { ...r.application, id: `${team}:${r.application.id}`, candidate_id: `${team}:${r.application.candidate_id}`, __realId: r.application.id, __team: TEAM_LABEL[team] }
+            : r.application);
+        }
+      }
+      return { total: res.total, cands, apps };
+    }
+    if (view === 'followUps') {
+      const res = await trackerApi.pageFollowUps(token, { team: teamParam, q: followupSearch.trim(), stage: followupStageFilter, date_from: followupNextFrom, date_to: followupNextTo, limit, offset });
+      return { total: res.total, fus: res.items.map(tag) as any[] };
+    }
+    return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, teamParam, isAllTeamsView, view, search, filterStatus, jobDateFrom, jobDateTo, candDateFrom, candDateTo, sortOrder,
+      followupSearch, followupStageFilter, followupNextFrom, followupNextTo]);
+
+  const loadSummary = useCallback(async () => {
     if (!token) return;
+    try { setSummary(await trackerApi.summary(token, teamParam)); } catch { /* the cards keep their last numbers */ }
+  }, [token, teamParam]);
+
+  /** Load the first page of the list on screen (after an edit: as many rows as are on screen, so the list does not jump back to the top). */
+  const refresh = useCallback(async (keep: boolean = false) => {
+    if (!token || view === 'managerSettings') return;
     setLoading(true); setError(null);
     try {
-      if (isAllTeamsView) {
-        const [jobsDXB, rowsDXB, fusDXB, jobsAD, rowsAD, fusAD] = await Promise.all([
-          trackerApi.listJobOpenings(token, 'dubai'),
-          trackerApi.listCandidateRows(token, 'dubai').catch(() => [] as any[]),
-          trackerApi.listFollowUps(token, 'dubai').catch(() => [] as TrackerFollowUp[]),
-          trackerApi.listJobOpenings(token, 'abudhabi'),
-          trackerApi.listCandidateRows(token, 'abudhabi').catch(() => [] as any[]),
-          trackerApi.listFollowUps(token, 'abudhabi').catch(() => [] as TrackerFollowUp[]),
-        ]);
-
-        const candsDXB = rowsDXB
-          .map((r) => r.candidate)
-          .filter(Boolean)
-          .map((c: any) => ({ ...c, id: `dubai:${c.id}`, __realId: c.id, __team: 'Dubai' }));
-        const appsDXB = rowsDXB
-          .map((r) => r.application)
-          .filter(Boolean)
-          .map((a: any) => ({ ...a, id: `dubai:${a.id}`, candidate_id: `dubai:${a.candidate_id}`, __realId: a.id, __team: 'Dubai' }));
-        const candsAD = rowsAD
-          .map((r) => r.candidate)
-          .filter(Boolean)
-          .map((c: any) => ({ ...c, id: `abudhabi:${c.id}`, __realId: c.id, __team: 'Abu Dhabi' }));
-        const appsAD = rowsAD
-          .map((r) => r.application)
-          .filter(Boolean)
-          .map((a: any) => ({
-            ...a,
-            id: `abudhabi:${a.id}`,
-            candidate_id: `abudhabi:${a.candidate_id}`,
-            __realId: a.id,
-            __team: 'Abu Dhabi',
-          }));
-
-        setJobOpenings([
-          ...jobsDXB.map((j: any) => ({ ...j, id: `dubai:${j.id}`, __realId: j.id, __team: 'Dubai' })),
-          ...jobsAD.map((j: any) => ({ ...j, id: `abudhabi:${j.id}`, __realId: j.id, __team: 'Abu Dhabi' })),
-        ] as any);
-        setCandidates([...candsDXB, ...candsAD] as any);
-        setApplications([...appsDXB, ...appsAD] as any);
-        setFollowUps([
-          ...fusDXB.map((f: any) => ({ ...f, id: `dubai:${f.id}`, __realId: f.id, __team: 'Dubai' })),
-          ...fusAD.map((f: any) => ({ ...f, id: `abudhabi:${f.id}`, __realId: f.id, __team: 'Abu Dhabi' })),
-        ] as any);
-      } else {
-        const [jobs, rows, fus] = await Promise.all([
-          trackerApi.listJobOpenings(token, apiTeam),
-          trackerApi.listCandidateRows(token, apiTeam).catch(() => [] as any[]),
-          trackerApi.listFollowUps(token, apiTeam).catch(() => [] as TrackerFollowUp[]),
-        ]);
-        const cands = rows.map((r) => r.candidate).filter(Boolean);
-        const apps = rows.map((r) => r.application).filter(Boolean);
-        setJobOpenings(jobs); setCandidates(cands); setApplications(apps as any);
-        setFollowUps(fus);
+      const want = keep ? Math.min(Math.max(PAGE, loadedRef.current[view]), 1000) : PAGE;
+      const jobs: any[] = []; const cands: any[] = []; const apps: any[] = []; const fus: any[] = [];
+      let total = 0;
+      for (let offset = 0; offset < want; ) {
+        const n = Math.min(200, want - offset);
+        const page: any = await fetchPage(offset, n);
+        if (!page) break;
+        total = page.total;
+        jobs.push(...(page.jobs ?? [])); cands.push(...(page.cands ?? [])); apps.push(...(page.apps ?? [])); fus.push(...(page.fus ?? []));
+        const got = (page.jobs ?? page.cands ?? page.fus ?? []).length;
+        offset += got;
+        if (got < n) break;
       }
+      if (view === 'jobOpenings') { setJobOpenings(jobs); setJobTotal(total); loadedRef.current.jobOpenings = jobs.length; }
+      if (view === 'candidateProfiles') { setCandidates(cands); setApplications(apps); setCandTotal(total); loadedRef.current.candidateProfiles = cands.length; }
+      if (view === 'followUps') { setFollowUps(fus); setFuTotal(total); loadedRef.current.followUps = fus.length; }
     } catch (e: any) { setError(e?.message || 'Failed to load data'); }
     finally { setLoading(false); }
-  }, [token, apiTeam, isAllTeamsView]);
+  }, [token, view, fetchPage]);
+
+  /** The next page of the list on screen, added below the rows already there (called when the list is scrolled to its end). */
+  const loadMore = useCallback(async () => {
+    if (!token || loadingMore || view === 'managerSettings') return;
+    setLoadingMore(true);
+    try {
+      const page: any = await fetchPage(loadedRef.current[view], PAGE);
+      if (!page) return;
+      if (view === 'jobOpenings') {
+        setJobOpenings((prev) => { const next = [...prev, ...page.jobs]; loadedRef.current.jobOpenings = next.length; return next; });
+        setJobTotal(page.total);
+      } else if (view === 'candidateProfiles') {
+        setCandidates((prev) => { const next = [...prev, ...page.cands]; loadedRef.current.candidateProfiles = next.length; return next; });
+        setApplications((prev) => [...prev, ...page.apps]);
+        setCandTotal(page.total);
+      } else {
+        setFollowUps((prev) => { const next = [...prev, ...page.fus]; loadedRef.current.followUps = next.length; return next; });
+        setFuTotal(page.total);
+      }
+    } catch (e: any) { setError(e?.message || 'Failed to load more'); }
+    finally { setLoadingMore(false); }
+  }, [token, view, fetchPage, loadingMore]);
 
   const loadOptions = useCallback(async () => {
     if (!token) return;
@@ -391,174 +423,40 @@ export default function TrackerWorkspace() {
   }, [textPeek]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([refresh(), loadOptions()]);
-  }, [refresh, loadOptions]);
+    await Promise.all([refresh(true), loadSummary(), loadOptions()]);
+  }, [refresh, loadSummary, loadOptions]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  // A change of tab, search or filter loads the first page of what matches (typing waits a moment so every keystroke is not a request).
+  useEffect(() => {
+    const t = setTimeout(() => { void refresh(false); }, 200);
+    return () => clearTimeout(t);
+  }, [refresh]);
+  useEffect(() => { void loadSummary(); }, [loadSummary]);
   useEffect(() => { loadOptions(); }, [loadOptions]);
 
-  // Map candidate_id → first application (a candidate may appear multiple times if they have
-  // multiple applications; for the flat table we show one row per candidate using their latest app)
+  // Map candidate_id → its latest application (the server already chose it); the rows stay in the server's order.
   const appByCandId = useMemo(() => {
     const m = new Map<string, TrackerApplication>();
-    // iterate oldest→newest so the latest app wins
-    [...applications].reverse().forEach((a) => m.set(a.candidate_id, a));
+    applications.forEach((a) => m.set(a.candidate_id, a));
     return m;
   }, [applications]);
 
-  const candidateRows = useMemo(() => {
-    const s = search.trim().toLowerCase();
-    const fromD = candDateFrom ? new Date(candDateFrom) : null;
-    const toD = candDateTo ? new Date(candDateTo) : null;
-    if (fromD) fromD.setHours(0, 0, 0, 0);
-    if (toD) toD.setHours(23, 59, 59, 999);
-    return candidates
-      .map((cand) => ({ cand, app: appByCandId.get(cand.id) ?? null }))
-      .filter(({ app }) => filterStatus === 'all' || (app?.status ?? '') === filterStatus)
-      .filter(({ cand, app }) => {
-        if (!s) return true;
-        return (
-          cand.name.toLowerCase().includes(s) ||
-          (app?.position || '').toLowerCase().includes(s) ||
-          (app?.client || '').toLowerCase().includes(s) ||
-          (app?.recruiter || '').toLowerCase().includes(s) ||
-          (app?.account_manager || '').toLowerCase().includes(s) ||
-          (app?.recruitment_manager || '').toLowerCase().includes(s) ||
-          (app?.comment || '').toLowerCase().includes(s)
-        );
-      })
-      .filter(({ app }) => {
-        if (!fromD && !toD) return true;
-        const d = app?.applied_date ? new Date(String(app.applied_date)) : null;
-        if (!d || Number.isNaN(d.getTime())) return false;
-        if (fromD && d < fromD) return false;
-        if (toD && d > toD) return false;
-        return true;
-      })
-      .sort((a, b) => {
-        const ad = a.app?.applied_date ? new Date(a.app.applied_date).getTime() : 0;
-        const bd = b.app?.applied_date ? new Date(b.app.applied_date).getTime() : 0;
-        return sortOrder === 'latest' ? bd - ad : ad - bd;
-      });
-  }, [candidates, appByCandId, filterStatus, search, candDateFrom, candDateTo, sortOrder]);
+  const candidateRows = useMemo(
+    () => candidates.map((cand) => ({ cand, app: appByCandId.get(cand.id) ?? null })),
+    [candidates, appByCandId],
+  );
+  const visibleJobOpenings = jobOpenings;       // searched, filtered and ordered by the server
+  const visibleFollowUps = followUps;
 
-  const visibleJobOpenings = useMemo(() => {
-    const s = search.trim().toLowerCase();
-    const fromD = jobDateFrom ? new Date(jobDateFrom) : null;
-    const toD = jobDateTo ? new Date(jobDateTo) : null;
-    if (fromD) fromD.setHours(0, 0, 0, 0);
-    if (toD) toD.setHours(23, 59, 59, 999);
-    return jobOpenings
-      .filter((j) => filterStatus === 'all' || (j.status ?? '') === filterStatus)
-      .filter((j) => {
-        if (!s) return true;
-        const client = (j as any).client || '';
-        return (
-          (j.title || '').toLowerCase().includes(s) ||
-          String(client).toLowerCase().includes(s) ||
-          (j.hiring_manager || '').toLowerCase().includes(s) ||
-          (j.department || '').toLowerCase().includes(s)
-        );
-      })
-      .filter((j) => {
-        if (!fromD && !toD) return true;
-        const d = (j as any).submission_date ? new Date(String((j as any).submission_date)) : null;
-        if (!d || Number.isNaN(d.getTime())) return false;
-        if (fromD && d < fromD) return false;
-        if (toD && d > toD) return false;
-        return true;
-      })
-      .sort((a, b) => {
-        const ad = new Date(a.created_at || 0).getTime();
-        const bd = new Date(b.created_at || 0).getTime();
-        return bd - ad;
-      });
-  }, [jobOpenings, filterStatus, search, jobDateFrom, jobDateTo]);
-
-  const visibleFollowUps = useMemo(() => {
-    const q = followupSearch.trim().toLowerCase();
-    const stage = followupStageFilter;
-    const from = followupNextFrom ? new Date(followupNextFrom) : null;
-    const to = followupNextTo ? new Date(followupNextTo) : null;
-    if (from) from.setHours(0, 0, 0, 0);
-    if (to) to.setHours(23, 59, 59, 999);
-
-    return [...followUps]
-      .filter((r) => {
-        if (!q) return true;
-        return (
-          String(r.client_name || '').toLowerCase().includes(q) ||
-          String(r.position || '').toLowerCase().includes(q) ||
-          String(r.recruiter_name || '').toLowerCase().includes(q) ||
-          String(r.account_manager || '').toLowerCase().includes(q) ||
-          String(r.recruitment_manager || '').toLowerCase().includes(q) ||
-          String(r.client_feedback || '').toLowerCase().includes(q) ||
-          String(r.interview_feedback || '').toLowerCase().includes(q) ||
-          String(r.remarks || '').toLowerCase().includes(q)
-        );
-      })
-      .filter((r) => stage === 'all' || String(r.current_stage || '') === stage)
-      .filter((r) => {
-        if (!from && !to) return true;
-        const d = r.next_follow_up_date ? new Date(r.next_follow_up_date) : null;
-        if (!d || Number.isNaN(d.getTime())) return false;
-        if (from && d < from) return false;
-        if (to && d > to) return false;
-        return true;
-      })
-      .sort((a, b) => {
-        const ad = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const bd = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return bd - ad;
-      });
-  }, [followUps, followupSearch, followupStageFilter, followupNextFrom, followupNextTo]);
-
-  const requirementCounts = useMemo(() => {
-    const isClosed = (s?: string | null) => {
-      const k = String(s || '').toLowerCase().trim();
-      return k === 'closed' || k === 'cancelled';
-    };
-    const isHold = (s?: string | null) => {
-      const k = String(s || '').toLowerCase().trim();
-      return k === 'hold';
-    };
-    const isSubmitted = (s?: string | null) => {
-      const k = String(s || '').toLowerCase().trim();
-      return k === 'submitted';
-    };
-    const open = jobOpenings.filter((j) => !isClosed(j.status) && !isHold(j.status) && !isSubmitted(j.status)).length;
-    const submitted = jobOpenings.filter((j) => isSubmitted(j.status)).length;
-    const hold = jobOpenings.filter((j) => isHold(j.status)).length;
-    const closed = jobOpenings.filter((j) => isClosed(j.status)).length;
-    return { open, submitted, hold, closed };
-  }, [jobOpenings]);
-
-  const selectionCounts = useMemo(() => {
-    const totalSelections = candidateRows.length;
-    const joined = candidateRows.filter(({ app }) => isJoinedStatus(app?.status)).length;
-    const backouts = candidateRows.filter(({ app }) => isBackoutStatus(_norm(app?.status))).length;
-    const offerReleased = candidateRows.filter(({ app }) => isOfferReleasedStatus(_norm(app?.status))).length;
-    const offerPending = candidateRows.filter(({ app }) => _norm(app?.status) === 'offer pending').length;
-    return { totalSelections, offerPending, offerReleased, backouts, joined };
-  }, [candidateRows, applications]);
-
-  const followUpCounts = useMemo(() => {
-    let feedbackPending = 0;
-    let positionsClosed = 0;
-    let overdue = 0;
-    let holdCount = 0;
-    let interviewScheduledCount = 0;
-    for (const f of followUps) {
-      const st = String(f.current_stage || '').trim();
-      const k = _norm(st);
-      if (k === 'positions closed' || k === 'position closed') positionsClosed += 1;
-      if (k === 'feedback pending' || k === 'interview feedback pending') feedbackPending += 1;
-      if (k === 'hold') holdCount += 1;
-      if (k === 'interview' || (k.includes('interview') && k.includes('scheduled'))) interviewScheduledCount += 1;
-      if (isOverdue(f.next_follow_up_date, st) || k === 'overdue follow-ups') overdue += 1;
-    }
-    return { feedbackPending, positionsClosed, overdue, hold: holdCount, interviewScheduled: interviewScheduledCount };
-  }, [followUps]);
+  const requirementCounts = summary?.requirements ?? { open: 0, submitted: 0, hold: 0, closed: 0, total: 0 };
+  const selectionCounts = {
+    totalSelections: summary?.selections.total ?? 0, offerPending: summary?.selections.offerPending ?? 0,
+    offerReleased: summary?.selections.offerReleased ?? 0, backouts: summary?.selections.backouts ?? 0, joined: summary?.selections.joined ?? 0,
+  };
+  const followUpCounts = summary?.followups ?? { feedbackPending: 0, positionsClosed: 0, overdue: 0, hold: 0, interviewScheduled: 0, total: 0 };
+  const hasMoreRows = view === 'jobOpenings' ? jobOpenings.length < jobTotal
+    : view === 'candidateProfiles' ? candidates.length < candTotal
+      : view === 'followUps' ? followUps.length < fuTotal : false;
 
 
   /* ── sidebar ── */
@@ -603,10 +501,10 @@ export default function TrackerWorkspace() {
 
       <nav className="px-2 pt-3 space-y-0.5 flex-1">
         {([
-          { id: 'jobOpenings', label: 'Requirement Status', icon: Briefcase, count: jobOpenings.length, show: true },
+          { id: 'jobOpenings', label: 'Requirement Status', icon: Briefcase, count: requirementCounts.total, show: true },
           // Recruiters should not see Selections & Joinings.
-          { id: 'candidateProfiles', label: 'Selections & Joinings', icon: Users, count: candidates.length, show: !isRecruiterUser },
-          { id: 'followUps', label: 'Follow-ups', icon: Shield, count: followUps.length, show: true },
+          { id: 'candidateProfiles', label: 'Selections & Joinings', icon: Users, count: selectionCounts.totalSelections, show: !isRecruiterUser },
+          { id: 'followUps', label: 'Follow-ups', icon: Shield, count: followUpCounts.total, show: true },
           {
             id: 'managerSettings',
             label: 'Manager Settings',
@@ -736,9 +634,9 @@ export default function TrackerWorkspace() {
               <div>
                 <p className="text-[13px] text-slate-400 font-medium">
                   {view === 'candidateProfiles'
-                    ? `${candidateRows.length} candidate${candidateRows.length !== 1 ? 's' : ''}`
+                    ? `${candTotal.toLocaleString()} candidate${candTotal !== 1 ? 's' : ''}`
                     : view === 'followUps'
-                      ? `${followUps.length} follow-up${followUps.length !== 1 ? 's' : ''}`
+                      ? `${fuTotal.toLocaleString()} follow-up${fuTotal !== 1 ? 's' : ''}`
                       : null}
                 </p>
                 {view === 'jobOpenings' && (
@@ -746,7 +644,7 @@ export default function TrackerWorkspace() {
                     <div className="w-[100px] h-[62px] rounded-lg border border-surface-border bg-slate-50 flex flex-col justify-center px-3">
                       <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Total</div>
                       <div className="text-[20px] leading-none font-extrabold text-slate-900 tabular-nums">
-                        {jobOpenings.length}
+                        {requirementCounts.total}
                       </div>
                     </div>
                     <div className="w-[92px] h-[62px] rounded-lg border border-transparent bg-brand-600 flex flex-col justify-center px-3">
@@ -1233,6 +1131,7 @@ export default function TrackerWorkspace() {
                   </tbody>
                 </table>
               </SyncedXScroll>
+              <InfiniteScrollSentinel hasMore={hasMoreRows} loading={loadingMore} itemCount={jobOpenings.length} onLoadMore={loadMore} />
             </div>
           ) : view === 'candidateProfiles' ? (
             /* ────── Selections & Joinings table ────── */
@@ -1505,6 +1404,7 @@ export default function TrackerWorkspace() {
                   </tbody>
                 </table>
               </SyncedXScroll>
+              <InfiniteScrollSentinel hasMore={hasMoreRows} loading={loadingMore} itemCount={candidates.length} onLoadMore={loadMore} />
             </div>
           ) : view === 'followUps' ? (
             /* ────── Follow-ups table ────── */
@@ -1834,6 +1734,7 @@ export default function TrackerWorkspace() {
                   </tbody>
                 </table>
               </SyncedXScroll>
+              <InfiniteScrollSentinel hasMore={hasMoreRows} loading={loadingMore} itemCount={followUps.length} onLoadMore={loadMore} />
             </div>
           ) : (
             /* ────── Manager Settings ────── */

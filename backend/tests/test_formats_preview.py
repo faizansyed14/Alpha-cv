@@ -43,6 +43,22 @@ def test_odt_is_extracted(parser, tmp_path):
     assert "Jane Smith" in text and "FastAPI" in text
 
 
+@pytest.mark.parametrize("bomb", [
+    '<!DOCTYPE bomb [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]>',          # entity expansion ("billion laughs")
+    '<!DOCTYPE x [<!ENTITY secret SYSTEM "file:///etc/passwd">]>',                                     # an external entity
+    '<!doctype x [<!entity e "v">]>',                                                                   # the same in lower case
+])
+def test_an_odt_whose_xml_declares_entities_is_refused(parser, tmp_path, bomb):
+    f = tmp_path / "bomb.odt"
+    xml = (bomb + '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+           'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text>'
+           '<text:p>&a;</text:p></office:text></office:body></office:document-content>')
+    with zipfile.ZipFile(f, "w") as zf:
+        zf.writestr("content.xml", xml)
+    with pytest.raises(Exception, match="entities"):
+        parser.extract_text_from_odt(str(f))
+
+
 def test_html_is_extracted_without_scripts_or_tags(parser, tmp_path):
     f = tmp_path / "cv.html"
     f.write_text(f"<html><head><style>p{{color:red}}</style><script>alert(1)</script></head>"
@@ -106,17 +122,14 @@ def client(mock_user):
 
 
 def test_preview_endpoint_returns_png_with_page_count(client):
-    point = SimpleNamespace(payload={"raw_content": BODY * 80, "filename": "cv.doc"})
-    qdrant = MagicMock()
-    qdrant.client.retrieve.return_value = [point]
-    with patch("app.api.routers.cvs.get_qdrant_utils", return_value=qdrant):
-        resp = client.get("/api/cv/abc123/preview?page=1")
+    from app.store import get_store
+
+    cid = get_store().save_candidate({"id": "00000000-0000-0000-0000-000000000001", "content_sha256": "a" * 64, "filename": "cv.doc",
+                                      "raw_text": BODY * 80, "facts": {"full_name": "Sam"}})
+    resp = client.get(f"/api/cv/{cid}/preview?page=1")
     assert resp.status_code == 200 and resp.headers["content-type"] == "image/png"
     assert int(resp.headers["X-Preview-Pages"]) >= 1 and resp.content[:4] == b"\x89PNG"
 
 
 def test_preview_endpoint_404s_for_unknown_cv(client):
-    qdrant = MagicMock()
-    qdrant.client.retrieve.return_value = []
-    with patch("app.api.routers.cvs.get_qdrant_utils", return_value=qdrant):
-        assert client.get("/api/cv/missing/preview").status_code == 404
+    assert client.get("/api/cv/missing/preview").status_code == 404

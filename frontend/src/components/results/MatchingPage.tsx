@@ -13,7 +13,6 @@ import {
   Pencil,
   Save,
   X,
-  Sparkles,
   CheckCircle2,
   AlertTriangle,
   FileCheck,
@@ -364,9 +363,7 @@ export default function MatchingPage() {
     <motion.div variants={rise} initial="hidden" animate="show" className="rounded-2xl border border-surface-border bg-paper p-5 shadow-card">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-navy-600 text-white shadow-sm">
-            <Target className="h-5 w-5" />
-          </div>
+          <img src="/icons/match/ai-robot.gif" alt="" aria-hidden className="h-10 w-10 shrink-0 object-contain" />
           <div>
             <h3 className="text-[15px] font-semibold tracking-[-0.015em] text-slate-900">Quick match</h3>
             <p className="text-xs text-slate-500">Score the latest CVs in a category against a job description.</p>
@@ -1009,7 +1006,6 @@ export default function MatchingPage() {
                             phone={candidate.cv_phone}
                             linkedin={candidate.cv_linkedin}
                             github={candidate.cv_github}
-                            privacy
                           />
                         </div>
                       )}
@@ -1293,12 +1289,7 @@ export default function MatchingPage() {
                               <div className="space-y-4 rounded-2xl border border-surface-border bg-white p-4 shadow-card sm:p-5">
                                 <div className="flex items-start justify-between gap-4 pb-3 border-b border-slate-100">
                                   <div className="flex items-center gap-3">
-                                    <div className={`p-2 rounded-lg ${candidate.llm_analysis.match_level === 'Strong' ? 'bg-emerald-100 text-emerald-600' :
-                                      candidate.llm_analysis.match_level === 'Good' ? 'bg-blue-100 text-blue-600' :
-                                        'bg-amber-100 text-amber-600'
-                                      }`}>
-                                      <Sparkles className="w-5 h-5" />
-                                    </div>
+                                    <img src="/icons/match/ai-robot.gif" alt="" aria-hidden className="h-9 w-9 shrink-0 object-contain" />
                                     <div>
                                       <h4 className="text-base font-semibold text-slate-900 leading-tight">AI Match Analysis</h4>
                                       <p className="text-xs font-medium text-slate-500 mt-0.5">

@@ -1,11 +1,11 @@
 """Advanced CV search, the modal on the database page (keywords, experience
-range, location, nationality), searching the whole cv_structured collection
+range, location, nationality), searching the whole candidate table
 server-side with cursor-based pagination for infinite scroll. Matching rules:
-QdrantUtils.search_cvs_advanced.
+CandidateStore.search_candidates (app/store/candidates.py).
 """
-from typing import List, Optional
+from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class CVAdvancedSearchRequest(BaseModel):
@@ -18,6 +18,16 @@ class CVAdvancedSearchRequest(BaseModel):
     locations: Optional[List[str]] = Field(None, max_length=50, description="Any of these locations (matched by words)")
     nationalities: Optional[List[str]] = Field(None, max_length=50, description="Any of these nationalities (matched by words)")
     languages: Optional[List[str]] = Field(None, max_length=50, description="Any of these languages (exact match on CV languages)")
+    categories: Optional[List[str]] = Field(None, max_length=50, description="Only CVs in any of these categories (folders)")
+    notes: Optional[Literal["with", "without"]] = Field(None, description="Only CVs that have (or have no) HR notes")
+    @field_validator("keywords", "locations", "nationalities", "languages", "categories")
+    @classmethod
+    def _short_items(cls, values):
+        # one keyword is a word or a phrase; megabyte-long ones only cost the database time
+        if values and any(len(v) > 200 for v in values):
+            raise ValueError("each value must be at most 200 characters")
+        return values
+
     boolean_query: Optional[str] = Field(
         None, max_length=4000,
         description='A pasted boolean string, e.g. ("Cloud Engineer") AND ("Azure" OR "AWS") NOT intern. Narrows with the other filters.'
@@ -52,7 +62,6 @@ class CVSearchResultItem(BaseModel):
     is_job_application: bool = False
     applied_job_id: Optional[str] = None
     applied_job_title: Optional[str] = None
-    match_score: Optional[float] = None
     matched_keywords: List[str] = []
 
 

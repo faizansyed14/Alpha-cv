@@ -22,9 +22,12 @@ import {
   MessageSquare,
   Megaphone,
   Cpu,
+  Bug,
+  Bookmark,
 } from '@/components/icons';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useSavedCvsStore } from '@/stores/savedCvsStore';
 import { api } from '@/lib/api';
 import { clearActiveMatch, loadActiveMatch } from '@/lib/matchRun';
 import { getToken } from '@/lib/auth';
@@ -51,26 +54,32 @@ interface TabItem {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   description: string;
-  section: 'Recruiting' | 'Hiring' | 'AI agents' | 'Administration';
+  section: 'Recruiting' | 'Hiring' | 'AI agents' | 'Administration' | 'Support';
 }
 
 const TRACKER_ONLY_ROLES = ['account_manager'];
-const NAV_WIDTH = 236;
-const NAV_WIDTH_COLLAPSED = 72;
+const NAV_WIDTH = 188;
+const NAV_WIDTH_COLLAPSED = 64;
 const NAV_COLLAPSED_KEY = 'alphacv.navCollapsed';
 
 const STAFF_ROLES = ['admin', 'user', 'recruiter', 'manager', 'evp'];   // keep in step with canUseAgents in lib/agentLinks.ts
+
+const REPORT_BUG_TAB: TabItem = { id: 'report-bug', label: 'Report a bug', icon: Bug, description: 'Tell us something is not working', section: 'Support' };
 
 const getNavigationTabs = (
   userRole?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager',
 ): TabItem[] => {
   if (userRole && TRACKER_ONLY_ROLES.includes(userRole)) {
-    return [{ id: 'tracker', label: 'Tracker', icon: KanbanSquare, description: 'Candidate tracker', section: 'Hiring' }];
+    return [
+      { id: 'tracker', label: 'Tracker', icon: KanbanSquare, description: 'Candidate tracker', section: 'Hiring' },
+      REPORT_BUG_TAB,
+    ];
   }
 
   const tabs: TabItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, description: 'Overview and quick actions', section: 'Recruiting' },
     { id: 'candidates', label: 'Candidates', icon: Users, description: 'Browse and select CVs', section: 'Recruiting' },
+    { id: 'saved', label: 'Saved CVs', icon: Bookmark, description: 'Your saved candidates: select and match them', section: 'Recruiting' },
     { id: 'jobs', label: 'Job descriptions', icon: FileText, description: 'Browse and select a JD', section: 'Recruiting' },
     { id: 'match', label: 'Match', icon: Target, description: 'AI matching results', section: 'Recruiting' },
     { id: 'upload', label: 'Upload', icon: Upload, description: 'Upload documents', section: 'Recruiting' },
@@ -88,7 +97,9 @@ const getNavigationTabs = (
     tabs.push({ id: 'admin', label: 'Users', icon: Shield, description: 'User management & database tools', section: 'Administration' });
     tabs.push({ id: 'monitor', label: 'Monitor', icon: Activity, description: 'Model calls, matching flow & system health', section: 'Administration' });
     tabs.push({ id: 'agent-usage', label: 'Agent usage', icon: Cpu, description: 'AI agent token use per person, with reset', section: 'Administration' });
+    tabs.push({ id: 'admin-bugs', label: 'Bug reports', icon: Bug, description: 'What users reported, with status and replies', section: 'Administration' });
   }
+  tabs.push(REPORT_BUG_TAB);
   return tabs;
 };
 
@@ -139,10 +150,29 @@ export default function AppShell({ children }: AppShellProps) {
   const fullBleed = isFullBleedPath(pathname);
   const agentic = pathname.replace(/\/$/, '') === '/agentic';          // Agentic mode has no side navigation: it is its own full page
   const navigationTabs = getNavigationTabs(user?.role);
+  const [openBugs, setOpenBugs] = useState<number | undefined>(undefined);
+  const savedCount = useSavedCvsStore((s) => s.ids.length);
+  const loadSaved = useSavedCvsStore((s) => s.load);
+  const canSave = !!user && user.role !== 'account_manager';
+  useEffect(() => {
+    if (canSave) void loadSaved(true);           // each person's own list: read again when someone else signs in
+  }, [canSave, user?.username, loadSaved]);
   const navCounts: Record<string, number | undefined> = {
     candidates: totalCVs ?? (cvs.length || undefined),
     jobs: totalJDs ?? (jds.length || undefined),
+    'admin-bugs': openBugs,
+    saved: savedCount || undefined,
   };
+
+  // The admin sees how many bug reports still wait, kept fresh while the page is open.
+  useEffect(() => {
+    if (user?.role !== 'admin') return;
+    let alive = true;
+    const load = () => { api.getOpenBugCount().then((n) => { if (alive) setOpenBugs(n); }).catch(() => {}); };
+    load();
+    const id = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(id); };
+  }, [user?.role]);
 
   useEffect(() => {
     if (pathname.replace(/\/$/, '') !== '/agentic') persistWorkspacePath(pathname.replace(/\/$/, '') || '/dashboard');
@@ -196,6 +226,7 @@ export default function AppShell({ children }: AppShellProps) {
 
   const handleLogout = () => {
     clearActiveMatch();
+    useSavedCvsStore.getState().reset();
     logout();
     router.push('/login');
   };
@@ -226,9 +257,23 @@ export default function AppShell({ children }: AppShellProps) {
         {active ? (
           <motion.span layoutId={`nav-pill-${scope}`} transition={spring.snappy} className="absolute inset-0 rounded-xl bg-navy-50/70" />
         ) : null}
-        <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
-          <Icon className="h-5 w-5" />
-        </span>
+        <motion.span
+          className="relative flex h-6 w-6 shrink-0 items-center justify-center"
+          whileHover={{ scale: 1.14, y: -1 }}
+          whileTap={{ scale: 0.92 }}
+          animate={active ? { scale: [1, 1.1, 1], rotate: [0, -6, 6, 0] } : { scale: 1, rotate: 0 }}
+          transition={
+            active
+              ? { duration: 0.55, ease, times: [0, 0.35, 0.7, 1] }
+              : { type: 'spring', stiffness: 420, damping: 22 }
+          }
+        >
+          <Icon
+            className={`h-5 w-5 transition-colors duration-150 ${
+              active ? 'text-navy-700' : 'text-slate-500 group-hover:text-slate-800'
+            }`}
+          />
+        </motion.span>
         {compact ? null : <span className="relative min-w-0 flex-1 truncate text-left">{tab.label}</span>}
         {!compact && typeof count === 'number' && count > 0 ? (
           <span className={`relative rounded-md px-1.5 text-[11px] font-semibold tabular-nums ${active ? 'bg-white text-navy-700' : 'text-slate-400'}`}>
@@ -248,7 +293,7 @@ export default function AppShell({ children }: AppShellProps) {
     );
   };
 
-  const sections = (['Recruiting', 'Hiring', 'AI agents', 'Administration'] as const)
+  const sections = (['Recruiting', 'Hiring', 'AI agents', 'Administration', 'Support'] as const)
     .map((name) => ({ name, items: navigationTabs.filter((t) => t.section === name) }))
     .filter((g) => g.items.length > 0);
 

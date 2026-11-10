@@ -23,10 +23,14 @@ export interface AgentChatShellProps {
   title: string;                                   // header and sidebar title
   headline: string;                                // heading on the start screen
   blurb: string;                                   // one line under it
+  /** Real image mark above the start-screen headline (and beside the header title). */
+  heroMarkSrc?: string;
   workingSteps: string[];                          // status lines while the answer is written
   workingStepsWithCv?: string[];
   renderAnswer: (message: AgentMessage, ctx: { fresh: boolean }) => ReactNode;
 }
+
+const SIDE_W = 168;
 
 function errorText(e: any, fallback: string): string {
   return e?.detail || e?.response?.data?.detail || e?.message || fallback;
@@ -44,7 +48,7 @@ function Note({ m }: { m: AgentMessage }) {
   );
 }
 
-export function AgentChatShell({ agentId, title, headline, blurb, workingSteps, workingStepsWithCv, renderAnswer }: AgentChatShellProps) {
+export function AgentChatShell({ agentId, title, headline, blurb, heroMarkSrc, workingSteps, workingStepsWithCv, renderAnswer }: AgentChatShellProps) {
   const jds = useAppStore((s) => s.jds);
   const cvs = useAppStore((s) => s.cvs);
   const loadJDs = useAppStore((s) => s.loadJDs);
@@ -266,7 +270,7 @@ export function AgentChatShell({ agentId, title, headline, blurb, workingSteps, 
 
   const examples = info?.examples ?? [];
   const sidebar = (
-    <div className="flex h-full w-[236px] flex-col">
+    <div className="flex h-full flex-col" style={{ width: SIDE_W }}>
       <div className="p-2.5">
         <button type="button" onClick={newChat}
           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-slate-800 transition-colors hover:bg-slate-200/60">
@@ -281,7 +285,7 @@ export function AgentChatShell({ agentId, title, headline, blurb, workingSteps, 
     <div className="flex h-[calc(100dvh-3.5rem)] overflow-hidden bg-white lg:h-dvh">
       <motion.aside
         className="hidden shrink-0 overflow-hidden border-r border-slate-200 bg-slate-50 lg:block"
-        initial={false} animate={{ width: sideOpen ? 236 : 0 }} transition={{ duration: 0.24, ease }}
+        initial={false} animate={{ width: sideOpen ? SIDE_W : 0 }} transition={{ duration: 0.24, ease }}
       >
         {sidebar}
       </motion.aside>
@@ -290,7 +294,7 @@ export function AgentChatShell({ agentId, title, headline, blurb, workingSteps, 
         {drawer && (
           <div className="fixed inset-0 z-50 lg:hidden">
             <motion.div className="absolute inset-0 bg-slate-900/40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDrawer(false)} />
-            <motion.aside className="absolute inset-y-0 left-0 bg-slate-50 shadow-2xl" initial={{ x: -240 }} animate={{ x: 0 }} exit={{ x: -240 }} transition={{ duration: 0.26, ease }}>
+            <motion.aside className="absolute inset-y-0 left-0 bg-slate-50 shadow-2xl" initial={{ x: -SIDE_W }} animate={{ x: 0 }} exit={{ x: -SIDE_W }} transition={{ duration: 0.26, ease }}>
               <button type="button" onClick={() => setDrawer(false)} aria-label="Close" className="absolute right-1 top-2.5 rounded-lg p-2 text-slate-400 hover:bg-slate-200/60"><X className="h-4 w-4" /></button>
               {sidebar}
             </motion.aside>
@@ -302,7 +306,12 @@ export function AgentChatShell({ agentId, title, headline, blurb, workingSteps, 
         <header className="flex h-14 shrink-0 items-center gap-1 px-2 sm:px-3">
           <button type="button" onClick={() => setDrawer(true)} aria-label="Chats" className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 lg:hidden"><PanelLeft className="h-5 w-5" /></button>
           <button type="button" onClick={() => setSideOpen((o) => !o)} aria-label={sideOpen ? 'Hide chats' : 'Show chats'} className="hidden rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 lg:block"><PanelLeft className="h-5 w-5" /></button>
-          <p className="ml-1 flex-1 truncate text-[15px] font-semibold text-slate-900">{title}</p>
+          <div className="ml-1 flex min-w-0 flex-1 items-center gap-2">
+            {heroMarkSrc ? (
+              <img src={heroMarkSrc} alt="" draggable={false} className="h-6 w-6 shrink-0 rounded-md object-cover" />
+            ) : null}
+            <p className="truncate text-[15px] font-semibold text-slate-900">{title}</p>
+          </div>
           <ModeToggle className="mr-1" />
           <UsageMenu usage={usage} onOpen={() => void api.getAgentUsage().then(setUsage).catch(() => undefined)}
             onRequestReset={async (reason) => { setUsage(await api.requestAgentReset(reason)); }} />
@@ -312,6 +321,14 @@ export function AgentChatShell({ agentId, title, headline, blurb, workingSteps, 
           {showStart ? (
             <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center px-4 pb-24 pt-4 sm:px-6">
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease }} className="mb-7 text-center">
+                {heroMarkSrc ? (
+                  <img
+                    src={heroMarkSrc}
+                    alt=""
+                    draggable={false}
+                    className="mx-auto mb-4 h-16 w-16 rounded-2xl object-cover shadow-md ring-1 ring-black/5 sm:h-[72px] sm:w-[72px]"
+                  />
+                ) : null}
                 <h1 className="text-[28px] font-semibold leading-tight tracking-tight text-slate-900 sm:text-[32px]">{headline}</h1>
                 <p className="mx-auto mt-2 max-w-md text-[14.5px] leading-relaxed text-slate-500">{blurb}</p>
               </motion.div>

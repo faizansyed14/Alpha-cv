@@ -22,6 +22,7 @@ from app.api.routers.agentic import router as agentic_router
 from app.api.routers.interview_agent import router as interview_agent_router
 from app.api.routers.linkedin_agent import router as linkedin_agent_router
 from app.api.routers.admin import router as admin_router
+from app.api.routers.bug_reports import router as bug_reports_router
 from app.api.routers.tracker import router as tracker_router
 from app.api.routers.features import router as features_router
 
@@ -29,7 +30,7 @@ from app.api.routers.features import router as features_router
 from app.config.settings import settings
 from app.db.startup_lock import schema_init_lock
 from app.monitoring.recorder import get_recorder
-from app.providers.vectorstore.qdrant import get_qdrant_utils
+from app.store import get_store
 from app.providers.embeddings.service import get_embedding_service
 from app.providers.cache.memory import get_cache_service
 from app.db.database import init_database
@@ -58,12 +59,9 @@ async def lifespan(app: FastAPI):
         logger.info(f"Qdrant: {settings.QDRANT_HOST}:{settings.QDRANT_PORT}")
 
         # Initialize core dependencies
-        logger.info("Initializing Qdrant client & collections...")
-        get_qdrant_utils()  # ensures collections exist
+        logger.info("Initializing the vector store (Qdrant collections)...")
+        get_store().vectors.client   # connects and creates the two vector collections if they are missing
         logger.info("Qdrant ready")
-        # CVs stored before the advanced-search fields existed get them in the background (one process, idempotent)
-        from app.ingestion.search_index import start_backfill_in_background
-        start_backfill_in_background()
         
         logger.info("Warming embedding service...")
         get_embedding_service()
@@ -219,13 +217,17 @@ async def add_security_headers(request, call_next):
     is_https = (request.scope.get("scheme", request.url.scheme) == "https" or 
                 request.headers.get("X-Forwarded-Proto") == "https")
     
-    # Add security headers for HTTPS requests
+    # These cost nothing and are right on every response, over HTTP or HTTPS, in every environment.
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+    # Sign-in answers (tokens, CAPTCHA images) must never be stored by a browser or a proxy.
+    if request.url.path.startswith("/api/auth/"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+    # HSTS only makes sense over HTTPS, and not for local development.
     if not is_development and is_https:
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "SAMEORIGIN"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     
     return response
@@ -240,6 +242,7 @@ app.include_router(agentic_router)
 app.include_router(interview_agent_router)
 app.include_router(linkedin_agent_router)
 app.include_router(admin_router)
+app.include_router(bug_reports_router)
 app.include_router(features_router)
 app.include_router(tracker_router)
 app.include_router(notices.router)
@@ -289,7 +292,7 @@ async def root():
             "Document processing (PDF, DOCX, OCR)",
             "LLM standardization for CV/JD",
             f"Vector embeddings ({settings.EMBEDDING_MODEL_NAME}, {settings.EMBEDDING_DIM}d)",
-            "EXACT 32-vector storage for embeddings",
+            "EXACT 32-vector storage for embeddings (Qdrant: vectors only; PostgreSQL: every fact)",
             "Explainable + Hungarian deterministic matching",
             "Bulk processing & top candidate search",
             "JWT Authentication & User Management",
@@ -297,16 +300,37 @@ async def root():
             "Anonymous job applications",
             "Careers page functionality",
         ],
-        "qdrant_collections": [
-            "cv_documents", "cv_structured", "cv_embeddings",
-            "jd_documents", "jd_structured", "jd_embeddings",
-            "job_postings_documents", "job_postings_structured", "job_postings_embeddings",
-            "applications_documents", "applications_structured", "applications_embeddings",
-        ],
+        "qdrant_collections": ["candidate_vectors", "job_description_vectors"],   # vectors only; every fact is in PostgreSQL
     }
 
 
 from fastapi import HTTPException as _HTTPException
+from fastapi.exceptions import RequestValidationError
+from sqlalchemy.exc import TimeoutError as _SATimeout
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request, exc):
+    """422 with where and why, but WITHOUT echoing what the caller sent (FastAPI's default repeats the input: passwords in a
+    malformed login body, megabytes of junk, and a deeply nested body crashed the encoder with a 500)."""
+    try:
+        errors = [{"loc": [str(x) if not isinstance(x, int) else x for x in e.get("loc", ())], "msg": str(e.get("msg", ""))[:200],
+                   "type": str(e.get("type", ""))} for e in exc.errors()[:50]]
+    except RecursionError:
+        errors = [{"loc": ["body"], "msg": "Request body is nested too deeply", "type": "too_deep"}]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
+@app.exception_handler(_SATimeout)
+async def pool_busy_handler(request, exc):
+    logger.error("Database connection pool exhausted")
+    return JSONResponse(status_code=503, headers={"Retry-After": "5"},
+                        content={"error": "The server is busy. Please try again in a moment.", "detail": "The server is busy. Please try again in a moment.", "type": "busy"})
+
+
+@app.exception_handler(RecursionError)
+async def too_deep_handler(request, exc):
+    return JSONResponse(status_code=400, content={"error": "Request body is nested too deeply", "detail": "Request body is nested too deeply", "type": "http_error"})
 
 
 @app.exception_handler(Exception)

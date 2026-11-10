@@ -9,6 +9,14 @@ from typing import Generator
 if not os.getenv("TESTS_USE_REAL_REDIS"):
     os.environ["REDIS_HOST"] = "127.0.0.1"
     os.environ["REDIS_PORT"] = "1"            # nothing listens here: tests run without Redis, never against a live one
+
+# Tests never touch a real database: the app's engine is a throwaway SQLite file (set before the app is imported, whatever the
+# environment says), and Qdrant is an in-memory client (see the _isolated_store fixture below).
+import tempfile
+
+_TEST_DB_DIR = tempfile.mkdtemp(prefix="alpha-tests-")
+os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_DIR}/app.db"
+os.environ["ADMIN_EMAIL"] = "admin@test.example"          # the address comes from the environment only; tests set their own
 from unittest.mock import Mock
 from sqlmodel import Session, create_engine, SQLModel
 from fastapi.testclient import TestClient
@@ -17,6 +25,36 @@ from app.config.settings import settings
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+_TALENT_TABLES = ("candidate", "candidate_search", "candidate_note", "job_description", "job_requirement", "job_posting", "job_application",
+                  "email_subject_counter")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_store(monkeypatch):
+    """Every test gets empty data tables and its own in-memory Qdrant, so no test can see another's data or touch a real service."""
+    from qdrant_client import QdrantClient
+    from sqlalchemy import delete, event
+
+    import app.models.talent  # noqa: F401  (registers the tables)
+    import app.store as store_module
+    from app.db.database import engine
+    from app.store import TalentStore, VectorStore
+
+    if not getattr(engine, "_alpha_fk_pragma", False):                 # SQLite enforces cascading deletes only when asked; PostgreSQL always does
+        event.listen(engine, "connect", lambda conn, _rec: conn.execute("PRAGMA foreign_keys=ON"))
+        engine._alpha_fk_pragma = True
+        engine.dispose()
+    SQLModel.metadata.create_all(engine)
+    store = TalentStore(engine=engine, vectors=VectorStore(client=QdrantClient(":memory:")))
+    monkeypatch.setattr(store_module, "_store", store)
+    yield store
+    with Session(engine) as session:
+        for table in reversed(SQLModel.metadata.sorted_tables):
+            if table.name in _TALENT_TABLES:
+                session.execute(delete(table))
+        session.commit()
 
 
 @pytest.fixture(scope="session")

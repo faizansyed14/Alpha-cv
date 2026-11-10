@@ -5,7 +5,6 @@ import pytest
 from app.ingestion.contact import extract_contacts
 from app.ingestion.cv_parser import ParsingService
 from app.ingestion.profile_links import find_profile_links, normalize_github, normalize_linkedin
-from app.providers.vectorstore.qdrant import resolve_candidate_contact
 
 CV = """Ahmed Khan
 Senior Network Engineer
@@ -129,26 +128,88 @@ def test_a_file_whose_links_cannot_be_read_still_parses(tmp_path):
     assert ParsingService().process_document(str(path), "cv")["extracted_pii"]["github"] == ["https://github.com/ahmedk"]
 
 
-def test_the_candidates_links_are_returned_from_wherever_they_were_stored():
-    payload = {"linkedin_url": "linkedin.com/in/jane-doe"}
-    structured = {"contact_info": {"github": "https://github.com/jane-doe"}}
-    found = resolve_candidate_contact(payload, structured)
-    assert found["linkedin_url"] == "https://www.linkedin.com/in/jane-doe"
-    assert found["github_url"] == "https://github.com/jane-doe"
-    bad = resolve_candidate_contact({"linkedin_url": "javascript:alert(1)"}, {"github_url": "https://evil.example/x"})
-    assert bad["linkedin_url"] is None and bad["github_url"] is None
-    assert resolve_candidate_contact({}, {})["linkedin_url"] is None
-
-
 def test_the_links_are_stored_as_facts_about_the_candidate():
     from types import SimpleNamespace
 
-    from app.ingestion.pipeline import CANDIDATE_FIELDS, _build_record, _candidate_facts
+    from app.ingestion.pipeline import CANDIDATE_FIELDS, _candidate_facts, _person
+    from app.store import get_store
 
     assert "linkedin_url" in CANDIDATE_FIELDS and "github_url" in CANDIDATE_FIELDS     # kept when a second source joins the record
     sub = SimpleNamespace(hints={}, candidate={}, source="upload", filename="cv.pdf", job=None)
     pii = {"email": ["a@example.com"], "phone": [], "linkedin": ["https://www.linkedin.com/in/jane-doe"], "github": []}
     facts = _candidate_facts(sub, {"name": "Jane Doe"}, pii)
     assert facts["linkedin_url"] == "https://www.linkedin.com/in/jane-doe" and "github_url" not in facts
-    record = _build_record(sub, {"name": "Jane Doe"}, pii, None)
-    assert record["linkedin_url"] == "https://www.linkedin.com/in/jane-doe"
+    person = _person(sub, {"name": "Jane Doe"}, pii)
+    assert person["linkedin_url"] == "https://www.linkedin.com/in/jane-doe" and person["full_name"] == "Jane Doe"
+
+    store = get_store()                                                              # ...and they are columns of the candidate
+    cid = store.save_candidate({"id": "00000000-0000-0000-0000-000000000001", "content_sha256": "a" * 64, "filename": "cv.pdf",
+                                "facts": {**person, "github_url": "https://github.com/jane-doe"}})
+    detail = store.candidate_detail(cid)
+    assert detail["linkedin_url"] == "https://www.linkedin.com/in/jane-doe" and detail["github_url"] == "https://github.com/jane-doe"
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# false positives: what looks like a profile link but is not the candidate's
+# ---------------------------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("text", [
+    "LinkedIn: linkedin.com/in/yourname",                         # the template words nobody replaced
+    "linkedin.com/in/your-profile and linkedin.com/in/firstname-lastname",
+    "linkedin.com/in/username | linkedin.com/in/full-name",
+    "GitHub: github.com/yourusername and github.com/your-username",
+    "github.com/username",
+    "linkedin.com/in/me",                                         # too short to be a LinkedIn address
+    "https://www.google.com/url?q=https://www.linkedin.com/in/someone-else&sa=D",         # a link inside another address
+    "https://web.archive.org/web/2020/https://www.linkedin.com/in/archived-person",
+    "https://l.facebook.com/l.php?u=https://github.com/somebody",
+])
+def test_templates_and_links_inside_other_addresses_are_not_profiles(text):
+    assert find_profile_links(text) == {"linkedin": [], "github": []}
+
+
+def test_a_real_profile_after_a_label_or_bracket_is_still_found():
+    text = "Profiles: (linkedin.com/in/omar-sedeek) [github.com/omarsedeek] <https://www.linkedin.com/in/omar-sedeek-9a1b2>"
+    links = find_profile_links(text)
+    assert links["linkedin"] == ["https://www.linkedin.com/in/omar-sedeek", "https://www.linkedin.com/in/omar-sedeek-9a1b2"]
+    assert links["github"] == ["https://github.com/omarsedeek"]
+
+
+def test_the_candidate_is_chosen_among_several_linkedin_profiles_by_their_name_not_by_position():
+    from app.ingestion.profile_links import pick_linkedin
+
+    links = ["https://www.linkedin.com/in/sara-ali-123", "https://www.linkedin.com/in/omar-sedeek"]      # a recommender is written first
+    assert pick_linkedin(links, "Omar Sedeek", "omar.s@example.com") == "https://www.linkedin.com/in/omar-sedeek"
+    assert pick_linkedin(links, None, "omarsedeek@example.com") == "https://www.linkedin.com/in/omar-sedeek"       # the e-mail will do
+    assert pick_linkedin(links, "Someone Else") == links[0]                                      # nothing resembles them: the first written
+    assert pick_linkedin(links[:1], "Omar Sedeek") == links[0]                                   # one link is taken as theirs
+    assert pick_linkedin([], "Omar Sedeek") is None
+
+
+def test_a_github_account_that_is_only_a_repository_of_someone_else_is_not_the_candidate():
+    from app.ingestion.profile_links import github_repo_only, pick_github
+
+    text = "Tools: Flask (github.com/pallets/flask), React (https://github.com/facebook/react)"
+    links = find_profile_links(text)
+    only = github_repo_only(text)
+    assert links["github"] == ["https://github.com/pallets", "https://github.com/facebook"] and only == links["github"]
+    assert pick_github(links["github"], only, "Omar Sedeek") is None                              # two tools, no candidate
+
+    own = "GitHub: github.com/omarsedeek ; forked github.com/facebook/react"
+    links, only = find_profile_links(own), github_repo_only(own)
+    assert only == ["https://github.com/facebook"]
+    assert pick_github(links["github"], only, "Omar Sedeek") == "https://github.com/omarsedeek"
+
+    mine = "Projects: github.com/oreaba/mlops-platform"                                          # their own repository: the name matches
+    links, only = find_profile_links(mine), github_repo_only(mine)
+    assert pick_github(links["github"], only, "Mohammad Oreaba") == "https://github.com/oreaba"
+    assert pick_github(links["github"], only, "Someone Else") is None                              # a repository of somebody not them
+
+    bare = "see github.com/coolcoder99"                                                           # a plain account link is taken as theirs
+    links, only = find_profile_links(bare), github_repo_only(bare)
+    assert pick_github(links["github"], only, "Someone Else") == "https://github.com/coolcoder99"
+
+
+def test_the_repo_only_accounts_are_reported_with_the_contacts():
+    found = extract_contacts("GitHub: github.com/omarsedeek  tools: github.com/pallets/flask")
+    assert found["github"] == ["https://github.com/omarsedeek", "https://github.com/pallets"]
+    assert found["github_repo_only"] == ["https://github.com/pallets"]

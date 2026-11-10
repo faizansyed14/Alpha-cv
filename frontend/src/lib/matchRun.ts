@@ -50,6 +50,19 @@ export const MATCH_MAX_CVS = 10_000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** How long to wait before the next progress read. A long match does not need a read every second: one per second for the first
+ * 30 s, then every 2 s, 3 s after two minutes and 5 s after ten (the bar is smoothed anyway). Fewer reads per open page. */
+export function pollDelay(baseMs: number, elapsedMs: number): number {
+  const seconds = elapsedMs / 1000;
+  return baseMs * (seconds < 30 ? 1 : seconds < 120 ? 2 : seconds < 600 ? 3 : 5);
+}
+
+/** The wait the server asked for (Retry-After, in seconds), at least ``floorMs`` and at most 30 s. */
+export function retryAfterMs(error: any, floorMs: number): number {
+  const raw = Number(error?.response?.headers?.['retry-after']);
+  return Math.min(30_000, Math.max(floorMs, Number.isFinite(raw) ? raw * 1000 : floorMs));
+}
+
 /**
  * The figure shown to the user. The backend's own number (2-88 scoring, 90-98 AI review) is honest about WORK DONE but
  * not about TIME: scoring 20 CVs takes a second, the AI review of the top 30 takes up to ~20 seconds in a few big steps, so
@@ -197,19 +210,29 @@ async function followJob(
   };
 
   if (first) emit(first);
-  const deadline = Date.now() + timeoutMs;
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
   let transientFailures = 0;
+  let throttled = 0;
 
   while (Date.now() < deadline) {
-    await sleep(pollMs);
+    await sleep(pollDelay(pollMs, Date.now() - startedAt));
     let r: MatchResponse;
     try {
       // The job endpoint only reads the job; it can never start a second one.
       r = jobId ? await api.getMatchJob(jobId) : await api.matchCandidates(request as MatchRequest);
       transientFailures = 0;
+      throttled = 0;
     } catch (error: any) {
       const status = error?.response?.status;
       const detail = error?.detail || error?.response?.data?.detail;
+      if (status === 429 || status === 503) {
+        // The server (or the proxy) asked us to slow down. The match itself keeps running on the server, so wait as told and
+        // keep following it; only give up after a long unbroken run of refusals (about half an hour at 30 s each).
+        if (++throttled >= 60) throw error;
+        await sleep(retryAfterMs(error, pollMs));
+        continue;
+      }
       if ((status && status >= 500 && detail) || status === 404) throw error;   // the job failed or expired
       if (++transientFailures >= 8) throw error;                                // network down for ~8 polls
       continue;

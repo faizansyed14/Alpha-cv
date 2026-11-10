@@ -11,6 +11,8 @@ from sqlmodel import SQLModel
 
 from app.config.settings import settings
 import app.models.agent  # noqa: F401  (registers tables)
+import app.models.bug_report  # noqa: F401
+import app.models.talent  # noqa: F401
 import app.models.tracker.models  # noqa: F401
 import app.models.user  # noqa: F401
 

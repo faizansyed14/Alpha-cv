@@ -1,0 +1,43 @@
+name: security
+
+# Software-composition and static checks on every push / PR and once a week (new advisories appear without any code change).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  python-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pip-audit==2.9.0
+      # pytest is a test-only package that ships in the same requirements file; its advisory is reviewed, everything else fails the build
+      - run: pip-audit -r backend/requirements.txt --no-deps --disable-pip --ignore-vuln PYSEC-2026-1845
+
+  python-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install bandit==1.8.3
+      - run: bandit -r backend/app -ll -q
+
+  node-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npm ci
+        working-directory: frontend
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: frontend

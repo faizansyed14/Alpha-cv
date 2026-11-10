@@ -3,29 +3,34 @@
 # Built rarely (requirements and the model almost never change), so the backend image never pays for an ML runtime.
 # Build from backend/model_server/:  docker build -t alpha-model-server .
 
-# Stage 1: download the ONNX model and its tokenizer once (the original publisher's export first, a community export of the
-# same weights as fallback). huggingface-hub is only needed here and is not copied to the runtime image.
+# Stage 1: download the ONNX model and its tokenizer once, from ONE pinned revision of the original publisher's repo, and
+# refuse to build unless both files match the SHA-256 recorded here (a moved tag, a hijacked repo or a corrupted download
+# fails the build instead of shipping unverified weights). To move to a new model version: change REVISION and both hashes.
+# huggingface-hub is only needed here and is not copied to the runtime image.
 FROM python:3.12-slim AS model
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN --mount=type=cache,target=/root/.cache/pip pip install huggingface-hub==0.26.2
 WORKDIR /opt/model
 RUN python - <<'PY'
-import shutil
+import hashlib, shutil
 from huggingface_hub import hf_hub_download
 
-for repo in ("intfloat/multilingual-e5-small", "Xenova/multilingual-e5-small"):
-    try:
-        onnx = hf_hub_download(repo, "onnx/model.onnx")
-        tokenizer = hf_hub_download(repo, "tokenizer.json")
-    except Exception as exc:  # try the next source
-        print(f"{repo} unavailable ({type(exc).__name__}); trying the next source")
-        continue
-    shutil.copyfile(onnx, "/opt/model/model.onnx")
-    shutil.copyfile(tokenizer, "/opt/model/tokenizer.json")
-    print(f"model downloaded from {repo}")
-    break
-else:
-    raise SystemExit("could not download multilingual-e5-small from any source")
+REPO = "intfloat/multilingual-e5-small"
+REVISION = "614241f622f53c4eeff9890bdc4f31cfecc418b3"
+FILES = {
+    "onnx/model.onnx": ("model.onnx", "ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665"),
+    "tokenizer.json": ("tokenizer.json", "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"),
+}
+for remote, (local, want) in FILES.items():
+    path = hf_hub_download(REPO, remote, revision=REVISION)
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != want:
+        raise SystemExit(f"{remote}: SHA-256 {digest.hexdigest()} does not match the pinned {want}")
+    shutil.copyfile(path, f"/opt/model/{local}")
+print("model verified:", REPO, REVISION)
 PY
 
 # Stage 2: the Python environment (versions match backend/requirements.txt where they overlap).

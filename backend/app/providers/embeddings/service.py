@@ -131,8 +131,8 @@ class EmbeddingService:
 
     def generate_document_embeddings(self, structured_data: dict) -> dict:
         """
-        Generate EXACTLY 32 vectors per document:
-        20 skills + 10 responsibilities + 1 experience + 1 job title.
+        Generate EXACTLY 31 vectors per document:
+        20 skills + 10 responsibilities + 1 job title (years of experience are compared as numbers, not as a vector).
         """
         try:
             embeddings = {}
@@ -157,13 +157,6 @@ class EmbeddingService:
             embeddings["responsibility_vectors"] = [v.tolist() for v in resp_matrix]
             embeddings["responsibilities"] = responsibilities
 
-            experience_text = str(structured_data.get("experience_years", "0") or "0")
-            if not experience_text.strip():
-                experience_text = "0 years"
-            experience_vector = self.generate_single_embedding(f"Experience: {experience_text} years")
-            embeddings["experience_vector"] = [experience_vector.tolist()]
-            embeddings["experience_years"] = experience_text
-
             job_title = structured_data.get("job_title", "")
             if not job_title or not str(job_title).strip():
                 job_title = "Professional"
@@ -174,13 +167,12 @@ class EmbeddingService:
             total_vectors = (
                 len(embeddings["skill_vectors"])
                 + len(embeddings["responsibility_vectors"])
-                + len(embeddings["experience_vector"])
                 + len(embeddings["job_title_vector"])
             )
-            if total_vectors != 32:
-                raise ValueError(f"Expected exactly 32 vectors, got {total_vectors}")
+            if total_vectors != 31:
+                raise ValueError(f"Expected exactly 31 vectors, got {total_vectors}")
 
-            logger.info("Generated exactly 32 vectors (20 skills + 10 resp + 1 exp + 1 title)")
+            logger.info("Generated exactly 31 vectors (20 skills + 10 resp + 1 title)")
             return embeddings
 
         except Exception as e:

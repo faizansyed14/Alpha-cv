@@ -31,8 +31,8 @@ placeholders remain.
 | `backend/` | FastAPI app, packaged by function: `app/api/routers` (HTTP), `matching/`, `ingestion/`, `jobs/` (queues + workers), `providers/` (embeddings, llm, vectorstore, cache, storage), `integrations/email/`, `security/`; `app/config/settings.py` = single source of config truth. `model_server/` = the embedding-model container (see `backend/ARCHITECTURE.md`) |
 | `frontend/` | Next.js 15 app (zustand stores, axios client in `src/lib/api.ts`) |
 | `docker-compose.prod.yml` / `docker-compose.dev.yml` | The two deployment stacks (CPU-only) |
-| `scripts/` | `start.sh` / `stop.sh` / `clean.sh` (+ `system/setup-ssl.sh`, `testing/`, `utils/` helpers) |
-| `db/` | RDS bootstrap SQL, Qdrant collection init, guarded data reset, `cleanup_old_cvs.py` retention tool |
+| `scripts/` | `start.sh` / `stop.sh` / `clean.sh`, `backup.sh` / `restore.sh` (see `docs/BACKUP_AND_RECOVERY.md`), `system/setup-ssl.sh`, `utils/` dataset builders |
+| `scripts/db/` | RDS bootstrap SQL, Qdrant collection init and rebuild, store audit, guarded data reset (operations tools; the application's own database code is `backend/app/db/`) |
 | `backend/migrations/` | Alembic: one migration history for the whole database (`alembic upgrade head`; the app applies it at startup) |
 | `nginx/` | `nginx.conf.template` (domain via `DOMAIN` env) + dev config |
 | `docs/` | Documentation, including `docs/AUDIT_REPORT.md` (full audit + refactor log) |
@@ -54,7 +54,7 @@ running services. Set `E2E_REAL_MODEL=1` to use the real embedding model.
 
 - **Volumes** (`postgres_data`, `qdrant_data`, `redis_data`, `uploads_data`,
   `llm_cache`) hold all state. No script in this repo ever deletes them.
-- `db/reset_data.sh dev|prod` wipes application data (keeps auth users and
+- `scripts/db/reset_data.sh local|dev|prod` wipes application data (keeps auth users and
   volumes) after an interactive confirmation.
 - Matching is CPU-only, **queued**, and cached. `POST /api/match` enqueues a job
   on Redis and returns immediately (`is_queued=true` + `job_id`); the dedicated
@@ -62,7 +62,7 @@ running services. Set `E2E_REAL_MODEL=1` to use the real embedding model.
   re-POSTing the same request or via `GET /api/match/jobs/{job_id}`. There is no
   longer a 300-CV cap, the worker streams candidates in chunks; `MATCH_MAX_CVS`
   (default 5000, `0`=off) is only an absurd-request ceiling. Caches: per-text
-  embedding cache (Redis), in-process TTL cache for Qdrant documents, a Redis
+  embedding cache (Redis), in-process TTL cache for the JD's data during a match, a Redis
   result cache keyed by (cv, jd, weights), and a per-`(jd,cv)` LLM-analysis
   cache. Knobs live in `.env.prod` / `.env.dev` under "Matching performance" / "Match job queue".
   See `docs/MATCHING_SCALABILITY.md` for the bottleneck analysis and the
@@ -71,10 +71,6 @@ running services. Set `E2E_REAL_MODEL=1` to use the real embedding model.
   volume) or `s3` (AWS S3 + `S3_BUCKET`; uses the EC2 instance role). Relational
   data (users, tracker, email) lives in ONE PostgreSQL database and moves to AWS RDS by changing
   `DATABASE_URL` in `.env.prod`, no code changes.
-- **Retention**: `python3 db/cleanup_old_cvs.py --days 365 --dry-run` purges
-  raw files + embeddings of old CVs while keeping searchable structured data,
-  notes, dedup hashes, tracker/auth/email records. Embeddings regenerate
-  automatically if a purged CV is matched again.
 - **Email dedup**: processed email ids persist in Postgres, and each extracted
   CV stores a `content_sha256`, the same CV file arriving in another email is
   skipped, and applicant+job duplicates are rejected.

@@ -22,9 +22,10 @@ export default function MatchTray() {
   const { go } = useWorkspaceNav();
   const [listOpen, setListOpen] = useState(false);
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
-  const { cvs, jds, selectedCVs, selectedJD, deselectCV, deselectAllCVs, selectJD, runMatch, matching, progressVisible } = useAppStore(
+  const { cvs, knownCVs, jds, selectedCVs, selectedJD, deselectCV, deselectAllCVs, selectJD, runMatch, matching, progressVisible } = useAppStore(
     useShallow((s) => ({
       cvs: s.cvs,
+      knownCVs: s.knownCVs,
       jds: s.jds,
       selectedCVs: s.selectedCVs,
       selectedJD: s.selectedJD,
@@ -49,9 +50,10 @@ export default function MatchTray() {
     () =>
       selectedCVs.map((id) => {
         const cv = cvIndex.get(id);
-        return { id, name: cv?.full_name || cv?.filename || 'Candidate', title: cv?.job_title || '' };
+        const known = knownCVs[id];
+        return { id, name: cv?.full_name || cv?.filename || known?.name || 'Candidate', title: cv?.job_title || known?.title || '' };
       }),
-    [selectedCVs, cvIndex],
+    [selectedCVs, cvIndex, knownCVs],
   );
 
   const selectionKey = `${selectedCVs.length}|${selectedJD ?? ''}`;

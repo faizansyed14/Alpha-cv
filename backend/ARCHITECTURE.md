@@ -22,17 +22,17 @@ backend/
 │   ├── providers/              # adapters to external systems
 │   │   ├── embeddings/         # service.py (EmbeddingService), remote.py (model-server client)
 │   │   ├── llm/                # service.py (OpenAI standardisation + extraction)
-│   │   ├── vectorstore/        # qdrant.py
 │   │   ├── cache/              # redis.py (shared), memory.py (in-process)
 │   │   └── storage/            # base.py, local.py, s3.py
 │   ├── integrations/email/     # login OTP e-mail (Microsoft Graph), follow-up reminders
 │   ├── security/               # auth.py (hashing + JWT), captcha.py, login_guard.py
 │   ├── services/               # careers_service, careers_helpers, locations_service, presence, auth_mode
 │   ├── db/                     # database.py (the single engine + session, runs the Alembic migrations at startup)
-│   ├── models/                 # SQL tables      └── schemas/   # request/response models
+│   ├── models/                 # SQL tables (talent.py: candidates, JDs, postings, applications)   └── schemas/   # request/response models
+│   ├── store/                  # THE data layer: Postgres tables (candidates.py, jobs.py, stats.py) + Qdrant vectors only (vectors.py)
 │   └── data/                   # static datasets (cities.json)
 ├── model_server/               # separate container: multilingual-e5-small on ONNX Runtime (no torch) behind POST /embed
-├── migrations/                 # alembic (auth, tracker)
+├── migrations/                 # alembic (auth, tracker, talent tables)
 └── tests/
 ```
 
@@ -57,7 +57,7 @@ The backend image has no ML runtime, so it builds in seconds and its layers rare
    limits → HTTP 429). An identical in-flight request re-attaches to the same job.
 2. A match-worker runner takes a **slot** (a Redis lease; cap `MATCH_QUEUE_MAX_CONCURRENT_JOBS`), pops the job and
    runs `matching/runner.run_match` while a heartbeat renews the lease.
-3. Candidates are streamed in chunks (`MATCH_CHUNK_SIZE`), Qdrant payloads fetched in batches
+3. Candidates are streamed in chunks (`MATCH_CHUNK_SIZE`), structured CVs read from Postgres and vectors from Qdrant in batches
    (`MATCH_QDRANT_BATCH_SIZE`), texts embedded in batches via the model server.
 4. Progress and the final result are written to Redis; the client polls `POST /api/match` / `GET /api/match/jobs/{id}`.
 5. A crashed worker's lease expires; the janitor (in every worker) re-queues the job, up to `MATCH_JOB_MAX_ATTEMPTS`.

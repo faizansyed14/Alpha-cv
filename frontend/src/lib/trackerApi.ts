@@ -11,6 +11,41 @@ import type {
 
 export type TrackerTeam = 'dubai' | 'abudhabi';
 
+/** One page of a searched list, and how many rows match in all (the database searches, filters and pages every row). */
+export interface TrackerPage<T> {
+  items: Array<T & { team?: TrackerTeam }>;
+  total: number;
+}
+
+export interface TrackerPageParams {
+  /** 'all' lists both teams together (admins). */
+  team?: TrackerTeam | 'all';
+  q?: string;
+  status?: string;
+  stage?: string;
+  date_from?: string;
+  date_to?: string;
+  sort?: 'latest' | 'oldest';
+  limit?: number;
+  offset?: number;
+}
+
+/** The numbers on the cards, counted over every row. */
+export interface TrackerSummary {
+  requirements: { total: number; open: number; submitted: number; hold: number; closed: number };
+  selections: { total: number; joined: number; backouts: number; offerReleased: number; offerPending: number };
+  followups: { total: number; feedbackPending: number; positionsClosed: number; overdue: number; hold: number; interviewScheduled: number };
+}
+
+function clean(params: TrackerPageParams) {
+  const out: Record<string, string | number> = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === '' || v === 'all' && k !== 'team') continue;
+    out[k] = v as string | number;
+  }
+  return out;
+}
+
 function client(token: string) {
   return axios.create({
     baseURL: getApiBaseUrl(),
@@ -23,6 +58,26 @@ function client(token: string) {
 }
 
 export const trackerApi = {
+
+  async pageJobOpenings(token: string, params: TrackerPageParams): Promise<TrackerPage<TrackerJobOpening>> {
+    const res = await client(token).get<TrackerPage<TrackerJobOpening>>('/api/tracker/job-openings/page', { params: clean(params) });
+    return res.data;
+  },
+
+  async pageCandidateRows(token: string, params: TrackerPageParams): Promise<TrackerPage<TrackerCandidateRow>> {
+    const res = await client(token).get<TrackerPage<TrackerCandidateRow>>('/api/tracker/candidate-rows/page', { params: clean(params) });
+    return res.data;
+  },
+
+  async pageFollowUps(token: string, params: TrackerPageParams): Promise<TrackerPage<TrackerFollowUp>> {
+    const res = await client(token).get<TrackerPage<TrackerFollowUp>>('/api/tracker/follow-ups/page', { params: clean(params) });
+    return res.data;
+  },
+
+  async summary(token: string, team?: TrackerTeam | 'all'): Promise<TrackerSummary> {
+    const res = await client(token).get<TrackerSummary>('/api/tracker/summary', { params: team ? { team } : undefined });
+    return res.data;
+  },
 
   async listJobOpenings(token: string, team?: TrackerTeam): Promise<TrackerJobOpening[]> {
     const res = await client(token).get<TrackerJobOpening[]>('/api/tracker/job-openings', { params: team ? { team } : undefined });

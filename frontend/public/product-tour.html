@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AlphaCV — Product tour (demo data)</title>
+  <style>
+    :root {
+      --navy-950: #0b1228;
+      --navy-900: #121a3a;
+      --navy-800: #16204b;
+      --navy-700: #1e2a5c;
+      --navy-600: #2a3a78;
+      --navy-100: #dce3f4;
+      --navy-50: #eef2fa;
+      --sky: #e8f2fc;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --paper: #ffffff;
+      --good: #059669;
+      --warn: #d97706;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: #070b16;
+      color: var(--ink);
+      overflow: hidden;
+      height: 100vh;
+    }
+    .stage {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(74, 107, 200, 0.25), transparent 55%),
+        radial-gradient(ellipse 70% 50% at 90% 90%, rgba(22, 32, 75, 0.55), transparent 50%),
+        #070b16;
+    }
+    .frame {
+      width: min(1180px, 92vw);
+      height: min(720px, 86vh);
+      border-radius: 18px;
+      overflow: hidden;
+      background: linear-gradient(145deg, var(--navy-50), var(--sky) 40%, #eef3fa);
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.12),
+        0 40px 100px rgba(0,0,0,0.55);
+      position: relative;
+      transform-origin: center;
+      transition: transform 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .chrome {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 14px;
+      background: rgba(255,255,255,0.75);
+      border-bottom: 1px solid rgba(255,255,255,0.7);
+      backdrop-filter: blur(12px);
+    }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot.r { background: #ff5f57; }
+    .dot.y { background: #febc2e; }
+    .dot.g { background: #28c840; }
+    .url {
+      margin-left: 12px;
+      flex: 1;
+      height: 24px;
+      border-radius: 8px;
+      background: white;
+      border: 1px solid var(--line);
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+    }
+    .app {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      height: calc(100% - 42px);
+    }
+    .side {
+      background: linear-gradient(180deg, var(--navy-900), var(--navy-950));
+      color: white;
+      padding: 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
+      padding: 0 6px;
+    }
+    .brand img { width: 28px; height: 28px; background: white; border-radius: 8px; padding: 3px; }
+    .brand b { font-size: 14px; letter-spacing: -0.02em; }
+    .brand span { display: block; font-size: 10px; color: #94a3b8; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      border-radius: 10px;
+      font-size: 13px;
+      color: #cbd5e1;
+      transition: background 0.25s, color 0.25s;
+    }
+    .nav-item.active { background: rgba(255,255,255,0.1); color: white; font-weight: 600; }
+    .main {
+      overflow: hidden;
+      position: relative;
+      padding: 22px 26px;
+    }
+    .scroll {
+      height: 100%;
+      overflow: hidden;
+      transition: transform 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    h1 { font-size: 26px; letter-spacing: -0.03em; margin-bottom: 4px; }
+    .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+    .kpis {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .kpi {
+      background: linear-gradient(145deg, #eef2fa, white);
+      border: 1px solid #d7deed;
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 8px 24px -16px rgba(22,32,75,0.25);
+    }
+    .kpi .label { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--navy-600); }
+    .kpi .val { font-size: 40px; font-weight: 700; letter-spacing: -0.04em; margin-top: 6px; tabular-nums; }
+    .kpi .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+    .panel {
+      background: rgba(255,255,255,0.85);
+      border: 1px solid rgba(255,255,255,0.9);
+      border-radius: 16px;
+      padding: 16px 18px;
+      box-shadow: 0 8px 24px -16px rgba(22,32,75,0.2);
+      margin-bottom: 14px;
+    }
+    .panel h2 { font-size: 14px; margin-bottom: 2px; }
+    .panel p.meta { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+    .bars { display: flex; align-items: flex-end; gap: 10px; height: 120px; }
+    .bar {
+      flex: 1;
+      background: linear-gradient(180deg, #3a4f94, var(--navy-800));
+      border-radius: 4px 4px 0 0;
+      height: 0;
+      transition: height 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+      position: relative;
+    }
+    .bar span {
+      position: absolute;
+      top: -18px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--navy-800);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .bar.show span { opacity: 1; }
+    .bar-label {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .cards { display: grid; gap: 10px; }
+    .card {
+      display: grid;
+      grid-template-columns: 40px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      box-shadow: 0 4px 14px -10px rgba(16,24,40,0.2);
+    }
+    .avatar {
+      width: 40px; height: 40px; border-radius: 50%;
+      display: grid; place-items: center;
+      background: var(--navy-50); color: var(--navy-800);
+      font-weight: 700; font-size: 13px;
+    }
+    .card .name { font-size: 14px; font-weight: 650; }
+    .card .role { font-size: 12px; color: var(--muted); }
+    .score {
+      font-size: 18px; font-weight: 700; color: var(--navy-800); tabular-nums;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 650;
+      border: 1px solid #c7d2ea;
+      background: var(--navy-50);
+      color: var(--navy-800);
+    }
+    .chip.live { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
+    .form-grid { display: grid; gap: 10px; }
+    .field label { display: block; font-size: 12px; font-weight: 650; color: #475569; margin-bottom: 4px; }
+    .field input, .field textarea {
+      width: 100%;
+      border: 1px solid #d7deed;
+      background: white;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font: inherit;
+      font-size: 13px;
+    }
+    .field textarea { min-height: 72px; resize: none; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 40px;
+      padding: 0 16px;
+      border-radius: 10px;
+      border: none;
+      background: var(--navy-900);
+      color: white;
+      font-weight: 650;
+      font-size: 13px;
+      cursor: default;
+    }
+    .btn.ghost {
+      background: white;
+      color: var(--navy-800);
+      border: 1px solid #d7deed;
+    }
+    .match-hero {
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding-top: 40px;
+    }
+    .ring {
+      width: 140px; height: 140px; border-radius: 50%;
+      background:
+        radial-gradient(circle at center, white 58%, transparent 59%),
+        conic-gradient(var(--navy-800) calc(var(--p, 0) * 1%), #e2e8f0 0);
+      display: grid; place-items: center;
+      margin-bottom: 16px;
+      transition: --p 0.2s linear;
+    }
+    .ring .pct { font-size: 34px; font-weight: 700; letter-spacing: -0.04em; }
+    .caption {
+      position: absolute;
+      left: 50%;
+      bottom: 28px;
+      transform: translateX(-50%);
+      z-index: 20;
+      background: rgba(11, 18, 40, 0.88);
+      color: white;
+      padding: 12px 18px;
+      border-radius: 14px;
+      font-size: 14px;
+      font-weight: 550;
+      letter-spacing: -0.01em;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+      opacity: 0;
+      transition: opacity 0.35s;
+      max-width: min(720px, 90vw);
+      text-align: center;
+      pointer-events: none;
+    }
+    .caption.show { opacity: 1; }
+    .caption small { display: block; margin-top: 4px; color: #94a3b8; font-size: 12px; font-weight: 500; }
+    .title-card, .end-card {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, var(--navy-950), var(--navy-800));
+      color: white;
+      z-index: 5;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.5s;
+      text-align: center;
+      padding: 40px;
+    }
+    .title-card.show, .end-card.show { opacity: 1; pointer-events: auto; }
+    .title-card h1, .end-card h1 { font-size: 42px; letter-spacing: -0.04em; margin: 14px 0 10px; }
+    .title-card p, .end-card p { color: #a8b7e0; font-size: 16px; max-width: 480px; margin: 0 auto; }
+    .badge {
+      display: inline-flex;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.08);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #c7d2ea;
+    }
+    .cursor {
+      position: absolute;
+      width: 18px; height: 18px;
+      border-radius: 50% 50% 50% 0;
+      background: white;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+      transform: rotate(-20deg);
+      z-index: 30;
+      opacity: 0;
+      transition: left 0.7s cubic-bezier(0.22,1,0.36,1), top 0.7s cubic-bezier(0.22,1,0.36,1), opacity 0.2s;
+      pointer-events: none;
+    }
+    .progress {
+      position: absolute;
+      top: 0; left: 0; height: 3px;
+      background: linear-gradient(90deg, #6b86c8, white);
+      width: 0%;
+      z-index: 40;
+      transition: width 0.2s linear;
+    }
+    .scene { display: none; height: 100%; }
+    .scene.on { display: block; }
+    .public {
+      background: linear-gradient(145deg, var(--navy-50), var(--sky), #eef3fa);
+      height: 100%;
+      padding: 18px 28px;
+    }
+    .public header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 28px;
+    }
+    .public .hero { text-align: center; max-width: 640px; margin: 0 auto 22px; }
+    .public .hero h1 { font-size: 30px; margin: 10px 0 14px; }
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      max-width: 640px;
+      margin: 0 auto 18px;
+    }
+    .fact {
+      background: rgba(255,255,255,0.8);
+      border: 1px solid rgba(255,255,255,0.9);
+      border-radius: 14px;
+      padding: 12px;
+      text-align: center;
+    }
+    .fact .l { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; }
+    .fact .v { font-size: 13px; font-weight: 650; margin-top: 4px; }
+    .list { max-width: 640px; margin: 0 auto; background: rgba(255,255,255,0.8); border-radius: 16px; padding: 16px 18px; border: 1px solid rgba(255,255,255,0.9); }
+    .list li { list-style: none; display: flex; gap: 10px; font-size: 13.5px; color: #334155; padding: 6px 0; }
+    .list li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #3a4f94; margin-top: 7px; flex-shrink: 0; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .note {
+      position: absolute;
+      right: 24px;
+      top: 58px;
+      z-index: 25;
+      background: rgba(255,255,255,0.95);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 11px;
+      color: var(--muted);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+    }
+    @media (max-width: 900px) {
+      .app { grid-template-columns: 1fr; }
+      .side { display: none; }
+      .facts { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <div class="progress" id="progress"></div>
+    <div class="frame" id="frame">
+      <div class="cursor" id="cursor"></div>
+      <div class="chrome">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <div class="url" id="url">app.alphacv.demo / dashboard</div>
+      </div>
+
+      <div class="title-card show" id="titleCard">
+        <div>
+          <div class="badge">Product tour · Fake demo data</div>
+          <h1>AlphaCV</h1>
+          <p>AI screening for recruiters — from talent pool to ranked shortlist in one flow.</p>
+        </div>
+      </div>
+
+      <div class="end-card" id="endCard">
+        <div>
+          <div class="badge">Alpha Data Recruitment</div>
+          <h1>Hire faster. Rank smarter.</h1>
+          <p>Dashboard · Candidates · Careers · AI matching — one workspace for modern hiring teams.</p>
+        </div>
+      </div>
+
+      <div class="app" id="appShell" style="opacity:0">
+        <aside class="side">
+          <div class="brand">
+            <img src="/alphadatalogo.svg" alt="" />
+            <div><b>AlphaCV</b><span>Workspace</span></div>
+          </div>
+          <div class="nav-item" data-nav="dashboard">Dashboard</div>
+          <div class="nav-item" data-nav="candidates">Candidates</div>
+          <div class="nav-item" data-nav="jobs">Job descriptions</div>
+          <div class="nav-item" data-nav="match">AI matching</div>
+          <div class="nav-item" data-nav="upload">Upload</div>
+          <div class="nav-item" data-nav="careers">Careers</div>
+          <div class="nav-item" data-nav="tracker">Hiring tracker</div>
+        </aside>
+
+        <div class="main">
+          <!-- DASHBOARD -->
+          <section class="scene" id="scene-dashboard">
+            <div class="scroll" id="dashScroll">
+              <h1>Good morning, John>
+              <p class="sub">Hiring overview — talent pool, openings, and match activity. <span class="chip">Demo data</span></p>
+              <div class="kpis">
+                <div class="kpi"><div class="label">Candidates</div><div class="val">1,284</div><div class="hint">In your talent database</div></div>
+                <div class="kpi"><div class="label">Job descriptions</div><div class="val">46</div><div class="hint">Roles ready to match</div></div>
+              </div>
+              <div class="panel">
+                <h2>Jobs posted</h2>
+                <p class="meta">Per month · last 6 months</p>
+                <div class="bars" id="monthBars">
+                  <div class="bar" data-h="28"><span>4</span></div>
+                  <div class="bar" data-h="46"><span>7</span></div>
+                  <div class="bar" data-h="38"><span>6</span></div>
+                  <div class="bar" data-h="72"><span>11</span></div>
+                  <div class="bar" data-h="58"><span>9</span></div>
+                  <div class="bar" data-h="88"><span>14</span></div>
+                </div>
+                <div class="bar-label"><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span><span>Nov</span></div>
+              </div>
+              <div class="panel">
+                <h2>Latest match</h2>
+                <p class="meta">Senior Product Designer · 42 ranked</p>
+                <div class="cards">
+                  <div class="card"><div class="avatar">NR</div><div><div class="name">Nora Rahman</div><div class="role">Product Designer · Dubai</div></div><div class="score">92%</div></div>
+                  <div class="card"><div class="avatar">JL</div><div><div class="name">James Lee</div><div class="role">UX Designer · Abu Dhabi</div></div><div class="score">87%</div></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- CANDIDATES -->
+          <section class="scene" id="scene-candidates">
+            <div class="toolbar">
+              <div>
+                <h1 style="font-size:22px;margin:0">Candidates</h1>
+                <p class="sub" style="margin:4px 0 0">1,284 profiles · filtered: Design</p>
+              </div>
+              <button class="btn ghost">Advanced search</button>
+            </div>
+            <div class="cards" id="candList">
+              <div class="card"><div class="avatar">NR</div><div><div class="name">Nora Rahman</div><div class="role">Product Designer · 6 yrs · Dubai</div></div><span class="chip">Figma · Research</span></div>
+              <div class="card"><div class="avatar">JL</div><div><div class="name">James Lee</div><div class="role">UX Designer · 5 yrs · Abu Dhabi</div></div><span class="chip">Prototyping</span></div>
+              <div class="card"><div class="avatar">SK</div><div><div class="name">Sara Khan</div><div class="role">UI Designer · 4 yrs · Sharjah</div></div><span class="chip">Design systems</span></div>
+              <div class="card"><div class="avatar">MO</div><div><div class="name">Omar Hassan</div><div class="role">Product Designer · 8 yrs · Dubai</div></div><span class="chip">Mobile · Web</span></div>
+              <div class="card"><div class="avatar">AP</div><div><div class="name">Ava Patel</div><div class="role">Visual Designer · 3 yrs · Dubai</div></div><span class="chip">Brand · UI</span></div>
+            </div>
+          </section>
+
+          <!-- POST JOB -->
+          <section class="scene" id="scene-postjob">
+            <div class="toolbar">
+              <div>
+                <h1 style="font-size:22px;margin:0">Post a job</h1>
+                <p class="sub" style="margin:4px 0 0">Careers portal · new opening</p>
+              </div>
+              <span class="chip">Draft</span>
+            </div>
+            <div class="panel">
+              <div class="form-grid">
+                <div class="field"><label>Job title</label><input id="jobTitle" value="" placeholder="Role title" readonly /></div>
+                <div class="field"><label>Location</label><input id="jobLoc" value="" placeholder="City / remote" readonly /></div>
+                <div class="field"><label>Key responsibilities</label><textarea id="jobResp" readonly placeholder="Bullet points..."></textarea></div>
+                <div style="display:flex;gap:8px;justify-content:flex-end">
+                  <button class="btn ghost">Save draft</button>
+                  <button class="btn" id="publishBtn">Publish opening</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- MATCHING -->
+          <section class="scene" id="scene-matching">
+            <div class="match-hero">
+              <div class="ring" id="matchRing" style="--p:0"><div class="pct" id="matchPct">0%</div></div>
+              <h1 style="font-size:22px">AI matching</h1>
+              <p class="sub">Scoring 48 CVs against “Senior Product Designer”</p>
+              <div class="chip" id="matchPhase">Prepare</div>
+            </div>
+          </section>
+
+          <!-- RESULTS -->
+          <section class="scene" id="scene-results">
+            <div class="toolbar">
+              <div>
+                <h1 style="font-size:22px;margin:0">Match results</h1>
+                <p class="sub" style="margin:4px 0 0">Senior Product Designer · 48 ranked</p>
+              </div>
+              <button class="btn ghost">Export shortlist</button>
+            </div>
+            <div class="cards">
+              <div class="card"><div class="avatar">NR</div><div><div class="name">Nora Rahman</div><div class="role">Strong match · skills 94 · design systems</div></div><div class="score" style="color:var(--good)">92%</div></div>
+              <div class="card"><div class="avatar">JL</div><div><div class="name">James Lee</div><div class="role">Good match · UX research · prototyping</div></div><div class="score" style="color:var(--good)">87%</div></div>
+              <div class="card"><div class="avatar">MO</div><div><div class="name">Omar Hassan</div><div class="role">Good match · product thinking · mobile</div></div><div class="score">81%</div></div>
+              <div class="card"><div class="avatar">SK</div><div><div class="name">Sara Khan</div><div class="role">Review · UI craft · systems</div></div><div class="score" style="color:var(--warn)">74%</div></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- PUBLIC CAREERS (no sidebar) -->
+      <div id="publicShell" style="display:none;height:calc(100% - 42px)">
+        <div class="public">
+          <header>
+            <div style="display:flex;align-items:center;gap:10px">
+              <img src="/alphadatalogo.svg" alt="" width="28" height="28" />
+              <div><b style="font-size:14px">AlphaData</b><div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#94a3b8;font-weight:700">Recruitment</div></div>
+            </div>
+            <button class="btn">Apply now</button>
+          </header>
+          <div class="hero">
+            <span class="chip live">Now hiring</span>
+            <h1>Senior Product Designer</h1>
+            <p style="color:var(--muted);font-size:14px">Shape digital products for enterprise clients across the UAE.</p>
+          </div>
+          <div class="facts">
+            <div class="fact"><div class="l">Location</div><div class="v">Dubai, UAE</div></div>
+            <div class="fact"><div class="l">Company</div><div class="v">AlphaData</div></div>
+            <div class="fact"><div class="l">Experience</div><div class="v">5+ years</div></div>
+            <div class="fact"><div class="l">Posted</div><div class="v">9 Nov 2026</div></div>
+          </div>
+          <ul class="list">
+            <li>Lead end-to-end product design for web and mobile experiences</li>
+            <li>Partner with engineering and product on discovery and delivery</li>
+            <li>Build and evolve a scalable design system</li>
+            <li>Present concepts clearly to stakeholders</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="caption" id="caption"></div>
+    <div class="note">All names &amp; numbers are fictional demo data</div>
+  </div>
+
+  <script>
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const $ = (id) => document.getElementById(id);
+    const caption = $('caption');
+    const progress = $('progress');
+    const cursor = $('cursor');
+    const url = $('url');
+    const frame = $('frame');
+
+    function setCaption(title, sub) {
+      caption.innerHTML = title + (sub ? `<small>${sub}</small>` : '');
+      caption.classList.add('show');
+    }
+    function hideCaption() { caption.classList.remove('show'); }
+
+    function setNav(id) {
+      document.querySelectorAll('.nav-item').forEach((el) => {
+        el.classList.toggle('active', el.dataset.nav === id);
+      });
+    }
+
+    function showScene(id) {
+      document.querySelectorAll('.scene').forEach((s) => s.classList.remove('on'));
+      const el = document.getElementById('scene-' + id);
+      if (el) el.classList.add('on');
+      $('appShell').style.display = 'grid';
+      $('publicShell').style.display = 'none';
+      $('appShell').style.opacity = '1';
+    }
+
+    function showPublic() {
+      $('appShell').style.display = 'none';
+      $('publicShell').style.display = 'block';
+    }
+
+    function moveCursor(x, y, show = true) {
+      cursor.style.opacity = show ? '1' : '0';
+      cursor.style.left = x + 'px';
+      cursor.style.top = y + 'px';
+    }
+
+    function setProgress(p) { progress.style.width = Math.min(100, p) + '%'; }
+
+    async function typeInto(el, text, speed = 28) {
+      el.value = '';
+      for (const ch of text) {
+        el.value += ch;
+        await sleep(speed);
+      }
+    }
+
+    async function run() {
+      // Title
+      setProgress(2);
+      await sleep(2200);
+      $('titleCard').classList.remove('show');
+      showScene('dashboard');
+      setNav('dashboard');
+      url.textContent = 'app.alphacv.demo / dashboard';
+      setCaption('Dashboard overview', 'Talent pool health and hiring activity at a glance');
+      setProgress(10);
+      await sleep(900);
+
+      // Animate bars + scroll
+      document.querySelectorAll('#monthBars .bar').forEach((b, i) => {
+        setTimeout(() => {
+          b.style.height = b.dataset.h + '%';
+          b.classList.add('show');
+        }, i * 90);
+      });
+      await sleep(1400);
+      $('dashScroll').style.transform = 'translateY(-180px)';
+      setCaption('Scroll the dashboard', 'Month-wise postings and latest match rankings');
+      setProgress(22);
+      await sleep(1800);
+      $('dashScroll').style.transform = 'translateY(0)';
+      await sleep(600);
+
+      // Candidates
+      setNav('candidates');
+      showScene('candidates');
+      url.textContent = 'app.alphacv.demo / candidates';
+      moveCursor(340, 180);
+      setCaption('Candidates workspace', 'Search, filter, and open profiles — sample talent pool');
+      setProgress(38);
+      await sleep(2200);
+
+      // Post job
+      setNav('careers');
+      showScene('postjob');
+      url.textContent = 'app.alphacv.demo / careers-manage';
+      moveCursor(520, 260);
+      setCaption('Post a job opening', 'Publish to the public careers portal in minutes');
+      setProgress(52);
+      await typeInto($('jobTitle'), 'Senior Product Designer', 24);
+      await typeInto($('jobLoc'), 'Dubai, UAE', 20);
+      await typeInto($('jobResp'), '• Lead product design for digital products\n• Partner with engineering & product\n• Grow the design system', 8);
+      moveCursor(780, 420);
+      await sleep(400);
+      $('publishBtn').textContent = 'Published ✓';
+      await sleep(900);
+
+      // Public careers
+      showPublic();
+      url.textContent = 'careers.alphacv.demo / jobs / senior-product-designer';
+      moveCursor(0, 0, false);
+      setCaption('Public careers page', 'Clean candidate-facing job page — same brand system');
+      setProgress(68);
+      await sleep(2600);
+
+      // Matching
+      showScene('matching');
+      setNav('match');
+      url.textContent = 'app.alphacv.demo / match';
+      setCaption('AI matching in progress', 'Rank CVs against the role with live progress');
+      setProgress(78);
+      const ring = $('matchRing');
+      const pct = $('matchPct');
+      const phase = $('matchPhase');
+      const phases = ['Prepare', 'Score', 'Verify', 'Finish'];
+      for (let i = 0; i <= 100; i += 2) {
+        ring.style.setProperty('--p', i);
+        pct.textContent = i + '%';
+        phase.textContent = phases[Math.min(3, Math.floor(i / 28))];
+        await sleep(28);
+      }
+      await sleep(500);
+
+      // Results
+      showScene('results');
+      url.textContent = 'app.alphacv.demo / match · results';
+      setCaption('Ranked shortlist', 'Top candidates with match scores — ready to review');
+      setProgress(92);
+      await sleep(2800);
+
+      // End
+      hideCaption();
+      $('endCard').classList.add('show');
+      setProgress(100);
+      await sleep(3200);
+
+      // Loop
+      $('endCard').classList.remove('show');
+      document.querySelectorAll('#monthBars .bar').forEach((b) => {
+        b.style.height = '0';
+        b.classList.remove('show');
+      });
+      $('publishBtn').textContent = 'Publish opening';
+      $('jobTitle').value = '';
+      $('jobLoc').value = '';
+      $('jobResp').value = '';
+      ring.style.setProperty('--p', 0);
+      pct.textContent = '0%';
+      $('titleCard').classList.add('show');
+      setProgress(0);
+      await sleep(800);
+      run();
+    }
+
+    run();
+  </script>
+</body>
+</html>

@@ -57,13 +57,13 @@ export const api = {
   downloadStorageFile: (docType: 'cv' | 'jd', docId: string) => RequestRetryHandler.withRetry(() => apiClient.downloadStorageFile(docType, docId)),
 
   // Auth
-  login: (username: string, password: string) => RequestRetryHandler.withRetry(() => apiClient.login(username, password)),
+  login: (email: string, password: string) => RequestRetryHandler.withRetry(() => apiClient.login(email, password)),
   me: (token: string) => RequestRetryHandler.withRetry(() => apiClient.me(token)),
-  verifyPassword: (username: string, password: string) => RequestRetryHandler.withRetry(() => apiClient.verifyPassword(username, password)),
-  sendOTP: (username: string, password: string) => RequestRetryHandler.withRetry(() => apiClient.sendOTP(username, password)),
-  verifyOTP: (username: string, otp: string) => RequestRetryHandler.withRetry(() => apiClient.verifyOTP(username, otp)),
-  getCaptcha: (username: string, password: string) => RequestRetryHandler.withRetry(() => apiClient.getCaptcha(username, password)),
-  verifyCaptcha: (username: string, captchaId: string, answer: string) => RequestRetryHandler.withRetry(() => apiClient.verifyCaptcha(username, captchaId, answer)),
+  verifyPassword: (email: string, password: string) => RequestRetryHandler.withRetry(() => apiClient.verifyPassword(email, password)),
+  sendOTP: (email: string, password: string) => RequestRetryHandler.withRetry(() => apiClient.sendOTP(email, password)),
+  verifyOTP: (email: string, otp: string) => RequestRetryHandler.withRetry(() => apiClient.verifyOTP(email, otp)),
+  getCaptcha: (email: string, password: string) => RequestRetryHandler.withRetry(() => apiClient.getCaptcha(email, password)),
+  verifyCaptcha: (email: string, captchaId: string, answer: string) => RequestRetryHandler.withRetry(() => apiClient.verifyCaptcha(email, captchaId, answer)),
   logout: (token: string) => apiClient.logout(token),
 
   // Admin Users (admin only)
@@ -79,6 +79,7 @@ export const api = {
   listJobPostingsPaged: (params?: { includeInactive?: boolean; limit?: number; offset?: number }) =>
     RequestRetryHandler.withRetry(() => apiClient.listJobPostingsPaged(params)),
   getPublicJob: (token: string) => RequestRetryHandler.withRetry(() => apiClient.getPublicJob(token)),
+  searchOpenJobs: (params: Parameters<typeof apiClient.searchOpenJobs>[0] = {}) => RequestRetryHandler.withRetry(() => apiClient.searchOpenJobs(params)),
   getRecentJobPostings: (limit: number = 10) => RequestRetryHandler.withRetry(() => apiClient.getRecentJobPostings(limit)),
   searchLocations: (query: string) => RequestRetryHandler.withRetry(() => apiClient.searchLocations(query)),
   autofillFromCV: (token: string, cvFile: File) => apiClient.autofillFromCV(token, cvFile),
@@ -112,6 +113,19 @@ export const api = {
   updateJobStatus: (jobId: string, status: { is_active: boolean }) =>
     RequestRetryHandler.withRetry(() => apiClient.updateJobStatus(jobId, status)),
   deleteJobPosting: (jobId: string) => RequestRetryHandler.withRetry(() => apiClient.deleteJobPosting(jobId)),
+  // Saved CVs
+  getSavedCVs: (params?: { limit?: number; offset?: number; q?: string }) => RequestRetryHandler.withRetry(() => apiClient.getSavedCVs(params)),
+  getSavedCVIds: () => RequestRetryHandler.withRetry(() => apiClient.getSavedCVIds()),
+  saveCVs: (cvIds: string[]) => apiClient.saveCVs(cvIds),
+  unsaveCVs: (cvIds: string[]) => apiClient.unsaveCVs(cvIds),
+  // Bug reports (a submit is never retried automatically: it would send the report twice)
+  submitBugReport: (body: import('@/lib/types').BugCreateRequest) => apiClient.submitBugReport(body),
+  listMyBugReports: (params?: { limit?: number; offset?: number }) => RequestRetryHandler.withRetry(() => apiClient.listMyBugReports(params)),
+  adminListBugReports: (params?: Parameters<typeof apiClient.adminListBugReports>[0]) => RequestRetryHandler.withRetry(() => apiClient.adminListBugReports(params)),
+  adminUpdateBugReport: (id: string, body: Parameters<typeof apiClient.adminUpdateBugReport>[1]) => apiClient.adminUpdateBugReport(id, body),
+  adminDeleteBugReport: (id: string) => apiClient.adminDeleteBugReport(id),
+  getOpenBugCount: () => apiClient.getOpenBugCount(),
+  getCareersOverview: () => RequestRetryHandler.withRetry(() => apiClient.getCareersOverview()),
   getJobTrends: (days: number = 14) => RequestRetryHandler.withRetry(() => apiClient.getJobTrends(days)),
   getWeeklyAnalysisReport: (params: { startDate: string; endDate: string }) =>
     RequestRetryHandler.withRetry(() => apiClient.getWeeklyAnalysisReport(params)),

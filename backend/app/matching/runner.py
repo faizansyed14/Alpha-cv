@@ -30,10 +30,10 @@ from app.schemas.matching import (
 )
 from app.providers.embeddings.service import get_embedding_service  # noqa: F401 (warm model)
 from app.providers.llm.service import get_llm_service
-from app.matching.engine import get_matching_service
+from app.matching.engine import get_matching_service, safe_parse_years
 from app.ingestion.llm_enhancement import enhance_with_llm_analysis_batched
 from app.matching import requirements as job_requirements
-from app.providers.vectorstore.qdrant import get_qdrant_utils
+from app.store import get_store
 
 logger = logging.getLogger(__name__)
 
@@ -56,29 +56,6 @@ def normalize_weights(weights: Dict[str, float]) -> Dict[str, float]:
     if total <= 0:
         return {"skills": 0.25, "responsibilities": 0.25, "job_title": 0.25, "experience": 0.25}
     return {k: v / total for k, v in weights.items()}
-
-
-def safe_parse_years(years_value) -> int:
-    """Safely parse years of experience, handling string values like 'Not specified' or '5-8'."""
-    if not years_value:
-        return 0
-    if isinstance(years_value, (int, float)):
-        return int(years_value)
-    if isinstance(years_value, str):
-        s = years_value.strip()
-        if not s or s.lower() in {"not specified", "x years", "not applicable", "n/a"}:
-            return 0
-        if "-" in s:
-            try:
-                return int(s.split("-")[0].strip())
-            except Exception:
-                return 0
-        try:
-            s = s.replace(" years", "").replace("+", "").strip()
-            return int(s)
-        except Exception:
-            return 0
-    return 0
 
 
 async def process_single_candidate(
@@ -245,17 +222,13 @@ async def process_candidates_chunk_parallel(
 # Candidate gathering (batched Qdrant reads)
 # ---------------------------------------------------------------------------
 def _candidate_ids(qdrant, cv_ids: Optional[List[str]]) -> List[str]:
-    """The CV ids to score. Only ids are held up front; the structured payloads are fetched chunk by chunk."""
+    """The CV ids to score. Only ids are held up front; the structured CVs and vectors are fetched chunk by chunk."""
     cap = settings.MATCH_MAX_CVS or None
     if cv_ids:
         ids = list(dict.fromkeys(cv_ids))  # de-dupe, preserve order
         return ids[:cap] if cap else ids   # the API already refuses more; this keeps a direct caller inside the maximum too
-    # No CVs named: the newest MATCH_MAX_CVS, read from Qdrant's own sorted index (never every CV in the database).
-    if cap and getattr(qdrant, "uploaded_at_ready", lambda: False)():
-        ids = qdrant.list_cv_ids_newest_first(0, cap)
-    else:
-        ids = [m["id"] for m in qdrant.list_all_cvs()]
-        ids = ids[:cap] if cap else ids
+    # No CVs named: the newest MATCH_MAX_CVS (never more than the cap in one match).
+    ids = qdrant.list_candidate_ids(0, cap or 1_000_000)
     logger.info(f"Matching the newest {len(ids)} CVs in the database")
     return ids
 
@@ -340,7 +313,7 @@ async def run_match(
                 pass
 
     t0 = time.time()
-    qdrant = get_qdrant_utils()
+    qdrant = get_store()
     matching_service = get_matching_service()
 
     jd = _resolve_jd(qdrant, jd_id, jd_text)
@@ -515,27 +488,8 @@ async def run_match(
         except Exception as e:  # noqa: BLE001
             logger.error(f"LLM enhancement failed: {e} - continuing with semantic scores only")
 
-    # ------- persist scores -------
     _progress(status="processing", phase="finalizing", progress_percent=99,
               total_candidates=total_candidates, processed_candidates=total_candidates, recent=[])
-    if jd_id:
-        try:
-            score_map = {
-                c.cv_id: {
-                    "overall_score": float(c.overall_score),
-                    "skills_score": float(c.skills_score),
-                    "responsibilities_score": float(c.responsibilities_score),
-                    "job_title_score": float(c.job_title_score),
-                    "years_score": float(c.years_score),
-                }
-                for c in resp_candidates if getattr(c, "cv_id", None)
-            }
-            # Only writes onto CVs that actually applied to this job, an ad-hoc
-            # match against an unrelated JD never touches their stored score.
-            qdrant.store_applied_job_match_scores(jd_id, jd_title, score_map)
-        except Exception as persist_err:  # noqa: BLE001
-            logger.warning(f"Could not persist match scores: {persist_err}")
-
     _progress(status="completed", phase="finalizing", progress_percent=100,
               total_candidates=total_candidates, processed_candidates=total_candidates,
               results_so_far=len(resp_candidates), recent=[])

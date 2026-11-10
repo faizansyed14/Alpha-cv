@@ -1,14 +1,28 @@
 # =============================================================================
 # AlphaCV, Development (CPU-only)
+#
+# The same services, sizes and settings as docker-compose.local.yml. The only differences:
+#   local : raw CV files in the `uploads-local-data` volume, Postgres in the `postgres-local` container
+#   dev   : raw CV files in S3, Postgres on RDS (STORAGE_BACKEND, S3_*, DATABASE_URL come from .env.dev)
 # Configuration comes from ./.env.dev (created from .env.dev.example on first run).
 # Start:  ./scripts/start.sh dev         Stop: ./scripts/stop.sh dev
-# Exposed dev ports: 3000 frontend, 8000 backend, 80 nginx,
-#                    5434 postgres, 6335 qdrant, 6380 redis.
+# Resources (measured idle: about 2 GB of RAM and almost no CPU; the limits are ceilings, not reservations):
+#   memory limits add up to ~7.2 GB. docker-compose.prod.yml has the production sizes.
+# Ports (same as local, so run one of the two at a time):
+#   3000 frontend, 8000 backend, 80 nginx, 6335 qdrant, 6380 redis
 # =============================================================================
 
+# What every backend process is told about its neighbours in this stack (the database and the file store come from .env.dev).
+x-dev-services: &dev-services
+  QDRANT_HOST: qdrant-dev
+  QDRANT_PORT: "6333"
+  REDIS_HOST: redis-dev
+  REDIS_PORT: "6379"
+  EMBEDDING_SERVICE_URL: http://model-server-dev:8080
+  # shared secret between the backend processes and the model server (empty = off; set MODEL_SERVER_TOKEN in the env file to turn it on)
+  EMBEDDING_SERVICE_TOKEN: ${MODEL_SERVER_TOKEN:-}
+
 services:
-  # Development Frontend (port 3000). The browser uses window.location.origin at
-  # runtime, so NEXT_PUBLIC_API_URL only matters for the SSR fallback.
   frontend-dev:
     build:
       context: ./frontend
@@ -23,15 +37,21 @@ services:
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_API_URL=http://localhost
-      # Server-side rewrite proxy: Next.js forwards /api/* to this URL.
       - BACKEND_INTERNAL_URL=http://backend-dev:8000
     depends_on:
       - backend-dev
     networks:
-      - dev-network
+      dev-network:
+        aliases: [frontend-dev]   # nginx/nginx-dev.conf routes to frontend-dev / backend-dev
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
     restart: unless-stopped
 
-  # Development Backend (port 8000, CPU-only PyTorch, hot-reload source mount)
   backend-dev:
     image: alpha-backend:dev
     build:
@@ -42,22 +62,31 @@ services:
     env_file:
       - .env.dev
     environment:
-      - EMBEDDING_SERVICE_URL=http://model-server-dev:8080
+      <<: *dev-services
+      # 2 API processes, like production (the API only enqueues the heavy work, so more would just share the same cores)
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
     volumes:
       - ./backend:/app
-      - uploads-dev-data:/data/uploads
     networks:
-      - dev-network
+      dev-network:
+        aliases: [backend-dev]
     depends_on:
-      - postgres-dev
-      - qdrant-dev
-      - redis-dev
-      - model-server-dev
+      qdrant-dev:
+        condition: service_started
+      redis-dev:
+        condition: service_started
+      model-server-dev:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 1280M
+          cpus: '1.5'
+        reservations:
+          memory: 384M
     restart: unless-stopped
 
-  # Combined background worker: email scheduler + public-CV queue consumer.
-  # Merged (see docker-compose.prod.yml for why), match-worker-dev below
-  # stays separate since it's the only genuinely CPU-heavy one.
+  # Email scheduler + public-CV queue consumer
   background-worker-dev:
     image: alpha-backend:dev
     pull_policy: never
@@ -65,19 +94,24 @@ services:
     env_file:
       - .env.dev
     environment:
-      - EMBEDDING_SERVICE_URL=http://model-server-dev:8080
-      - ENABLE_PUBLIC_CV_QUEUE=true
+      <<: *dev-services
+      ENABLE_PUBLIC_CV_QUEUE: "true"
     depends_on:
       - backend-dev
-      - postgres-dev
       - qdrant-dev
       - redis-dev
       - model-server-dev
     volumes:
       - ./backend:/app
-      - uploads-dev-data:/data/uploads
     networks:
       - dev-network
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: '0.75'
+        reservations:
+          memory: 192M
     restart: unless-stopped
 
   # Dedicated matching worker (consumes the Redis match-job queue)
@@ -90,83 +124,92 @@ services:
     env_file:
       - .env.dev
     environment:
-      - EMBEDDING_SERVICE_URL=http://model-server-dev:8080
-      - ENABLE_MATCH_QUEUE=true
-      - TORCH_NUM_THREADS=${TORCH_NUM_THREADS:-1}
-      - MATCH_THREAD_POOL_WORKERS=${MATCH_THREAD_POOL_WORKERS:-4}
-      - MATCH_QUEUE_MAX_CONCURRENT_JOBS=${MATCH_QUEUE_MAX_CONCURRENT_JOBS:-0}
-      - MATCH_WORKER_CONCURRENCY=${MATCH_WORKER_CONCURRENCY:-2}
-      - OPENBLAS_NUM_THREADS=1
-      - MALLOC_ARENA_MAX=2
+      <<: *dev-services
+      ENABLE_MATCH_QUEUE: "true"
+      TORCH_NUM_THREADS: ${TORCH_NUM_THREADS:-1}
+      # Sizing measured under load (3 users x 15,000 CVs): one match is CPU-bound in a single Python process, so
+      # concurrency comes from worker PROCESSES (MATCH_WORKER_REPLICAS). Each process runs up to 2 jobs; the second
+      # is only taken when no idle process took it. 4 scoring threads are enough (2-16 measured the same).
+      MATCH_THREAD_POOL_WORKERS: ${MATCH_THREAD_POOL_WORKERS:-4}
+      MATCH_QUEUE_MAX_CONCURRENT_JOBS: ${MATCH_QUEUE_MAX_CONCURRENT_JOBS:-0}
+      MATCH_WORKER_CONCURRENCY: ${MATCH_WORKER_CONCURRENCY:-2}
+      OPENBLAS_NUM_THREADS: "1"
+      MALLOC_ARENA_MAX: "2"
     depends_on:
       - backend-dev
-      - postgres-dev
       - qdrant-dev
       - redis-dev
       - model-server-dev
     volumes:
       - ./backend:/app
-      - uploads-dev-data:/data/uploads
     networks:
       - dev-network
     deploy:
       replicas: ${MATCH_WORKER_REPLICAS:-2}
+      resources:
+        limits:
+          memory: 1024M
+          cpus: '1.5'
+        reservations:
+          memory: 256M
     restart: unless-stopped
 
-  # Embedding model server (multilingual-e5-small on ONNX Runtime lives ONLY here; internal, no host port)
+  # Embedding model server: the only process with the embedding model, multilingual-e5-small on ONNX Runtime (internal, no host port)
   model-server-dev:
     image: alpha-model-server:dev
     build:
       context: ./backend/model_server
     environment:
       - MODEL_THREADS=${MODEL_THREADS:-2}
+      - MODEL_SERVER_TOKEN=${MODEL_SERVER_TOKEN:-}
     init: true
     networks:
       - dev-network
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+          cpus: '1.5'
+        reservations:
+          memory: 384M
     restart: unless-stopped
 
-  # Development PostgreSQL (host port 5434)
-  postgres-dev:
-    image: postgres:15
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=${POSTGRES_DB:-cv_analyzer_dev}
-    ports:
-      - "5434:5432"
-    volumes:
-      - postgres-dev-data:/var/lib/postgresql/data
-    networks:
-      - dev-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-
-  # Development Qdrant (host port 6335)
   qdrant-dev:
     image: qdrant/qdrant:v1.12.4
     ports:
-      - "6335:6333"
+      - "127.0.0.1:6335:6333"
     volumes:
       - qdrant-dev-data:/qdrant/storage
     networks:
       - dev-network
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
     restart: unless-stopped
 
-  # Development Redis (host port 6380)
+  # Redis keeps its data in a volume (append-only), so queued matches and caches survive a restart
   redis-dev:
     image: redis:7-alpine
     ports:
-      - "6380:6379"
-    command: redis-server --maxmemory 256mb --maxmemory-policy volatile-lru
+      - "127.0.0.1:6380:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy volatile-lru
+    volumes:
+      - redis-dev-data:/data
     networks:
       - dev-network
+    deploy:
+      resources:
+        limits:
+          memory: 320M
+          cpus: '0.5'
+        reservations:
+          memory: 64M
     restart: unless-stopped
 
-  # Development Nginx - reverse proxy (same routing as prod)
   nginx-dev:
     image: nginx:alpine
     ports:
@@ -178,6 +221,13 @@ services:
       - frontend-dev
     networks:
       - dev-network
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+        reservations:
+          memory: 16M
     restart: unless-stopped
 
 networks:
@@ -185,6 +235,5 @@ networks:
     driver: bridge
 
 volumes:
-  postgres-dev-data:
   qdrant-dev-data:
-  uploads-dev-data:
+  redis-dev-data:

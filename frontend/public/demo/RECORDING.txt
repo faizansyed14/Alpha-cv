@@ -1,0 +1,18 @@
+AlphaCV React product tour
+==========================
+
+URL (local Next preview):
+  http://localhost:3001/demo/product-tour
+
+URL (after Docker frontend rebuild):
+  http://localhost:3000/demo/product-tour
+
+Rebuild Docker frontend:
+  ./scripts/frontend.sh
+
+This page is real React/Next using the same components as the app
+(CandidateCard, JobCard, MonthBars, TrendChart, MatchingFullPageAnimation,
+PublicHeader) with fictional demo data only.
+
+Record for LinkedIn / business page:
+  Fullscreen (F11) → OBS or Win+G → one full loop → export MP4.

@@ -21,8 +21,8 @@ class FakeQdrant:
         self.ids = [f"cv{i}" for i in range(n)]
         self.batches = []
 
-    def list_all_cvs(self):
-        return [{"id": i} for i in self.ids]
+    def list_candidate_ids(self, offset, limit, categories=None):
+        return list(self.ids)[offset:offset + limit]
 
     def get_structured_cvs_batch(self, ids):
         self.batches.append(len(ids))
@@ -37,7 +37,7 @@ class FakeQdrant:
 def harness(monkeypatch):
     def build(n, *, detail_top=100, chunk=50):
         q = FakeQdrant(n)
-        monkeypatch.setattr(runner, "get_qdrant_utils", lambda: q)
+        monkeypatch.setattr(runner, "get_store", lambda: q)
         monkeypatch.setattr(runner, "get_matching_service", lambda: object())
         monkeypatch.setattr(runner, "_resolve_jd", lambda *_a: {"id": "text_jd", "job_title": "Dev"})
         monkeypatch.setattr(settings, "MATCH_DETAIL_TOP_N", detail_top)

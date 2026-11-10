@@ -10,11 +10,15 @@
 # migration:
 #   - DATABASE_URL -> points at an AWS RDS (PostgreSQL) endpoint: one database
 #     for users, tracker and email intake. Enable "Multi-AZ" + automated backups on
-#     the RDS instance itself; see db/init/rds-bootstrap.sql for the one-time setup.
+#     the RDS instance itself; see scripts/db/init/rds-bootstrap.sql for the one-time setup.
 #   - STORAGE_BACKEND=s3, S3_BUCKET / S3_REGION -> CV/JD files go straight to
 #     S3 (credentials via the EC2 instance's IAM role, no static keys on the
 #     box). Enable bucket versioning + default SSE-S3/KMS encryption on the
 #     bucket itself.
+# Sizing for a 4 vCPU / 16 GB host (the limits are ceilings, measured use is far lower): the memory limits add up to ~13.8 GB, which
+# leaves ~2 GB for the operating system. A 15,000-CV match was measured at ~250 MiB per match-worker process, the model server idles at
+# ~0.9 GB, and Qdrant keeps its vectors on disk. Redis's maxmemory is kept ~25% below its container limit (it needs room for its
+# append-only-file rewrite and fragmentation), so it is never killed for going over.
 # Qdrant (vector store) and Redis (cache/queue) still run as local containers
 # with named volumes, they are not in scope for this migration, but note
 # they remain single points of failure on this one EC2 host (see the ops
@@ -59,7 +63,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2560M
+          memory: 2048M
           cpus: '2.0'
         reservations:
           memory: 1G
@@ -105,7 +109,7 @@ services:
       resources:
         # per process; a 15,000-CV job peaked at ~250 MiB with the settings above (two jobs ~500 MiB)
         limits:
-          memory: 1536M
+          memory: 1024M
           cpus: '1.5'
         reservations:
           memory: 384M
@@ -142,7 +146,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536M
+          memory: 1024M
           cpus: '1.0'
         reservations:
           memory: 512M
@@ -166,7 +170,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2560M
+          memory: 2048M
           cpus: '2.0'
         reservations:
           memory: 1G
@@ -200,7 +204,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 512M
           cpus: '0.5'
         reservations:
           memory: 384M
@@ -209,7 +213,7 @@ services:
   # ---------------------------------------------------------------------------
   # PostgreSQL: NOT run here in production. DATABASE_URL in ./.env.prod points at an
   # AWS RDS PostgreSQL instance instead (see
-  # the header comment above and db/init/rds-bootstrap.sql for one-time setup:
+  # the header comment above and scripts/db/init/rds-bootstrap.sql for one-time setup:
   # RDS doesn't execute docker-entrypoint-initdb.d, so the application role and
   # its grant have to be created once against the RDS endpoint directly).
   # ---------------------------------------------------------------------------
@@ -252,7 +256,7 @@ services:
     command: >
       redis-server
       --appendonly yes
-      --maxmemory ${REDIS_MAXMEMORY:-2gb}
+      --maxmemory ${REDIS_MAXMEMORY:-1536mb}
       --maxmemory-policy volatile-lru
       --tcp-keepalive 60
       --timeout 300
@@ -281,6 +285,8 @@ services:
     volumes:
       - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
       - nginx_cache:/var/cache/nginx
+      # access log on the host for fail2ban (see scripts/system/setup-fail2ban.sh)
+      - /var/log/alphacv-nginx:/var/log/nginx
       # SSL (populated by scripts/system/setup-ssl.sh)
       - ./certbot/www:/var/www/certbot:ro
       - ./certbot/conf:/etc/letsencrypt:ro

@@ -11,6 +11,7 @@ export default function LinkedInAgentPage() {
       title="LinkedIn post"
       headline="A LinkedIn post for any job"
       blurb="Attach a job description, then ask for a post. Ask for a different tone or length any time."
+      heroMarkSrc="/icons/linkedin.svg"
       workingSteps={['Reading the job description', 'Finding the hook', 'Writing the post', 'Choosing hashtags']}
       renderAnswer={(m, ctx) => <LinkedInAnswer message={m} fresh={ctx.fresh} />}
     />

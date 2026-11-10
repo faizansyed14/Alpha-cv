@@ -38,13 +38,15 @@ def stages(monkeypatch):
     emb = MagicMock()
     emb.generate_document_embeddings.side_effect = embed_gauge
     q = MagicMock()
-    q.find_cv_by_content_hash.return_value = None
+    q.find_candidate_by_hash.return_value = None
     q.check_existing_application.return_value = None
-    q.store_document.return_value = q.store_structured_data.return_value = q.store_embeddings_exact.return_value = True
+    q.save_candidate.return_value = "cv"
+    q.store_embeddings.return_value = True
+    q.link_application.return_value = True
     parsing = MagicMock()
     parsing.process_document.return_value = {"raw_text": CV_TEXT, "clean_text": CV_TEXT, "extracted_pii": {"email": [], "phone": []}}
-    for name, obj in (("get_qdrant_utils", q), ("get_llm_service", llm), ("get_embedding_service", emb),
-                      ("get_parsing_service", parsing), ("get_storage_service", MagicMock()), ("get_cache_service", MagicMock())):
+    for name, obj in (("get_store", q), ("get_llm_service", llm), ("get_embedding_service", emb),
+                      ("get_parsing_service", parsing), ("get_storage_service", MagicMock())):
         monkeypatch.setattr(pipeline, name, lambda obj=obj: obj)
     monkeypatch.setattr(pipeline, "_persist_original", lambda sub, text, ext: "stored/x")
     monkeypatch.setattr(pipeline, "_llm_slots", threading.BoundedSemaphore(3))

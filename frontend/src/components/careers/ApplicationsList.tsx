@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useLayoutEffect } from 'react';
 import dynamic from 'next/dynamic';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   User,
   Users,
@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/page';
 import { Avatar } from '@/components/ui/avatar';
 import { Bone, SkeletonRegion } from '@/components/skeletons';
+import { restoreScroll, saveScroll, SCROLL_KEYS } from '@/lib/scrollRestore';
 
 const FilePreviewModal = dynamic(
   () => import('@/components/ui/file-preview-modal').then((mod) => mod.FilePreviewModal),
@@ -35,6 +36,7 @@ function MatchScorePill({ score }: { score: number }) {
 
 export default function ApplicationsList() {
   const router = useRouter();
+  const pathname = usePathname();
   const { applications, isLoading } = useCareersStore();
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString();
@@ -102,6 +104,11 @@ export default function ApplicationsList() {
     };
     return [...(applications || [])].sort((x: any, y: any) => at(y?.application_date) - at(x?.application_date));
   }, [applications]);
+
+  useLayoutEffect(() => {
+    if (orderedApplications.length === 0) return;
+    return restoreScroll(SCROLL_KEYS.applicants) || undefined;
+  }, [orderedApplications.length]);
 
   if (isLoading) {
     return (
@@ -176,7 +183,11 @@ export default function ApplicationsList() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {orderedApplications.map((application: any) => (
-              <tr key={application.application_id} className="align-top transition-colors hover:bg-slate-50/70">
+              <tr
+                key={application.application_id}
+                data-scroll-id={application.application_id}
+                className="align-top transition-colors hover:bg-slate-50/70"
+              >
                 <td className="px-3 py-3.5">
                   <div className="flex min-w-0 items-start gap-2.5">
                     <Avatar name={application.applicant_name} />
@@ -216,8 +227,10 @@ export default function ApplicationsList() {
                     <span className="break-words">{application.notice_period ? `Notice: ${application.notice_period}` : dash}</span>
                   </div>
                 </td>
-                <td className="px-3 py-3.5 font-semibold text-slate-900">
-                  {application.expected_salary != null ? `AED ${application.expected_salary.toLocaleString()}` : dash}
+                <td className="px-3 py-3.5 font-semibold text-emerald-700">
+                  {application.expected_salary != null
+                    ? `AED ${Number(application.expected_salary).toLocaleString()}`
+                    : dash}
                 </td>
                 <td className="px-3 py-3.5">
                   {typeof application.match_score === 'number' ? (
@@ -228,7 +241,12 @@ export default function ApplicationsList() {
                   <div className="flex flex-col items-stretch gap-1.5">
                     <button
                       type="button"
-                      onClick={() => router.push(`/candidates/${application.application_id}`)}
+                      onClick={() => {
+                        saveScroll(SCROLL_KEYS.applicants, application.application_id);
+                        router.push(
+                          `/candidates/${application.application_id}?from=${encodeURIComponent((pathname || '/careers') + window.location.search)}`,
+                        );
+                      }}
                       className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-colors bg-navy-900 font-semibold text-white hover:bg-navy-800"
                     >
                       <Eye className="h-3.5 w-3.5" /> Details

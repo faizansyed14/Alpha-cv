@@ -3,32 +3,39 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/authStore';
-import Protected from '@/components/layout/Protected';
+import BusinessLanding from '@/components/marketing/BusinessLanding';
 import { BootSkeleton } from '@/components/skeletons';
 import { readPersistedWorkspacePath } from '@/lib/navigation';
 
 const TRACKER_ONLY_ROLES = ['account_manager'];
 
 /**
- * Root `/` redirects into URL workspaces.
- * Preserves last workspace; tracker-only roles go to /tracker.
+ * Public home: AlphaCV business page for guests.
+ * Signed-in users continue into their workspace.
  */
-export default function HomeRedirectPage() {
+export default function HomePage() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, loading, authHydrated } = useAuthStore();
 
   useEffect(() => {
-    if (user && TRACKER_ONLY_ROLES.includes(user.role as string)) {
+    if (!authHydrated || loading) return;
+    if (!user) return;
+
+    if (TRACKER_ONLY_ROLES.includes(user.role as string)) {
       router.replace('/tracker');
       return;
     }
     const last = readPersistedWorkspacePath();
     router.replace(last ?? '/dashboard');
-  }, [router, user]);
+  }, [router, user, loading, authHydrated]);
 
-  return (
-    <Protected>
-      <BootSkeleton />
-    </Protected>
-  );
+  if (!authHydrated || loading) {
+    return <BootSkeleton />;
+  }
+
+  if (user) {
+    return <BootSkeleton />;
+  }
+
+  return <BusinessLanding />;
 }

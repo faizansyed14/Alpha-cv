@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import {
   MapPin,
   Calendar,
-  CheckCircle2,
   AlertCircle,
   Building2,
   Briefcase,
@@ -86,13 +85,13 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
 
   const facts = [
     { icon: MapPin, label: 'Location', value: publicJob.job_location || 'UAE' },
-    { icon: Building2, label: 'Company', value: publicJob.company_name || 'AlphaData' },
+    { icon: Building2, label: 'Company', value: 'AlphaData' },
     ...(experience ? [{ icon: Briefcase, label: 'Experience', value: experience }] : []),
     { icon: Calendar, label: 'Posted', value: formatDate(publicJob.upload_date) },
   ];
 
   return (
-    <div className="min-h-screen bg-[var(--app-bg)]">
+    <div className="min-h-screen bg-gradient-to-br from-navy-50 via-sky-50/40 to-[#EEF3FA]">
       <PublicHeader
         right={
           isActive ? (
@@ -100,52 +99,79 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
               Apply now
             </Button>
           ) : (
-            <span className="rounded-full border border-surface-strong bg-slate-50 px-3 py-1 text-xs font-medium text-slate-500">Closed</span>
+            <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-xs font-medium text-slate-500 shadow-sm backdrop-blur">Closed</span>
           )
         }
       />
 
       <PublicBody>
-        {/* Title */}
-        <section className="border-b border-surface-border bg-gradient-to-b from-navy-50 via-white to-white">
-          <div className="mx-auto max-w-3xl px-4 pb-10 pt-12 sm:px-6 sm:pt-16">
-            <motion.div variants={stagger(0.07, 0.05)} initial="hidden" animate="show">
-              <motion.p variants={rise} className="mb-4 inline-flex rounded-full bg-white px-3 py-1 text-xs font-semibold text-navy-700 shadow-soft ring-1 ring-inset ring-navy-100">
+        {/* Centered title hero */}
+        <section className="relative overflow-hidden border-b border-white/60">
+          <div aria-hidden className="pointer-events-none absolute -left-20 top-4 h-56 w-56 rounded-full bg-sky-300/25 blur-3xl" />
+          <div aria-hidden className="pointer-events-none absolute -right-16 bottom-0 h-64 w-64 rounded-full bg-navy-400/15 blur-3xl" />
+          <div className="relative mx-auto max-w-3xl px-4 pb-12 pt-14 text-center sm:px-6 sm:pb-14 sm:pt-16">
+            <motion.div variants={stagger(0.07, 0.05)} initial="hidden" animate="show" className="mx-auto flex flex-col items-center">
+              <motion.p
+                variants={rise}
+                className="mb-5 inline-flex rounded-full border border-white/80 bg-white/80 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-navy-700 shadow-[var(--shadow-card)] backdrop-blur"
+              >
                 {isActive ? 'Now hiring' : 'Position closed'}
               </motion.p>
-              <motion.h1 variants={rise} className="font-display text-3xl leading-[1.12] text-slate-900 sm:text-4xl">
+              <motion.h1
+                variants={rise}
+                className="max-w-2xl text-[30px] font-bold leading-[1.12] tracking-[-0.03em] text-slate-900 sm:text-[40px]"
+              >
                 {publicJob.job_title || 'Open Position'}
               </motion.h1>
-              <motion.dl variants={rise} className="mt-8 grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
+              <motion.dl
+                variants={rise}
+                className="mt-9 grid w-full max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4"
+              >
                 {facts.map(({ icon: Icon, label, value }) => (
-                  <div key={label} className="min-w-0">
-                    <dt className="flex items-center gap-1.5 text-xs font-medium text-slate-400">
+                  <div
+                    key={label}
+                    className="min-w-0 rounded-2xl border border-white/80 bg-white/75 px-3 py-3.5 text-center shadow-[var(--shadow-card)] backdrop-blur-sm"
+                  >
+                    <dt className="flex items-center justify-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
                       <Icon className="h-3.5 w-3.5" />
                       {label}
                     </dt>
-                    <dd className="mt-1 truncate text-base font-medium text-ink" title={String(value)}>
+                    <dd className="mt-1.5 truncate text-[14px] font-semibold text-ink" title={String(value)}>
                       {value}
                     </dd>
                   </div>
                 ))}
               </motion.dl>
+              {isActive ? (
+                <motion.div variants={rise} className="mt-8">
+                  <Button variant="primary" size="lg" className="px-8 shadow-md" onClick={() => setShowApplicationForm(true)}>
+                    Apply now
+                  </Button>
+                </motion.div>
+              ) : null}
             </motion.div>
           </div>
         </section>
 
-        <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-          <motion.div variants={stagger(0.08, 0.1)} initial="hidden" animate="show" className="space-y-10">
-            <motion.section variants={rise}>
-              <h2 className="mb-3 text-2xs font-semibold uppercase tracking-[0.1em] text-slate-400">About the role</h2>
-              <div className="whitespace-pre-wrap text-md leading-7 text-slate-700">{publicJob.job_description}</div>
+        <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
+          <motion.div variants={stagger(0.08, 0.1)} initial="hidden" animate="show" className="space-y-8">
+            <motion.section
+              variants={rise}
+              className="rounded-3xl border border-white/80 bg-white/80 p-6 text-center shadow-[var(--shadow-card)] backdrop-blur-md sm:p-8"
+            >
+              <h2 className="mb-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">About the role</h2>
+              <div className="whitespace-pre-wrap text-left text-[15px] leading-7 text-slate-700">{publicJob.job_description}</div>
             </motion.section>
 
             {responsibilities.length > 0 && (
-              <motion.section variants={rise}>
-                <h2 className="mb-4 text-2xs font-semibold uppercase tracking-[0.1em] text-slate-400">Key responsibilities</h2>
-                <ul className="space-y-3">
+              <motion.section
+                variants={rise}
+                className="rounded-3xl border border-white/80 bg-white/80 p-6 shadow-[var(--shadow-card)] backdrop-blur-md sm:p-8"
+              >
+                <h2 className="mb-5 text-center text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Key responsibilities</h2>
+                <ul className="space-y-3 text-left">
                   {responsibilities.map((responsibility: string, idx: number) => (
-                    <li key={idx} className="flex items-start gap-3 text-md leading-7 text-slate-700">
+                    <li key={idx} className="flex items-start gap-3 text-[15px] leading-7 text-slate-700">
                       <span className="mt-[0.7rem] h-1.5 w-1.5 shrink-0 rounded-full bg-navy-500" />
                       <span>{responsibility}</span>
                     </li>
@@ -155,12 +181,15 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
             )}
 
             {requirements.length > 0 && (
-              <motion.section variants={rise}>
-                <h2 className="mb-4 text-2xs font-semibold uppercase tracking-[0.1em] text-slate-400">Qualifications and requirements</h2>
-                <ul className="space-y-3">
+              <motion.section
+                variants={rise}
+                className="rounded-3xl border border-white/80 bg-white/80 p-6 shadow-[var(--shadow-card)] backdrop-blur-md sm:p-8"
+              >
+                <h2 className="mb-5 text-center text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Qualifications and requirements</h2>
+                <ul className="space-y-3 text-left">
                   {requirements.map((requirement: string, idx: number) => (
-                    <li key={idx} className="flex items-start gap-3 text-md leading-7 text-slate-700">
-                      <CheckCircle2 className="mt-1.5 h-4 w-4 shrink-0 text-success" />
+                    <li key={idx} className="flex items-start gap-3 text-[15px] leading-7 text-slate-700">
+                      <span className="mt-[0.7rem] h-1.5 w-1.5 shrink-0 rounded-full bg-navy-500" />
                       <span>{requirement}</span>
                     </li>
                   ))}
@@ -168,25 +197,10 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
               </motion.section>
             )}
 
-            <motion.section variants={rise} className="rounded-2xl border border-surface-border bg-paper p-6 text-center shadow-card sm:p-8">
-              {isActive ? (
-                <>
-                  <h2 className="font-display text-2xl text-ink">Interested in this role?</h2>
-                  <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-                    It takes a few minutes. Upload your CV and tell us a little about yourself.
-                  </p>
-                  <Button variant="primary" size="lg" className="mt-6 px-8" onClick={() => setShowApplicationForm(true)}>
-                    Apply for this position
-                  </Button>
-                </>
-              ) : (
-                <p className="text-sm text-slate-500">This position is no longer accepting candidates.</p>
-              )}
-            </motion.section>
           </motion.div>
 
-          <section className="mt-16">
-            <h2 className="mb-4 text-2xs font-semibold uppercase tracking-[0.1em] text-slate-400">Other openings</h2>
+          <section className="mt-16 text-center">
+            <h2 className="mb-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Other openings</h2>
             <MoreOpenings currentJobToken={token} />
           </section>
         </div>

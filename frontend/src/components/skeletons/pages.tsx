@@ -2,29 +2,26 @@ import { Bone, SkeletonCandidateCard, SkeletonFilterRail, SkeletonHeader, Skelet
 
 export function DashboardSkeleton() {
   return (
-    <SkeletonRegion label="Loading dashboard" className="space-y-6">
-      <div className="rounded-2xl border border-surface-border bg-paper px-6 py-8 shadow-card sm:px-8">
-        <Bone className="mb-3 h-3 w-24" />
-        <Bone className="mb-2 h-8 w-72 max-w-full" />
-        <Bone className="h-4 w-96 max-w-full" />
-        <div className="mt-6 flex gap-2">
-          <Bone className="h-9 w-24" />
-          <Bone className="h-9 w-28" />
-        </div>
+    <SkeletonRegion label="Loading dashboard" className="space-y-5">
+      <Bone className="h-40 w-full rounded-3xl sm:h-44" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="rounded-2xl border border-surface-border bg-paper p-5 shadow-card">
+            <Bone className="h-10 w-10 rounded-xl" />
+            <Bone className="mt-4 h-3 w-24" />
+            <Bone className="mt-2 h-8 w-20" />
+            <Bone className="mt-3 h-3 w-32" />
+          </div>
+        ))}
       </div>
-      <SkeletonStats count={4} />
-      <div>
-        <Bone className="mb-3 h-4 w-28" />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="flex items-start gap-3.5 rounded-2xl border border-surface-border bg-paper p-4 shadow-card">
-              <Bone className="h-10 w-10 rounded-xl" />
-              <div className="flex-1 space-y-2">
-                <Bone className="h-3.5 w-28" />
-                <Bone className="h-3 w-40" />
-              </div>
-            </div>
-          ))}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="rounded-2xl border border-surface-border bg-paper p-5 shadow-card lg:col-span-2">
+          <Bone className="h-4 w-40" />
+          <Bone className="mt-5 h-52 w-full" />
+        </div>
+        <div className="rounded-2xl border border-surface-border bg-paper p-5 shadow-card">
+          <Bone className="h-4 w-28" />
+          <Bone className="mt-5 h-52 w-full" />
         </div>
       </div>
     </SkeletonRegion>
@@ -256,21 +253,31 @@ export function TrackerSkeleton() {
 
 export function LoginSkeleton() {
   return (
-    <SkeletonRegion label="Loading sign in" className="flex min-h-screen w-full items-center justify-center bg-[var(--app-bg)] px-4 py-12">
-      <div className="w-full max-w-sm">
-        <div className="mb-8 flex flex-col items-center">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-surface-border bg-white p-2 shadow-[var(--shadow-md)]">
-            <img src="/alphadatalogo.svg" alt="" className="h-full w-full object-contain" />
-          </div>
-          <Bone className="h-5 w-28" />
-          <Bone className="mt-2 h-3 w-48" />
+    <SkeletonRegion
+      label="Loading sign in"
+      className="relative flex min-h-screen flex-col bg-[var(--app-bg,#F7F8FA)]"
+    >
+      <div className="flex h-16 items-center border-b border-white/60 bg-white/70 px-6 backdrop-blur-xl">
+        <Bone className="h-8 w-8 rounded-lg" />
+        <div className="ml-3 space-y-1.5">
+          <Bone className="h-3 w-20" />
+          <Bone className="h-2 w-16" />
         </div>
-        <div className="space-y-3 rounded-2xl border border-surface-border bg-paper p-6 shadow-[var(--shadow-md)]">
-          <Bone className="h-3 w-16" />
-          <Bone className="h-9 w-full" />
-          <Bone className="h-3 w-16" />
-          <Bone className="h-9 w-full" />
-          <Bone className="h-9 w-full" />
+      </div>
+      <div className="flex flex-1 items-center justify-center px-4 py-12">
+        <div className="w-full max-w-[400px]">
+          <div className="mb-8 flex flex-col items-center gap-2">
+            <Bone className="h-7 w-24 rounded-full" />
+            <Bone className="h-8 w-40" />
+            <Bone className="h-3 w-36" />
+          </div>
+          <div className="space-y-3 rounded-3xl border border-white/80 bg-white/80 p-8 shadow-card">
+            <Bone className="h-3 w-16" />
+            <Bone className="h-11 w-full rounded-xl" />
+            <Bone className="h-3 w-16" />
+            <Bone className="h-11 w-full rounded-xl" />
+            <Bone className="h-11 w-full rounded-xl" />
+          </div>
         </div>
       </div>
     </SkeletonRegion>

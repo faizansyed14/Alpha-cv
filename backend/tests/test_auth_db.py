@@ -307,3 +307,11 @@ class TestPasswordHashingInDatabase:
         # Verify password works
         assert verify_password(password, user.password_hash) is True
         assert verify_password("wrong_password", user.password_hash) is False
+
+
+def test_only_real_and_captcha_are_sign_in_modes_and_the_removed_fixed_mode_is_not_one():
+    from app.services.auth_mode import normalize_otp_mode
+
+    assert normalize_otp_mode("captcha") == "captcha" and normalize_otp_mode(" CAPTCHA ") == "captcha"
+    assert normalize_otp_mode("real") == "real" and normalize_otp_mode(None) == "real" and normalize_otp_mode("") == "real"
+    assert normalize_otp_mode("fixed") == "real"            # the fixed-code mode is gone: it is never a way in without a real second factor

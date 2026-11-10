@@ -9,7 +9,8 @@ from app.integrations.email.email_otp_service import get_email_otp_service
 logger = logging.getLogger(__name__)
 
 
-def _split_emails(v: str | None) -> list[str]:
+def split_emails(v: str | None) -> list[str]:
+    """A list of addresses written with commas or semicolons, each once (any capitals), in the order written."""
     if not v:
         return []
     parts = []
@@ -29,6 +30,10 @@ def _split_emails(v: str | None) -> list[str]:
     return out
 
 
+def join_emails(items: list[str]) -> str:
+    return ", ".join([e.strip() for e in items if str(e or "").strip()])
+
+
 async def send_followup_reminder_email(
     *,
     to_emails: str,
@@ -40,8 +45,8 @@ async def send_followup_reminder_email(
     Send an email using the same Microsoft Graph sender mailbox as OTP emails.
     """
     otp = get_email_otp_service()
-    to_list = _split_emails(to_emails)
-    cc_list = _split_emails(cc_emails)
+    to_list = split_emails(to_emails)
+    cc_list = split_emails(cc_emails)
     if not to_list:
         raise ValueError("Missing recipient (to)")
 

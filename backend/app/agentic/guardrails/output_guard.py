@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Iterable
+from typing import Any
 
 from app.security.llm_guard import mask_pii, sanitize_untrusted
 
@@ -43,7 +43,3 @@ def clean_answer(text: str, *, limit: int = 3500) -> str:
     out = re.sub(r"[ \t]{2,}", " ", out)
     out = re.sub(r"\n{3,}", "\n\n", out).strip()
     return out[:limit]
-
-
-def known_ids(*groups: Iterable[str]) -> set:
-    return {i for g in groups for i in g}

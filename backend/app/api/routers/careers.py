@@ -10,12 +10,11 @@ Handles:
 import asyncio
 import logging
 import uuid
-import re
-from datetime import datetime, date
-from typing import Optional, List, Any, Union
+from datetime import datetime, date, timedelta
+from typing import Literal, Optional, List, Any, Union
 import tempfile
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, status, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Query, status, BackgroundTasks
 from fastapi.responses import JSONResponse
 import hashlib
 import os
@@ -30,7 +29,7 @@ from app.schemas.careers import (
 from app.ingestion.cv_parser import get_parsing_service
 from app.providers.llm.service import get_llm_service  
 from app.providers.embeddings.service import get_embedding_service
-from app.providers.vectorstore.qdrant import get_qdrant_utils, get_decompressed_content, resolve_candidate_contact
+from app.store import get_store
 from app.providers.storage import get_storage_service
 from app.services import locations_service
 from app.api.deps import require_admin, require_core_app
@@ -41,7 +40,6 @@ from app.ingestion.pipeline import claim_application
 from app.services.careers_helpers import (
     generate_public_token,
     generate_public_slug,
-    validate_file_upload,
     now_iso,
     get_safe_applicant_name,
     generate_email_subject_id,
@@ -69,166 +67,93 @@ def _preview_careers_list_text(value: Any, max_chars: int = 320) -> str:
 
 # ==================== PUBLIC ENDPOINTS (No Authentication) ====================
 
+def _summary(job: dict, user: Optional[User] = None) -> JobPostingSummary:
+    """One posting as the lists show it. The poster's name and role are internal: only a signed-in user (``user``) sees them."""
+    is_owner = bool(user) and job.get("posted_by_user") == user.username
+    is_admin = bool(user) and user.role == "admin"
+    return JobPostingSummary(
+        job_id=job["id"],
+        job_title=job["job_title"],
+        job_location=job["job_location"],
+        job_summary=_preview_careers_list_text(job["job_summary"], 320),
+        key_responsibilities=_preview_careers_list_text(job["key_responsibilities"], 320),
+        qualifications=_preview_careers_list_text(job["qualifications"], 320),
+        upload_date=job.get("upload_date") or now_iso(),
+        filename=job.get("filename") or "job_description.pdf",
+        is_active=job.get("is_active", True),
+        application_count=int(job.get("application_count") or 0) if user else 0,
+        public_token=job["public_token"],
+        posted_by_user=job.get("posted_by_user") if user else None,
+        posted_by_role=job.get("posted_by_role") if user else None,
+        can_edit=is_owner or is_admin,
+        can_delete=is_owner or is_admin,
+        email_subject_id=job.get("email_subject_id") if user else None,
+        email_subject_template=job.get("email_subject_template") if user else None,
+        boolean_search_string=(job.get("boolean_search_string") or "") if user else None,
+    )
+
+
 @router.get("/jobs/recent", response_model=List[JobPostingSummary])
 async def get_recent_job_postings(limit: int = 10) -> List[JobPostingSummary]:
     """
     Public endpoint: Get recent job postings (no authentication required)
-    
+
     Returns the most recent active job postings for display on public job pages.
     Used to show "More Openings" section to candidates.
     """
     try:
-        logger.info(f"Getting recent {limit} job postings")
-        
-        qdrant = get_qdrant_utils()
-        recent_rows, _total = qdrant.list_job_postings_lightweight_page(
-            include_inactive=False,
-            limit=max(1, min(int(limit or 5), 50)),
-            offset=0,
-            cache_ttl_seconds=2.0,
-        )
-        
-        summaries = []
-        for job in recent_rows:
-            structured_info = job.get("structured_info", {}) or {}
-            
-            job_title = structured_info.get("job_title", "") or job.get("job_title", "Position Available")
-            job_location = structured_info.get("job_location", "") or structured_info.get("location", "")
-            raw_summary = structured_info.get("job_summary", "") or structured_info.get("summary", "")
-            job_summary = _preview_careers_list_text(raw_summary, 320)
-            
-            # Get responsibilities and skills
-            responsibilities_list = structured_info.get("responsibilities", [])
-            if responsibilities_list and isinstance(responsibilities_list, list):
-                key_responsibilities = _preview_careers_list_text("\n".join([f"• {resp}" for resp in responsibilities_list]), 320)
-            else:
-                key_responsibilities = ""
-            
-            skills_list = structured_info.get("skills", []) or structured_info.get("requirements", [])
-            if skills_list and isinstance(skills_list, list):
-                qualifications = _preview_careers_list_text("\n".join([f"• {skill}" for skill in skills_list]), 320)
-            else:
-                qualifications = ""
-            
-            summary = JobPostingSummary(
-                job_id=job["id"],
-                job_title=job_title,
-                job_location=job_location,
-                job_summary=job_summary,
-                key_responsibilities=key_responsibilities,
-                qualifications=qualifications,
-                company_name=job.get("company_name"),
-                upload_date=job.get("upload_date", now_iso()),
-                filename=job.get("filename", "job_description.pdf"),
-                is_active=job.get("is_active", True),
-                application_count=0,  # Not needed for public view
-                public_token=job.get("public_token") or "unknown",
-                # The poster's username and role are internal, so this public response leaves them out.
-                can_edit=False,  # Public access - no edit permissions
-                can_delete=False  # Public access - no delete permissions
-            )
-            summaries.append(summary)
-        
-        logger.info(f"Returning {len(summaries)} recent job postings")
-        return summaries
-        
+        rows, _total = await asyncio.to_thread(get_store().list_job_postings, include_inactive=False, offset=0,
+                                               limit=max(1, min(int(limit or 5), 50)))
+        return [_summary(job) for job in rows]
     except Exception as e:
         logger.error(f"Failed to get recent job postings: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve recent job postings")
+
+
+@router.get("/jobs/open")
+async def search_open_jobs(
+    q: Optional[str] = Query(None, max_length=200, description="Words of the job title or location"),
+    skills: Optional[List[str]] = Query(None, max_length=10, description="Every skill must appear in the posting (repeat the parameter)"),
+    region: Optional[Literal["UAE", "KSA", "Remote", "Not specified"]] = Query(None),
+    areas: Optional[List[str]] = Query(None, max_length=30, description="Any of these words in the location (emirates, cities)"),
+    limit: int = Query(12, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    """Public endpoint: the open job postings, searched and paged by the database (the careers page's search, location tabs and skills)."""
+    try:
+        rows, total = await asyncio.to_thread(get_store().list_public_postings, q=q, skills=skills, region=region, areas=areas,
+                                              offset=offset, limit=limit)
+        return {"jobs": [_summary(job) for job in rows], "total": total}
+    except Exception as e:
+        logger.error(f"Failed to search open jobs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve job openings")
 
 
 @router.get("/jobs/{public_token}", response_model=PublicJobView)
 async def get_public_job(public_token: str) -> PublicJobView:
     """
     Public endpoint: View job posting (no authentication required)
-    
+
     This endpoint must be accessible to anyone with the link.
     Returns structured job information for display to candidates.
     """
     try:
-        logger.info(f"Public job request for token: {public_token[:8]}...")
-        
-        qdrant = get_qdrant_utils()
-        # Update this to include inactive jobs
-        job_data = qdrant.get_job_posting_by_token(public_token, include_inactive=True)
-        
-        if not job_data:
-            logger.warning(f"Job posting not found for token: {public_token[:8]}...")
+        job = await asyncio.to_thread(get_store().get_job_posting_by_token, public_token, True)
+        if not job:
             raise HTTPException(status_code=404, detail="Job posting not found")
-        
-        # Debug logging
-        logger.info(f"Job data received: {job_data}")
-        logger.info(f"Job data keys: {list(job_data.keys()) if job_data else 'None'}")
-        if job_data and 'job_title' in job_data:
-            logger.info(f"Job title from merged data: {job_data['job_title']}")
-        
-        # The job_data from get_job_posting_by_token already contains merged data
-        # Use the merged data directly since it already contains the structured information
-        
-        # Extract data from the merged job_data
-        # Prioritize structured_info from new UI data system, fall back to legacy format
-        structured_info = job_data.get("structured_info", {})
-        
-        job_title = (
-            structured_info.get("job_title") or 
-            job_data.get("job_title") or 
-            "Position Available"
+
+        years = job.get("years_of_experience")
+        return PublicJobView(
+            job_id=job["id"],
+            job_title=job["job_title"] or "Position Available",
+            job_location=job["job_location"],
+            job_description=job["job_summary"] or "Job description not available",
+            upload_date=job.get("created_date") or now_iso(),
+            requirements=job["skills"][:10],               # top 10 for display
+            responsibilities=job["responsibilities"][:10],
+            experience_required=f"{years:g} years" if isinstance(years, (int, float)) else "Not specified",
+            is_active=job.get("is_active", True),          # the actual status: a closed job still shows, as closed
         )
-        
-        job_location = (
-            structured_info.get("job_location") or 
-            job_data.get("location") or 
-            job_data.get("job_location") or 
-            ""
-        )
-        
-        job_summary = (
-            structured_info.get("job_summary") or 
-            job_data.get("job_summary") or 
-            job_data.get("summary") or 
-            "Job description not available"
-        )
-        
-        experience_required = job_data.get("years_of_experience", "Not specified")
-        
-        # Convert experience to string if it's a number
-        if isinstance(experience_required, (int, float)):
-            experience_required = f"{experience_required} years"
-        
-        # Get requirements and responsibilities from structured UI data or legacy format
-        # For new UI data, convert bullet-point strings to arrays
-        if structured_info.get("qualifications"):
-            # Convert bullet-point string to array
-            qualifications_text = structured_info.get("qualifications", "")
-            requirements = [line.strip().lstrip("•").strip() for line in qualifications_text.split("\n") if line.strip()]
-        else:
-            # Legacy format
-            requirements = job_data.get("skills_sentences", []) or job_data.get("skills", [])
-        
-        if structured_info.get("key_responsibilities"):
-            # Convert bullet-point string to array
-            responsibilities_text = structured_info.get("key_responsibilities", "")
-            responsibilities = [line.strip().lstrip("•").strip() for line in responsibilities_text.split("\n") if line.strip()]
-        else:
-            # Legacy format
-            responsibilities = job_data.get("responsibility_sentences", []) or job_data.get("responsibilities", [])
-        
-        public_job = PublicJobView(
-            job_id=job_data["id"],
-            job_title=job_title,
-            job_location=job_location,
-            company_name=job_data.get("company_name", "Alpha Data Recruitment"),
-            job_description=job_summary,  # Use updated summary or fall back to original
-            upload_date=job_data.get("created_date", job_data.get("upload_date", now_iso())),
-            requirements=requirements[:10],  # Limit to top 10 for display
-            responsibilities=responsibilities[:10],  # Limit to top 10 for display
-            experience_required=str(experience_required),
-            is_active=job_data.get("is_active", True)  # This will now show the actual status
-        )
-        
-        logger.info(f"Returning public job: {job_title}")
-        return public_job
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -256,8 +181,7 @@ async def autofill_from_cv(public_token: str, cv_file: UploadFile = File(...)) -
     from app.ingestion.autofill import build_autofill, cached_standardized, park_standardized
     from app.ingestion.pipeline import _llm_slots
 
-    qdrant = get_qdrant_utils()
-    job_data = await asyncio.to_thread(qdrant.get_job_posting_by_token, public_token, True)
+    job_data = await asyncio.to_thread(get_store().get_job_posting_by_token, public_token, True)
     if not job_data or not job_data.get("is_active", True):
         raise HTTPException(status_code=404, detail="Job posting not found or no longer active")
     content, _name, _kind = await secure_upload(cv_file, PUBLIC_CV_EXTENSIONS)   # size, real type, bombs, macros, scripts, virus scan
@@ -304,7 +228,6 @@ async def apply_to_job(
     applicant_name: str = Form(..., min_length=1, max_length=100),
     applicant_email: str = Form(...),
     applicant_phone: Optional[str] = Form(None),
-    cover_letter: Optional[str] = Form(None),
     expected_salary: float = Form(..., description="Expected salary in AED"),
     years_of_experience: float = Form(..., description="Years of experience"),
     location: Optional[str] = Form(None, max_length=200, description="Candidate's current location"),
@@ -330,8 +253,8 @@ async def apply_to_job(
         logger.info(f"Application received for job token: {public_token[:8]}... from {applicant_name} (async: {background_processing})")
         
         # 1. Verify job exists and is active
-        qdrant = get_qdrant_utils()
-        job_data = qdrant.get_job_posting_by_token(public_token, include_inactive=True)
+        store = get_store()
+        job_data = await asyncio.to_thread(store.get_job_posting_by_token, public_token, True)
         if not job_data:
             raise HTTPException(status_code=404, detail="Job posting not found or no longer active")
             
@@ -349,7 +272,7 @@ async def apply_to_job(
 
         # One application per person per job: refuse a repeat immediately, with a message the form can show.
         applicant_key = applicant_email.strip().lower()
-        prior = await asyncio.to_thread(qdrant.check_existing_application, applicant_key, job_data["id"])
+        prior = await asyncio.to_thread(store.check_existing_application, applicant_key, job_data["id"])
         if prior:
             raise HTTPException(status_code=409, detail="You have already applied to this job. "
                                 "We have your application and will be in touch if there is a match.")
@@ -390,41 +313,16 @@ async def apply_to_job(
                     logger.error(f"Fallback save to uploads failed: {fallback_err}")
                     persisted_path = None
         
-        # Check experience requirements and create warning if needed
-        experience_warning = None
-        if job_data.get("years_of_experience"):
-            try:
-                # Extract required experience from job data
-                required_experience = 0
-                if isinstance(job_data["years_of_experience"], (int, float)):
-                    required_experience = float(job_data["years_of_experience"])
-                elif isinstance(job_data["years_of_experience"], str):
-                    # Extract number from string like "5 years" or "3-5 years"
-                    numbers = re.findall(r'\d+(?:\.\d+)?', job_data["years_of_experience"])
-                    if numbers:
-                        required_experience = float(numbers[0])
-                
-                if years_of_experience < required_experience:
-                    experience_warning = {
-                        "required": required_experience,
-                        "candidate": years_of_experience,
-                        "message": f"This job requires {required_experience} years of experience, but you have {years_of_experience} years."
-                    }
-            except (ValueError, TypeError):
-                pass  # Skip validation if parsing fails
-
         application_data = {
             "application_id": application_id,
             "applicant_name": applicant_name,
             "applicant_email": applicant_email,
             "applicant_phone": applicant_phone,
-            "cover_letter": cover_letter,
             "expected_salary": expected_salary,
             "years_of_experience": years_of_experience,
             "location": location,
             "notice_period": notice_period,
             "nationality": nationality,
-            "experience_warning": experience_warning,
             "cv_file_path": persisted_path,
             "cv_filename": cv_file.filename,
             "content_type": cv_file.content_type,
@@ -522,8 +420,6 @@ async def get_application_status(application_id: str) -> JSONResponse:
 
 @router.post("/admin/jobs/post", response_model=JobPostingResponse)
 async def post_job(
-    company_name: Optional[str] = Form(None),
-    additional_info: Optional[str] = Form(None),
     # Form data fields for manual job posting
     job_title: Optional[str] = Form(None),
     job_location: Optional[str] = Form(None),
@@ -648,53 +544,31 @@ async def post_job(
         embedding_service = get_embedding_service()
         embeddings_data = embedding_service.generate_document_embeddings(llm_result)
 
-        # 5. Store in existing JD collections (reuse existing infrastructure)
-        qdrant = get_qdrant_utils()
-        success_steps = []
-        
-        # Store raw document in JD collection
+        # 6. Store the description and the posting (PostgreSQL), and the description's vectors (Qdrant)
+        store = get_store()
         filename = file.filename if has_file else f"job_posting_{job_id}.txt"
         content_type = file.content_type if has_file else "text/plain"
-        
-        success_steps.append(
-            qdrant.store_document(
-                job_id, "jd", filename,
-                content_type,
-                extracted_text, now_iso()
-            )
-        )
-        
-        # Store structured data in JD collection
-        jd_structured_payload = {
-            **llm_result,
-            "document_type": "jd"
-        }
-        success_steps.append(
-            qdrant.store_structured_data(job_id, "jd", jd_structured_payload)
-        )
-        
-        # Store embeddings in JD collection
-        success_steps.append(
-            qdrant.store_embeddings_exact(job_id, "jd", embeddings_data)
-        )
-        
-        # 6. Store job posting metadata for careers functionality
-        success_steps.append(
-            qdrant.store_job_posting_metadata(
-                job_id, public_token, company_name, additional_info,
-                posted_by_user=current_user.username,
-                posted_by_role=current_user.role,
-                jd_id=job_id,  # Link job posting to its JD
-                email_subject_id=email_subject_id,
-                email_subject_template=email_subject_template,
-                boolean_search_string=boolean_search_string,
-            )
-        )
-        
-        if not all(success_steps):
-            logger.error(f"Failed to store job posting {job_id} - some steps failed: {success_steps}")
+        standardized = {**llm_result, "boolean_search_string": boolean_search_string}
+        store.save_job_description({
+            "id": job_id, "filename": filename, "file_format": os.path.splitext(filename)[1].lstrip("."), "mime_type": content_type,
+            "raw_text": extracted_text, "standardized": standardized,
+            "llm_model": (llm_result.get("processing_metadata") or {}).get("model_used") if isinstance(llm_result, dict) else None,
+        })
+        stored = store.store_embeddings("jd", job_id, embeddings_data)
+        if stored:
+            store.create_job_posting({
+                "id": job_id, "job_description_id": job_id, "public_token": public_token, "posted_by_user": current_user.username, "posted_by_role": current_user.role,
+                "email_subject_id": email_subject_id, "email_subject_template": email_subject_template,
+            })
+            if not has_file:    # typed in the form: the public page shows exactly what was typed
+                store.update_job_posting(job_id, {
+                    "job_title": job_title or "Position Available", "job_location": job_location or "", "job_summary": job_summary or "",
+                    "key_responsibilities": key_responsibilities or "", "qualifications": qualifications or ""})
+        if not stored:
+            store.delete_job_description(job_id)
+            logger.error(f"Failed to store job posting {job_id}")
             raise HTTPException(status_code=500, detail="Failed to create job posting. Please try again.")
-        
+
         # 7. Build public link
         # In production, use proper domain from config
         base_url = settings.FRONTEND_URL
@@ -710,7 +584,6 @@ async def post_job(
             upload_date=now_iso(),
             filename=filename,
             is_active=True,
-            company_name=company_name,
             posted_by_user=current_user.username,
             posted_by_role=current_user.role,
             email_subject_id=email_subject_id,
@@ -726,125 +599,44 @@ async def post_job(
 @router.get("/admin/jobs", response_model=Union[List[JobPostingSummary], dict])
 async def list_job_postings(
     include_inactive: bool = False,
-    limit: Optional[int] = None,
-    offset: Optional[int] = None,
+    limit: Optional[int] = Query(None, ge=1, le=200),
+    offset: Optional[int] = Query(None, ge=0),
+    q: Optional[str] = Query(None, max_length=200, description="Search the title, poster, e-mail subject or id of every posting"),
+    scope: Literal["all", "mine", "others"] = Query("all", description="Only the postings you posted, or only the others'"),
+    status_filter: Literal["all", "active", "inactive"] = Query("all", alias="status", description="Only open or only closed postings"),
     current_user: User = Depends(require_core_app)
 ) -> Union[List[JobPostingSummary], dict]:
-    """List job postings for HR dashboard - filtered by user role"""
+    """List job postings for the HR dashboard. Everyone sees every posting; edit / delete rights are the poster's and the admin's."""
     try:
-        logger.info(
-            f"Listing job postings for user {current_user.username} "
-            f"(role: {current_user.role}, include_inactive: {include_inactive}, limit: {limit}, offset: {offset})"
-        )
-        
-        qdrant = get_qdrant_utils()
-
+        paged = not (limit is None and offset is None)
         # Backwards compatible default: legacy clients call without pagination params.
-        if limit is None and offset is None:
-            page_rows, total = qdrant.list_job_postings_lightweight_page(
-                include_inactive=include_inactive,
-                limit=1000,
-                offset=0,
-                cache_ttl_seconds=2.0,
-            )
-        else:
-            page_rows, total = qdrant.list_job_postings_lightweight_page(
-                include_inactive=include_inactive,
-                limit=int(limit or 25),
-                offset=int(offset or 0),
-                cache_ttl_seconds=2.0,
-            )
-        
-        summaries = []
-        for job in page_rows:
-            # Debug logging for public_token
-            logger.info(f"Job {job.get('id', 'N/A')} - Public Token: {job.get('public_token', 'MISSING')}")
-            
-            # Fix missing public_token for existing jobs
-            if not job.get("public_token") or job.get("public_token") == "unknown":
-                logger.warning(f"Job {job.get('id')} missing public_token, generating new one")
-                new_token = generate_public_slug(
-                    (job.get("email_subject_template") or "").split(" | ")[0] or (job.get("structured_info") or {}).get("job_title") or "job",
-                    job.get("email_subject_id"))
-                # Update the job metadata with the new token
-                success = qdrant.update_job_posting_public_token(job["id"], new_token)
-                if success:
-                    job["public_token"] = new_token
-                    logger.info(f"Generated new public_token for job {job.get('id')}: {new_token[:8]}...")
-                else:
-                    logger.error(f"Failed to update public_token for job {job.get('id')}")
-                    # Still set the token in memory for this request
-                    job["public_token"] = new_token
-            
-            # Extract job details from merged job data (already contains both metadata and structured data)
-            job_title = "Position Available"
-            job_location = ""
-            job_summary = ""
-            key_responsibilities = ""
-            qualifications = ""
-            
-            structured_info = job.get("structured_info", {}) or {}
-            
-            # Use job posting's own data first (this is the edited data)
-            job_title = structured_info.get("job_title", "") or job.get("job_title", job_title)
-            job_location = structured_info.get("job_location", "") or structured_info.get("location", "")
-            raw_summary = structured_info.get("job_summary", "") or structured_info.get("summary", "")
-            job_summary = _preview_careers_list_text(raw_summary, 320)
-            
-            # Use job posting's own responsibilities and skills (edited data)
-            responsibilities_list = structured_info.get("responsibilities", [])
-            if responsibilities_list and isinstance(responsibilities_list, list):
-                key_responsibilities = _preview_careers_list_text(
-                    "\n".join([f"• {resp}" for resp in responsibilities_list]),
-                    320,
-                )
-            
-            skills_list = structured_info.get("skills", []) or structured_info.get("requirements", [])
-            if skills_list and isinstance(skills_list, list):
-                qualifications = _preview_careers_list_text(
-                    "\n".join([f"• {skill}" for skill in skills_list]),
-                    320,
-                )
-            
-            # Calculate permissions: user can edit/delete if they posted the job OR if they are admin
-            job_poster = job.get("posted_by_user")
-            is_owner = job_poster == current_user.username
-            is_admin = current_user.role == "admin"
-            can_edit = is_owner or is_admin
-            can_delete = is_owner or is_admin
-            
-            summary = JobPostingSummary(
-                job_id=job["id"],
-                job_title=job_title,
-                job_location=job_location,
-                job_summary=job_summary,
-                key_responsibilities=key_responsibilities,
-                qualifications=qualifications,
-                company_name=job.get("company_name"),
-                upload_date=job.get("upload_date", now_iso()),
-                filename=job.get("filename", "job_description.pdf"),
-                is_active=job.get("is_active", True),
-                application_count=int(job.get("application_count") or 0),
-                public_token=job.get("public_token") or "unknown",
-                posted_by_user=job.get("posted_by_user"),
-                posted_by_role=job.get("posted_by_role"),
-                can_edit=can_edit,
-                can_delete=can_delete,
-                email_subject_id=job.get("email_subject_id"),
-                email_subject_template=job.get("email_subject_template"),
-                boolean_search_string=job.get("boolean_search_string")
-                or structured_info.get("boolean_search_string", ""),
-            )
-            summaries.append(summary)
-        
+        rows, total = await asyncio.to_thread(
+            get_store().list_job_postings, include_inactive=include_inactive,
+            offset=int(offset or 0) if paged else 0, limit=int(limit or 25) if paged else 1000, q=q,
+            posted_by=current_user.username if scope == "mine" else None, not_posted_by=current_user.username if scope == "others" else None,
+            status=None if status_filter == "all" else status_filter)
+        summaries = [_summary(job, current_user) for job in rows]
         logger.info(f"Found {len(summaries)} job postings (total={total})")
-        if limit is None and offset is None:
+        if not paged:
             return summaries
-        return {"jobs": summaries, "total": total}
-        
+        counts = await asyncio.to_thread(
+            get_store().posting_status_counts, q=q, posted_by=current_user.username if scope == "mine" else None,
+            not_posted_by=current_user.username if scope == "others" else None)
+        return {"jobs": summaries, "total": total, "counts": counts}
     except Exception as e:
         logger.error(f"Failed to list job postings: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve job postings")
+
+
+@router.get("/admin/overview", response_model=dict)
+async def careers_overview(current_user: User = Depends(require_core_app)) -> dict:
+    """The dashboard's numbers: postings live and closed, applications (total, per day), postings per month, the busiest postings
+    and the newest ones. Counted by the database over every posting; counts and titles only, no candidate data."""
+    try:
+        return await asyncio.to_thread(get_store().careers_overview)
+    except Exception as e:
+        logger.error(f"Failed to build the careers overview: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load the overview")
 
 
 @router.get("/admin/jobs-trends", response_model=dict)
@@ -856,41 +648,20 @@ async def job_application_trends(
     performance charts. Counts only: no candidate data."""
     from collections import defaultdict
     from datetime import timedelta
-    from datetime import timezone
-    from qdrant_client.models import FieldCondition, Filter, MatchValue, Range
 
     days = max(1, min(int(days or 14), 90))
     today = datetime.utcnow().date()
     labels = [(today - timedelta(days=days - 1 - i)) for i in range(days)]
     index = {d.isoformat(): i for i, d in enumerate(labels)}
     series: dict = defaultdict(lambda: [0] * days)
-
-    def _collect() -> None:
-        client = get_qdrant_utils().client
-        # Only the applications stored inside the window (uploaded_at is indexed), not every application ever received.
-        window_start = datetime.combine(labels[0], datetime.min.time(), tzinfo=timezone.utc).timestamp()
-        flt = Filter(must=[FieldCondition(key="is_job_application", match=MatchValue(value=True)),
-                           FieldCondition(key="uploaded_at", range=Range(gte=window_start))])
-        offset = None
-        while True:
-            points, offset = client.scroll(
-                collection_name="cv_structured", scroll_filter=flt, limit=1000, offset=offset,
-                with_payload=["job_id", "application_date"], with_vectors=False,
-            )
-            for pt in points:
-                pl = pt.payload or {}
-                jid = str(pl.get("job_id") or "")
-                day = str(pl.get("application_date") or "")[:10]
-                if jid and day in index:
-                    series[jid][index[day]] += 1
-            if offset is None:
-                break
-
     try:
-        await asyncio.to_thread(_collect)
+        rows = await asyncio.to_thread(get_store().application_counts_by_day, datetime.combine(labels[0], datetime.min.time()))
     except Exception as e:
         logger.warning(f"job trends failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to load trends")
+    for posting_id, day, count in rows:
+        if day in index:
+            series[posting_id][index[day]] += count
     return {"days": [d.isoformat() for d in labels], "series": dict(series)}
 
 
@@ -898,7 +669,7 @@ async def job_application_trends(
 async def weekly_analysis_report(
     start_date: str,
     end_date: str,
-    current_admin: User = Depends(require_admin),  # ADMIN ONLY 
+    current_admin: User = Depends(require_admin),  # ADMIN ONLY
 ):
     """Return lightweight stats for a weekly analysis report.
 
@@ -917,44 +688,19 @@ async def weekly_analysis_report(
         if end < start:
             raise HTTPException(status_code=400, detail="end_date must be >= start_date")
 
-        qdrant = get_qdrant_utils()
-        # One scroll over job metadata; filter in memory by upload_date.
-        jobs = qdrant.get_all_job_postings(include_inactive=True)
-
-        def _job_date(job: dict) -> Optional[date]:
-            raw = str(job.get("upload_date") or job.get("created_date") or "")[:10]
-            if not raw:
-                return None
-            try:
-                return datetime.strptime(raw, "%Y-%m-%d").date()
-            except Exception:
-                return None
-
-        in_range: list[dict] = []
-        for j in jobs:
-            d = _job_date(j)
-            if not d:
-                continue
-            if start <= d <= end:
-                in_range.append(j)
+        in_range = await asyncio.to_thread(get_store().postings_between, datetime.combine(start, datetime.min.time()),
+                                           datetime.combine(end + timedelta(days=1), datetime.min.time()))
 
         recruiter_counts: dict[str, int] = {}
         by_recruiter: dict[str, list[dict]] = {}
         for j in in_range:
             poster = (j.get("posted_by_user") or "Unknown").strip() or "Unknown"
             recruiter_counts[poster] = recruiter_counts.get(poster, 0) + 1
-
-            structured = j.get("structured_info") or {}
-            title = structured.get("job_title") or j.get("job_title") or "Position Available"
-            job_id = str(j.get("id") or j.get("job_id") or "")
-            apps = qdrant.get_application_count_for_job(job_id) if job_id else 0
-
             by_recruiter.setdefault(poster, []).append(
-                {"job_id": job_id, "job_title": str(title), "applications": int(apps)}
-            )
+                {"job_id": str(j["id"]), "job_title": str(j.get("job_title") or "Position Available"),
+                 "applications": int(j.get("application_count") or 0)})
 
-        # Stable ordering for the UI/doc output.
-        recruiters_sorted = sorted(recruiter_counts.items(), key=lambda x: (-x[1], x[0].lower()))
+        recruiters_sorted = sorted(recruiter_counts.items(), key=lambda x: (-x[1], x[0].lower()))     # stable ordering for the UI/doc output
         return {
             "range": {"start_date": start.isoformat(), "end_date": end.isoformat()},
             "total_jobs_posted": len(in_range),
@@ -970,147 +716,45 @@ async def weekly_analysis_report(
         logger.error(f"weekly_analysis_report failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate weekly report")
 
+def _posting_text(job: dict) -> dict:
+    """The fields the job form and the matcher read, for one posting."""
+    return {
+        "job_title": job["job_title"], "job_location": job["job_location"], "job_summary": job["job_summary"],
+        "key_responsibilities": job["key_responsibilities"], "qualifications": job["qualifications"],
+        "jd_id": job.get("jd_id") or job["id"],   # jd_id: what the frontend matches against
+    }
+
+
 @router.get("/admin/jobs/{job_id}/match-data", response_model=dict)
 async def get_job_for_matching(job_id: str, current_user: User = Depends(require_core_app)) -> dict:
     """Get job data for matching - all users can access any job for matching purposes"""
     try:
-        logger.info(f"Getting job data for matching: {job_id} by user: {current_user.username}")
-        
-        qdrant = get_qdrant_utils()
-        
-        # Verify job exists
-        job_data = qdrant.get_job_posting_by_id(job_id)
-        if not job_data:
+        job = await asyncio.to_thread(get_store().get_job_posting_by_id, job_id)
+        if not job:
             raise HTTPException(status_code=404, detail="Job posting not found")
-        
-        # No authorization check needed - all users can match any job
-        
-        # Get structured data
-        client = qdrant.client
-        structured_data = None
-        try:
-            res = client.retrieve("job_postings_structured", ids=[job_id], with_payload=True, with_vectors=False)
-            if res:
-                structured_data = res[0].payload
-        except Exception as e:
-            logger.warning(f"Could not retrieve structured data for job {job_id}: {e}")
-        
-        # Extract job details
-        job_title = "Position Available"
-        job_location = ""
-        job_summary = ""
-        key_responsibilities = ""
-        qualifications = ""
-        
-        if structured_data:
-            structured_info = structured_data.get("structured_info", {})
-            
-            # Use job posting's own data first (this is the edited data)
-            job_title = structured_info.get("job_title", "") or structured_data.get("job_title", job_title)
-            job_location = structured_info.get("job_location", "") or structured_info.get("location", "")
-            job_summary = structured_info.get("job_summary", "") or structured_info.get("summary", "")
-            
-            # Use job posting's own responsibilities and skills (edited data)
-            responsibilities_list = structured_info.get("responsibilities", [])
-            if responsibilities_list and isinstance(responsibilities_list, list):
-                key_responsibilities = "\n".join([f"• {resp}" for resp in responsibilities_list])
-            
-            skills_list = structured_info.get("skills", []) or structured_info.get("requirements", [])
-            if skills_list and isinstance(skills_list, list):
-                qualifications = "\n".join([f"• {skill}" for skill in skills_list])
-        
-        return {
-            "job_title": job_title,
-            "job_location": job_location,
-            "job_summary": job_summary,
-            "key_responsibilities": key_responsibilities,
-            "qualifications": qualifications,
-            "company_name": job_data.get("company_name"),
-            "jd_id": job_data.get("jd_id")  # Include jd_id for frontend matching
-        }
-        
+        return _posting_text(job)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get job data for matching: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve job data")
 
+
+def _own_job_or_403(job: dict, user: User, action: str) -> None:
+    if user.role != "admin" and job.get("posted_by_user") != user.username:
+        logger.warning(f"Unauthorized {action} attempt: {user.username} on a job posted by {job.get('posted_by_user')}")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"You can only {action} job postings that you created")
+
+
 @router.get("/admin/jobs/{job_id}/edit-data", response_model=dict)
 async def get_job_for_edit(job_id: str, current_user: User = Depends(require_core_app)) -> dict:
     """Get job data for editing - users can only edit their own jobs"""
     try:
-        logger.info(f"Getting job data for editing: {job_id} by user: {current_user.username}")
-        
-        qdrant = get_qdrant_utils()
-        
-        # Verify job exists
-        job_data = qdrant.get_job_posting_by_id(job_id)
-        if not job_data:
+        job = await asyncio.to_thread(get_store().get_job_posting_by_id, job_id)
+        if not job:
             raise HTTPException(status_code=404, detail="Job posting not found")
-        
-        # Authorization check: Users can only edit their own job postings (unless admin)
-        if current_user.role != "admin":
-            job_poster = job_data.get("posted_by_user")
-            if job_poster != current_user.username:
-                logger.warning(f"Unauthorized edit attempt: User {current_user.username} tried to edit job posted by {job_poster}")
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="You can only edit job postings that you created"
-                )
-        
-        # Get structured data
-        client = qdrant.client
-        structured_data = None
-        try:
-            res = client.retrieve("job_postings_structured", ids=[job_id], with_payload=True, with_vectors=False)
-            if res:
-                structured_data = res[0].payload
-        except Exception as e:
-            logger.warning(f"Could not retrieve structured data for job {job_id}: {e}")
-            structured_data = None
-        
-        # Extract job details from structured data
-        job_title = ""
-        job_location = ""
-        job_summary = ""
-        key_responsibilities = ""
-        qualifications = ""
-        company_name = job_data.get("company_name", "")
-        
-        # Prioritize job posting's own structured_info data (edited data)
-        if structured_data:
-            structured_info = structured_data.get("structured_info", {})
-            # Use job posting's own data first (this is the edited data)
-            job_title = structured_info.get("job_title", "") or structured_data.get("job_title", "")
-            job_location = structured_info.get("job_location", "") or structured_info.get("location", "")
-            job_summary = structured_info.get("job_summary", "") or structured_info.get("summary", "")
-            
-            # Use job posting's own responsibilities and skills (edited data)
-            # Handle both string format (from UI extraction) and array format (from matching pipeline)
-            key_responsibilities = structured_info.get("key_responsibilities", "")
-            if not key_responsibilities:
-                # Fallback to array format
-                responsibilities_list = structured_info.get("responsibilities", [])
-                if responsibilities_list and isinstance(responsibilities_list, list):
-                    key_responsibilities = "\n".join([f"• {resp}" for resp in responsibilities_list])
-            
-            qualifications = structured_info.get("qualifications", "")
-            if not qualifications:
-                # Fallback to array format
-                skills_list = structured_info.get("skills", []) or structured_info.get("requirements", [])
-                if skills_list and isinstance(skills_list, list):
-                    qualifications = "\n".join([f"• {skill}" for skill in skills_list])
-        
-        return {
-            "job_title": job_title,
-            "job_location": job_location,
-            "job_summary": job_summary,
-            "key_responsibilities": key_responsibilities,
-            "qualifications": qualifications,
-            "company_name": company_name,
-            "jd_id": job_data.get("jd_id")  # Include jd_id for frontend matching
-        }
-        
+        _own_job_or_403(job, current_user, "edit")
+        return _posting_text(job)
     except HTTPException:
         raise
     except Exception as e:
@@ -1120,36 +764,19 @@ async def get_job_for_edit(job_id: str, current_user: User = Depends(require_cor
 
 @router.patch("/admin/jobs/{job_id}/status", response_model=dict)
 async def toggle_job_status(
-    job_id: str, 
+    job_id: str,
     status_update: JobStatusUpdate,
     current_user: User = Depends(require_core_app)
 ) -> dict:
     """Activate/deactivate job postings - users can only toggle their own jobs"""
     try:
-        logger.info(f"Updating job {job_id} status to: {status_update.is_active} by user: {current_user.username}")
-        
-        qdrant = get_qdrant_utils()
-        
-        # Check if job exists and get job data for authorization
-        job_data = qdrant.get_job_posting_by_id(job_id)
-        if not job_data:
+        store = get_store()
+        job = await asyncio.to_thread(store.get_job_posting_by_id, job_id)
+        if not job:
             raise HTTPException(status_code=404, detail="Job posting not found")
-        
-        # Authorization check: Users can only toggle their own job postings (unless admin)
-        if current_user.role != "admin":
-            job_poster = job_data.get("posted_by_user")
-            if job_poster != current_user.username:
-                logger.warning(f"Unauthorized status toggle attempt: User {current_user.username} tried to toggle job posted by {job_poster}")
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="You can only toggle status of job postings that you created"
-                )
-        
-        success = qdrant.update_job_posting_status(job_id, status_update.is_active)
-        
-        if not success:
+        _own_job_or_403(job, current_user, "toggle status of")
+        if not await asyncio.to_thread(store.update_job_posting, job_id, {"is_active": status_update.is_active}):
             raise HTTPException(status_code=404, detail="Job posting not found")
-        
         return {
             "success": True,
             "job_id": job_id,
@@ -1157,7 +784,6 @@ async def toggle_job_status(
             "message": f"Job posting {'activated' if status_update.is_active else 'deactivated'} successfully",
             "reason": status_update.reason
         }
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -1167,50 +793,39 @@ async def toggle_job_status(
 @router.get("/admin/jobs/{job_id}/applications", response_model=List[JobApplicationSummary])
 async def get_job_applications(
     job_id: str,
+    limit: int = Query(1000, ge=1, le=5000, description="Applications per call (a posting closes itself at 250, so this is rarely reached)"),
+    offset: int = Query(0, ge=0),
     _: User = Depends(require_core_app),
 ) -> List[JobApplicationSummary]:
-    """Get all applications for a specific job"""
+    """The applications to a specific job, newest first"""
     try:
-        logger.info(f"Getting applications for job: {job_id}")
-        
-        qdrant = get_qdrant_utils()
-        
-        # Verify job exists
-        job_data = qdrant.get_job_posting_by_id(job_id)
-        if not job_data:
+        store = get_store()
+        if not await asyncio.to_thread(store.get_job_posting_by_id, job_id):
             raise HTTPException(status_code=404, detail="Job posting not found")
-        
-        # Get applications
-        applications = qdrant.get_applications_for_job(job_id)
-        
-        summaries = []
-        for app in applications:
-            # Use safe applicant name function to prevent API failures
-            safe_applicant_name = get_safe_applicant_name(app)
-            
-            summary = JobApplicationSummary(
+        applications = await asyncio.to_thread(store.applications_for_job, job_id, limit, offset)
+        summaries = [
+            JobApplicationSummary(
                 application_id=app["id"],
                 job_id=job_id,
-                applicant_name=safe_applicant_name,
-                applicant_email=app.get("applicant_email", "unknown@email.com"),
-                applicant_phone=app.get("applicant_phone") or (app.get("structured_info") or {}).get("phone"),
-                **{k: v for k, v in resolve_candidate_contact(app, app.get("structured_info")).items() if k in ("linkedin_url", "github_url")},
-                application_date=app.get("application_date", "Unknown"),
-                cv_filename=app.get("cv_filename", "unknown.pdf"),
+                applicant_name=get_safe_applicant_name(app),      # never null: falls back to the e-mail, then "Applicant"
+                applicant_email=app.get("applicant_email") or "unknown@email.com",
+                applicant_phone=app.get("applicant_phone"),
+                linkedin_url=app.get("linkedin_url"),
+                github_url=app.get("github_url"),
+                application_date=app.get("application_date") or "Unknown",
+                cv_filename=app.get("cv_filename") or "unknown.pdf",
                 expected_salary=app.get("expected_salary"),
                 years_of_experience=app.get("years_of_experience"),
                 location=app.get("location"),
                 notice_period=app.get("notice_period"),
                 nationality=app.get("nationality"),
-                match_score=app.get("match_score"),  # Persisted when a match runs for this job
-                status=app.get("status", "pending"),
-                source=app.get("source", "website")  # Default to 'website' if not specified
+                status=app.get("status") or "pending",
+                source=app.get("source") or "website",
             )
-            summaries.append(summary)
-        
+            for app in applications
+        ]
         logger.info(f"Found {len(summaries)} applications for job {job_id}")
         return summaries
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -1229,16 +844,13 @@ async def extract_jd_for_ui(jd_id: str, _: User = Depends(require_core_app)) -> 
     try:
         logger.info(f"Extracting UI data for JD: {jd_id}")
         
-        qdrant = get_qdrant_utils()
-        
-        # Get the original JD document content (raw content, not structured)
-        jd_doc = qdrant.retrieve_document(jd_id, "jd")
+        jd_doc = await asyncio.to_thread(get_store().jd_document, jd_id)
         if not jd_doc:
             raise HTTPException(status_code=404, detail="JD not found")
-        
-        # Use raw content and send to LLM for auto-fill (as requested)
-        raw_content = get_decompressed_content(jd_doc)
-        
+
+        # Use the original text and send it to the LLM for auto-fill
+        raw_content = jd_doc["raw_text"]
+
         if not raw_content:
             raise HTTPException(status_code=400, detail="No raw content found in JD document")
         
@@ -1286,142 +898,53 @@ async def unified_job_update(
     job_summary: str = Form(...),
     key_responsibilities: str = Form(...),
     qualifications: str = Form(...),
-    company_name: Optional[str] = Form(None),
-    additional_info: Optional[str] = Form(None),
     current_user: User = Depends(require_core_app)
 ) -> dict:
     """
     Unified endpoint for creating or updating job postings.
     - If job_id is provided: Update existing job posting
     - If jd_id is provided (and no job_id): Create new job posting from JD
-    - Saves data directly to job_postings_structured collection
     """
     try:
-        qdrant = get_qdrant_utils()
-        
-        # Prepare UI data
-        ui_data = {
-            "job_title": job_title,
-            "job_location": job_location,
-            "job_summary": job_summary,
-            "key_responsibilities": key_responsibilities,
-            "qualifications": qualifications
-        }
-        
-        if job_id:
-            # Update existing job posting
-            logger.info(f"Updating existing job posting: {job_id} by user: {current_user.username}")
-            
-            # Verify job exists
-            existing_job = qdrant.get_job_posting_by_id(job_id)
-            if not existing_job:
-                raise HTTPException(status_code=404, detail="Job posting not found")
-            
-            # Authorization check: Users can only update their own job postings (unless admin)
-            if current_user.role != "admin":
-                job_poster = existing_job.get("posted_by_user")
-                if job_poster != current_user.username:
-                    logger.warning(f"Unauthorized update attempt: User {current_user.username} tried to update job posted by {job_poster}")
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="You can only update job postings that you created"
-                    )
-            
-            # Boolean search string: keep the existing one if present, else build it from
-            # the (possibly edited) title + skills so it is never empty.
-            _existing_bool = (
-                (existing_job.get("boolean_search_string") or "")
-                or ((existing_job.get("structured_info") or {}).get("boolean_search_string") or "")
-            ).strip()
-            _skills_for_bool = [q for q in (qualifications or "").split("\n") if q.strip()]
-            boolean_search_string = _existing_bool or generate_boolean_search_string(job_title, _skills_for_bool)
+        store = get_store()
+        text = {"job_title": job_title, "job_location": job_location, "job_summary": job_summary,
+                "key_responsibilities": key_responsibilities, "qualifications": qualifications}
 
-            # Update structured data
-            success = qdrant.update_job_posting_structured_data(job_id, {
-                "structured_info": ui_data,
-                "company_name": company_name,
-                "additional_info": additional_info,
-                "boolean_search_string": boolean_search_string,
-                "updated_date": now_iso()
-            })
-            
-            if not success:
+        if job_id:
+            existing = await asyncio.to_thread(store.get_job_posting_by_id, job_id)
+            if not existing:
+                raise HTTPException(status_code=404, detail="Job posting not found")
+            _own_job_or_403(existing, current_user, "update")
+            # Boolean search string: keep the existing one if present, else build it from the (possibly edited) title + skills.
+            skills = [q for q in (qualifications or "").split("\n") if q.strip()]
+            boolean_search_string = (existing.get("boolean_search_string") or "").strip() or generate_boolean_search_string(job_title, skills)
+            ok = await asyncio.to_thread(store.update_job_posting, job_id, {
+                **text, "boolean_search_string": boolean_search_string})
+            if not ok:
                 raise HTTPException(status_code=500, detail="Failed to update job posting")
-            
-            logger.info(f"Job posting updated: {job_id}")
-            
-            return {
-                "success": True,
-                "job_id": job_id,
-                "public_token": existing_job.get("public_token"),
-                "message": "Job posting updated successfully"
-            }
-            
+            return {"success": True, "job_id": job_id, "public_token": existing.get("public_token"), "message": "Job posting updated successfully"}
+
         elif jd_id:
-            # Create new job posting from JD
-            logger.info(f"Creating new job posting from JD: {jd_id}")
-            
-            # Verify the original JD exists
-            jd_doc = qdrant.retrieve_document(jd_id, "jd")
-            if not jd_doc:
+            jd = await asyncio.to_thread(store.get_structured_jd, jd_id)
+            if not jd:
                 raise HTTPException(status_code=404, detail="Original JD not found")
-            
-            # Generate new job posting metadata
             new_job_id = str(uuid.uuid4())
-            public_token = generate_public_token()
-            
-            # Generate email subject ID and template
             email_subject_id = generate_email_subject_id(job_title)
             email_subject_template = generate_email_subject_template(job_title, email_subject_id)
             public_token = generate_public_slug(job_title, email_subject_id)   # the readable public link
-            logger.info(f"Generated email subject for new job: {email_subject_template}")
-            
-            # Boolean search string: prefer the JD's LLM-generated string, else build one
-            # deterministically from the title + skills so it is never empty.
-            _jd_struct = (qdrant.get_structured_jd(jd_id) or {})
-            _jd_info = _jd_struct.get("structured_info") or {}
-            _llm_bool = (_jd_info.get("boolean_search_string") or "").strip()
-            _skills_for_bool = (
-                _jd_struct.get("skills_sentences")
-                or [q for q in (qualifications or "").split("\n") if q.strip()]
-            )
-            boolean_search_string = _llm_bool or generate_boolean_search_string(job_title, _skills_for_bool)
-            logger.info(f"Boolean search string for new job: {boolean_search_string}")
-
-            # Store UI data in job_postings_structured
-            success = qdrant.store_job_posting_ui_data(
-                job_id=new_job_id,
-                jd_id=jd_id,
-                public_token=public_token,
-                ui_data=ui_data,
-                posted_by_user=current_user.username,
-                posted_by_role=current_user.role,
-                email_subject_id=email_subject_id,
-                email_subject_template=email_subject_template
-            )
-
-            if not success:
-                raise HTTPException(status_code=500, detail="Failed to create job posting")
-
-            # Persist the boolean search string (+ any extra metadata) on the new posting.
-            _meta_update = {"boolean_search_string": boolean_search_string}
-            if company_name:
-                _meta_update["company_name"] = company_name
-            if additional_info:
-                _meta_update["additional_info"] = additional_info
-            qdrant.update_job_posting_structured_data(new_job_id, _meta_update)
-            
+            # Boolean search string: prefer the JD's LLM-generated string, else build one from the title + skills.
+            llm_bool = ((jd.get("structured_info") or {}).get("boolean_search_string") or "").strip()
+            boolean_search_string = llm_bool or generate_boolean_search_string(
+                job_title, jd.get("skills_sentences") or [q for q in (qualifications or "").split("\n") if q.strip()])
+            await asyncio.to_thread(store.create_job_posting, {
+                "id": new_job_id, "job_description_id": jd_id, "public_token": public_token, "posted_by_user": current_user.username, "posted_by_role": current_user.role,
+                "email_subject_id": email_subject_id, "email_subject_template": email_subject_template})
+            await asyncio.to_thread(store.update_job_posting, new_job_id, {**text, "boolean_search_string": boolean_search_string})
             logger.info(f"New job posting created: {new_job_id}")
-            
-            return {
-                "success": True,
-                "job_id": new_job_id,
-                "public_token": public_token,
-                "message": "Job posting created successfully"
-            }
+            return {"success": True, "job_id": new_job_id, "public_token": public_token, "message": "Job posting created successfully"}
         else:
             raise HTTPException(status_code=400, detail="Either job_id (for update) or jd_id (for create) must be provided")
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1435,73 +958,27 @@ async def delete_job_posting(
     current_user: User = Depends(require_core_app)  # Allow both admin and user
 ) -> JSONResponse:
     """
-    Delete a specific job posting and all related data (soft deletion)
-    
-    This endpoint will:
-    1. Mark job posting as deleted in job_postings_structured collection
-    2. Mark related JD data as deleted in jd_* collections if it exists
-    3. Archive job applications instead of deleting them
-    4. Return confirmation with cleanup summary
-    
-    Authorization:
-    - Admins can delete any job posting
-    - Regular users can only delete their own job postings
+    Delete a specific job posting (soft deletion): it disappears from every list, its description is hidden
+    from the library, and its applications are kept, archived. Admins can delete any posting; users their own.
     """
     try:
-        logger.info(f"USER ACTION: Starting deletion of job posting {job_id} by user: {current_user.username} (role: {current_user.role})")
-        
-        qdrant = get_qdrant_utils()
-        
-        # Check if job posting exists first
-        job_exists = qdrant.get_job_posting_by_id(job_id)
-        if not job_exists:
-            logger.warning(f"Job posting {job_id} not found for deletion by {current_user.username}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail=f"Job posting with ID {job_id} not found"
-            )
-        
-        # Authorization check: Users can only delete their own job postings (unless admin)
-        if current_user.role != "admin":
-            job_poster = job_exists.get("posted_by_user")
-            if job_poster != current_user.username:
-                logger.warning(f"Unauthorized deletion attempt: User {current_user.username} tried to delete job posted by {job_poster}")
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="You can only delete job postings that you created"
-                )
-        
-        # Perform soft deletion
-        results = qdrant.soft_delete_job_posting(
-            job_id=job_id,
-            deleted_by=current_user.username,
-            deleted_at=datetime.utcnow().isoformat()
-        )
-        
-        if results["success"]:
-            logger.info(f"Successfully soft-deleted job posting {job_id} by user: {current_user.username}")
-            return JSONResponse({
-                "success": True,
-                "message": f"Job posting {job_id} deleted successfully",
-                "details": results,
-                "deleted_by": {
-                    "username": current_user.username,
-                    "role": current_user.role,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            })
-        else:
-            logger.error(f"Failed to delete job posting {job_id}: {results}")
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Failed to delete job posting: {results.get('error', 'Unknown error')}"
-            )
-            
+        store = get_store()
+        job = await asyncio.to_thread(store.get_job_posting_by_id, job_id)
+        if not job:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job posting with ID {job_id} not found")
+        _own_job_or_403(job, current_user, "delete")
+        results = await asyncio.to_thread(store.soft_delete_job_posting, job_id, current_user.username)
+        if not results["success"]:
+            raise HTTPException(status_code=500, detail=f"Failed to delete job posting: {results.get('error', 'Unknown error')}")
+        logger.info(f"Soft-deleted job posting {job_id} by {current_user.username}")
+        return JSONResponse({
+            "success": True,
+            "message": f"Job posting {job_id} deleted successfully",
+            "details": results,
+            "deleted_by": {"username": current_user.username, "role": current_user.role, "timestamp": datetime.utcnow().isoformat()},
+        })
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error during job posting {job_id} deletion by {current_user.username}: {e}")
-        raise HTTPException(
-            status_code=500, 
-            detail="An unexpected error occurred while deleting the job posting. Please try again later."
-        )
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while deleting the job posting. Please try again later.")
