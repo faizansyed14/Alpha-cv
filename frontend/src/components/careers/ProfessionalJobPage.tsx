@@ -109,7 +109,7 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
         <section className="relative overflow-hidden border-b border-white/60">
           <div aria-hidden className="pointer-events-none absolute -left-20 top-4 h-56 w-56 rounded-full bg-sky-300/25 blur-3xl" />
           <div aria-hidden className="pointer-events-none absolute -right-16 bottom-0 h-64 w-64 rounded-full bg-navy-400/15 blur-3xl" />
-          <div className="relative mx-auto max-w-3xl px-4 pb-12 pt-14 text-center sm:px-6 sm:pb-14 sm:pt-16">
+          <div className="relative mx-auto max-w-7xl px-4 pb-12 pt-14 text-center sm:px-6 sm:pb-14 sm:pt-16 lg:px-8">
             <motion.div variants={stagger(0.07, 0.05)} initial="hidden" animate="show" className="mx-auto flex flex-col items-center">
               <motion.p
                 variants={rise}
@@ -119,13 +119,13 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
               </motion.p>
               <motion.h1
                 variants={rise}
-                className="max-w-2xl text-[30px] font-bold leading-[1.12] tracking-[-0.03em] text-slate-900 sm:text-[40px]"
+                className="max-w-5xl text-[30px] font-bold leading-[1.12] tracking-[-0.03em] text-slate-900 sm:text-[40px]"
               >
                 {publicJob.job_title || 'Open Position'}
               </motion.h1>
               <motion.dl
                 variants={rise}
-                className="mt-9 grid w-full max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4"
+                className="mt-9 grid w-full max-w-5xl grid-cols-2 gap-3 sm:grid-cols-4"
               >
                 {facts.map(({ icon: Icon, label, value }) => (
                   <div
@@ -153,11 +153,11 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
           </div>
         </section>
 
-        <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
+        <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
           <motion.div variants={stagger(0.08, 0.1)} initial="hidden" animate="show" className="space-y-8">
             <motion.section
               variants={rise}
-              className="rounded-3xl border border-white/80 bg-white/80 p-6 text-center shadow-[var(--shadow-card)] backdrop-blur-md sm:p-8"
+              className="rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-[var(--shadow-card)] sm:p-8 lg:p-10"
             >
               <h2 className="mb-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">About the role</h2>
               <div className="whitespace-pre-wrap text-left text-[15px] leading-7 text-slate-700">{publicJob.job_description}</div>
@@ -166,7 +166,7 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
             {responsibilities.length > 0 && (
               <motion.section
                 variants={rise}
-                className="rounded-3xl border border-white/80 bg-white/80 p-6 shadow-[var(--shadow-card)] backdrop-blur-md sm:p-8"
+                className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[var(--shadow-card)] sm:p-8 lg:p-10"
               >
                 <h2 className="mb-5 text-center text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Key responsibilities</h2>
                 <ul className="space-y-3 text-left">
@@ -183,7 +183,7 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
             {requirements.length > 0 && (
               <motion.section
                 variants={rise}
-                className="rounded-3xl border border-white/80 bg-white/80 p-6 shadow-[var(--shadow-card)] backdrop-blur-md sm:p-8"
+                className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[var(--shadow-card)] sm:p-8 lg:p-10"
               >
                 <h2 className="mb-5 text-center text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Qualifications and requirements</h2>
                 <ul className="space-y-3 text-left">

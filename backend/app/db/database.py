@@ -1,4 +1,4 @@
-"""The application's single relational database (PostgreSQL): users, the candidate tracker and email-intake tables.
+"""The application's single relational database (PostgreSQL): users, the AI agents' history and bug reports.
 
 The schema is owned by Alembic: one migration history in backend/migrations, applied with `alembic upgrade head`.
 `init_database()` runs that at startup (under the schema lock, so several workers take turns) and seeds the admin
@@ -21,7 +21,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 def _looks_like_prod(url: str) -> bool:
-    hints = [h.strip().lower() for h in (settings.TRACKER_PROD_URL_HINTS or "").split(",") if h.strip()]
+    hints = [h.strip().lower() for h in (settings.PROD_DB_URL_HINTS or "").split(",") if h.strip()]
     return any(h in url.lower() for h in hints)
 
 
@@ -31,7 +31,7 @@ def _assert_safe_database_url(url: str) -> None:
         return
     if _looks_like_prod(url) and not settings.ALLOW_PROD_DATA_ACCESS:
         raise RuntimeError(
-            "Refusing to use a DATABASE_URL that matches TRACKER_PROD_URL_HINTS in non-production. "
+            "Refusing to use a DATABASE_URL that matches PROD_DB_URL_HINTS in non-production. "
             "Set ALLOW_PROD_DATA_ACCESS=true to override (not recommended)."
         )
 
@@ -71,7 +71,6 @@ def run_migrations() -> None:
 
     import app.models.agent  # noqa: F401  (registers the tables)
     import app.models.bug_report  # noqa: F401
-    import app.models.tracker.models  # noqa: F401
     import app.models.user  # noqa: F401
 
     cfg = _alembic_config()
@@ -82,16 +81,6 @@ def run_migrations() -> None:
         command.stamp(cfg, "head")
     else:
         command.upgrade(cfg, "head")
-
-
-def clear_admin_team(session: Session) -> None:
-    """The admin has no team: remove one left over from before that was enforced."""
-    from app.models.user import User
-
-    for leftover in session.exec(select(User).where(User.role == "admin", User.team_location.is_not(None))).all():
-        leftover.team_location = None
-        session.add(leftover)
-    session.commit()
 
 
 def sync_admin_from_env(session: Session) -> None:
@@ -147,5 +136,4 @@ def init_database() -> None:
                 ))
                 session.commit()
                 logger.info("Seeded initial admin '%s'", settings.ADMIN_USERNAME)
-            clear_admin_team(session)
             sync_admin_from_env(session)

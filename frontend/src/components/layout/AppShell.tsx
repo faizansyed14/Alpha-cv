@@ -1,4 +1,5 @@
 'use client';
+import { roleLabel, type Role } from '@/lib/roles';
 
 import { ReactNode, useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
@@ -18,7 +19,6 @@ import {
   Globe2,
   Activity,
   Shield,
-  KanbanSquare,
   MessageSquare,
   Megaphone,
   Cpu,
@@ -57,25 +57,13 @@ interface TabItem {
   section: 'Recruiting' | 'Hiring' | 'AI agents' | 'Administration' | 'Support';
 }
 
-const TRACKER_ONLY_ROLES = ['account_manager'];
 const NAV_WIDTH = 188;
 const NAV_WIDTH_COLLAPSED = 64;
 const NAV_COLLAPSED_KEY = 'alphacv.navCollapsed';
 
-const STAFF_ROLES = ['admin', 'user', 'recruiter', 'manager', 'evp'];   // keep in step with canUseAgents in lib/agentLinks.ts
-
 const REPORT_BUG_TAB: TabItem = { id: 'report-bug', label: 'Report a bug', icon: Bug, description: 'Tell us something is not working', section: 'Support' };
 
-const getNavigationTabs = (
-  userRole?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager',
-): TabItem[] => {
-  if (userRole && TRACKER_ONLY_ROLES.includes(userRole)) {
-    return [
-      { id: 'tracker', label: 'Tracker', icon: KanbanSquare, description: 'Candidate tracker', section: 'Hiring' },
-      REPORT_BUG_TAB,
-    ];
-  }
-
+const getNavigationTabs = (userRole?: Role): TabItem[] => {
   const tabs: TabItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, description: 'Overview and quick actions', section: 'Recruiting' },
     { id: 'candidates', label: 'Candidates', icon: Users, description: 'Browse and select CVs', section: 'Recruiting' },
@@ -88,10 +76,9 @@ const getNavigationTabs = (
   if (userRole) {
     tabs.push({ id: 'careers', label: 'Careers', icon: Globe2, description: 'Manage job postings', section: 'Hiring' });
   }
-  if (userRole && STAFF_ROLES.includes(userRole)) {
+  if (userRole) {
     tabs.push({ id: 'agent-interview', label: 'Interview questions', icon: MessageSquare, description: 'AI agent: interview questions for a job', section: 'AI agents' });
     tabs.push({ id: 'agent-linkedin', label: 'LinkedIn post', icon: Megaphone, description: 'AI agent: a LinkedIn post for a job', section: 'AI agents' });
-    tabs.push({ id: 'tracker', label: 'Tracker', icon: KanbanSquare, description: 'Candidate tracker', section: 'Hiring' });
   }
   if (userRole === 'admin') {
     tabs.push({ id: 'admin', label: 'Users', icon: Shield, description: 'User management & database tools', section: 'Administration' });
@@ -153,7 +140,7 @@ export default function AppShell({ children }: AppShellProps) {
   const [openBugs, setOpenBugs] = useState<number | undefined>(undefined);
   const savedCount = useSavedCvsStore((s) => s.ids.length);
   const loadSaved = useSavedCvsStore((s) => s.load);
-  const canSave = !!user && user.role !== 'account_manager';
+  const canSave = !!user;
   useEffect(() => {
     if (canSave) void loadSaved(true);           // each person's own list: read again when someone else signs in
   }, [canSave, user?.username, loadSaved]);
@@ -339,7 +326,7 @@ export default function AppShell({ children }: AppShellProps) {
         {user && (
           compact ? (
             <div className="relative m-2 flex shrink-0 flex-col items-center gap-1 rounded-xl border border-white/80 bg-white/70 p-2 shadow-sm backdrop-blur">
-              <span title={`${user.username} (${String(user.role).replace('_', ' ')})`}>
+              <span title={`${user.username} (${roleLabel(user.role)})`}>
                 <Avatar name={user.username} />
               </span>
               <button
@@ -357,7 +344,7 @@ export default function AppShell({ children }: AppShellProps) {
             <Avatar name={user.username} />
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px] font-semibold text-slate-900">{user.username}</div>
-              <div className="truncate text-xs capitalize text-slate-500">{String(user.role).replace('_', ' ')}</div>
+              <div className="truncate text-xs text-slate-500">{roleLabel(user.role)}</div>
             </div>
             <button
               type="button"

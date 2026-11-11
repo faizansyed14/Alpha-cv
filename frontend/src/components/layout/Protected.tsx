@@ -1,4 +1,5 @@
 'use client';
+import type { Role } from '@/lib/roles';
 
 import { useEffect, ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
@@ -7,7 +8,7 @@ import { BootSkeleton } from '@/components/skeletons';
 
 interface ProtectedProps {
   children: ReactNode;
-  requireRole?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager';
+  requireRole?: Role;
   fallbackPath?: string;
 }
 

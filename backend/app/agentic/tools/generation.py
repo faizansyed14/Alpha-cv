@@ -17,8 +17,9 @@ from app.agents.base import AgentSpec, parse_answer
 from app.agents.interview import INTERVIEW_AGENT
 from app.agents.linkedin import LINKEDIN_AGENT
 from app.agents.runtime import AgentError, build_messages, prepare_cv
+from app.security.rbac_rules import ALL_ROLES
 
-ROLES = frozenset({"admin", "user", "manager", "evp"})
+ROLES = frozenset(ALL_ROLES)
 _UUID = re.compile(r"^[0-9a-fA-F-]{32,40}$")
 
 
@@ -68,7 +69,7 @@ def _write(ctx: ToolContext, agent: AgentSpec, args: Dict[str, Any]) -> ToolOutp
     max_tokens, why_not = usage.plan_call(ctx.session, ctx.username, messages, in_flight=ctx.spent_tokens)
     if why_not:
         raise ToolError(why_not)
-    response = models.complete(messages, role="write", max_tokens=max_tokens)
+    response = models.complete(messages, role="write", max_tokens=max_tokens, cache="system")
     if response is None or not response.success:
         raise ToolError("The writing model is not available right now. Please try again in a moment.")
     ctx.spent_tokens += int(response.tokens_in or 0) + int(response.tokens_out or 0)

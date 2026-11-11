@@ -14,8 +14,9 @@ from typing import Any, Dict
 from app.agentic.guardrails.output_guard import safe_text
 from app.agentic.tools import pages
 from app.agentic.tools.base import Tool, ToolContext, ToolError, ToolOutput, number, obj, text
+from app.security.rbac_rules import ALL_ROLES
 
-ROLES = frozenset({"admin", "user", "manager", "evp"})
+ROLES = frozenset(ALL_ROLES)
 _MODEL_KEYS = ["id", "name", "title", "years", "location"]
 
 

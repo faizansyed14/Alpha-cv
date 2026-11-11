@@ -42,12 +42,6 @@ RULES: Dict[str, List[Tuple["re.Pattern[str]", int]]] = {
         (re.compile(r"\b(?:social\s+media|hashtags?)\b", _I), 3),
         (re.compile(r"\b(?:write|draft|generate)\b.{0,20}\bpost\b", _I), 1),
     ],
-    "tracker": [
-        (re.compile(r"\btracker\b", _I), 4),
-        (re.compile(r"\bfollow[- ]?ups?\b", _I), 3),
-        (re.compile(r"\b(?:pipeline|selections?|stage|reminders?)\b", _I), 1),
-        (re.compile(r"\b(?:job\s+openings?|tracker\s+candidates?)\b", _I), 2),
-    ],
     "admin": [
         (re.compile(r"\b(?:tokens?|ai\s+usage|token\s+usage|reset\s+requests?|usage\s+(?:today|overview))\b", _I), 3),
         (re.compile(r"\b(?:notice|announcement|system\s+(?:status|health)|is\s+the\s+system|weekly\s+report|list\s+(?:the\s+)?users|who\s+has\s+an\s+account)\b", _I), 3),

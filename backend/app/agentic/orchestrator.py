@@ -27,6 +27,7 @@ from app.agentic.guardrails import confirmation, input_guard
 from app.agentic.guardrails.output_guard import clean_answer, safe_text
 from app.agentic.routing import intents, router
 from app.agentic.specialists import registry as specialists
+from app.agentic.specialists.base import person_line
 from app.agentic.tools import candidates as candidate_tools
 from app.agentic.tools import jobs as job_tools
 from app.agentic.tools import matching as match_tools
@@ -210,6 +211,7 @@ def _build(session: Session, user: Principal, spec: Any, message: str, rows: Lis
         needs = [k for k in ("job_title", "job_location") if not str(ctx.pending_draft.get(k) or "").strip()]
         if needs:
             system += f"\n\nThe draft on screen is still missing: {', '.join(n.replace('job_', '') for n in needs)}. Ask for it, or use it if the person just gave it (call draft_job_post with only that)."
+    system += person_line(user.username, user.role)       # last: everything above is shared between people
     messages = [{"role": "system", "content": system}, *_history(rows), {"role": "user", "content": safe_text(message, 4000) + hint}]
     return tools, ctx, messages
 

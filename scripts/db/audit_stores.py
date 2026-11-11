@@ -62,7 +62,6 @@ with engine.connect() as c:
         ("duplicate e-mails", "select count(*) from (select lower(email) from candidate where email is not null group by 1 having count(*)>1) d"),
         ("applications of one person to the same posting", "select count(*) from (select job_posting_id, candidate_id from job_application group by 1,2 having count(*)>1) d"),
         ("postings pointing at a missing description", "select count(*) from job_posting p where job_description_id is not null and not exists (select 1 from job_description j where j.id=p.job_description_id)"),
-        ("tracker rows without a team", "select count(*) from tracker_job_opening where team is null"),
     ):
         print(f"  {label}: {one(q)}")
     print("== search storage (PostgreSQL keeps the search text only as full-text vectors; the plain copies must be empty)")

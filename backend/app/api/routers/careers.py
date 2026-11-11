@@ -833,6 +833,78 @@ async def get_job_applications(
         raise HTTPException(status_code=500, detail="Failed to retrieve applications")
 
 
+# How many database candidates one match may take from a job's boolean search (the applicants are added on top).
+DATABASE_MATCH_MAX_IDS = 5000
+
+
+def _job_boolean_query(job: dict, override: Optional[str]) -> tuple:
+    """The boolean string to search with and where it came from: typed now ("custom"), stored on the job ("job"), or built from the
+    job's title and qualifications when the job has none yet ("generated")."""
+    if (override or "").strip():
+        return override.strip(), "custom"
+    stored = (job.get("boolean_search_string") or "").strip()
+    if stored:
+        return stored, "job"
+    skills = [q for q in (job.get("qualifications") or "").splitlines() if q.strip()]
+    return generate_boolean_search_string(job.get("job_title") or "", skills), "generated"
+
+
+@router.get("/admin/jobs/{job_id}/database-candidates", response_model=dict)
+async def get_job_database_candidates(
+    job_id: str,
+    limit: int = Query(50, ge=1, le=100),
+    cursor: Optional[str] = Query(None, max_length=200),
+    q: Optional[str] = Query(None, max_length=4000, description="A boolean string to use instead of the job's own (this view only)"),
+    ids_only: bool = Query(False, description="Only the ids of every match (up to DATABASE_MATCH_MAX_IDS), for matching"),
+    _: User = Depends(require_core_app),
+) -> dict:
+    """Candidates already in the database who fit the job's boolean search string and have NOT applied to it. The database decides the
+    match exactly (whole words, exact phrases); newest CV first; paged with the cursor of the previous answer."""
+    from app.ingestion.boolean_query import BooleanQueryError
+    from app.schemas.cv_search import CVSearchResultItem
+
+    store = get_store()
+    job = await asyncio.to_thread(store.get_job_posting_by_id, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job posting not found")
+    query, source = _job_boolean_query(job, q)
+    if not query:
+        raise HTTPException(status_code=400, detail="This job has no boolean search string yet. Edit and save the job to create one, or type one here.")
+    try:
+        applied = await asyncio.to_thread(store.applicant_ids, job_id)
+        if ids_only:
+            ids: List[str] = []
+            page_cursor, total = None, None
+            while len(ids) < DATABASE_MATCH_MAX_IDS:
+                found = await asyncio.to_thread(
+                    store.search_candidates, boolean_query=query, limit=min(500, DATABASE_MATCH_MAX_IDS - len(ids)), cursor=page_cursor,
+                    with_total=page_cursor is None, exclude_ids=applied)
+                if page_cursor is None:
+                    total = found["total"]
+                ids.extend(found["ids"])
+                page_cursor = found["next_cursor"]
+                if not page_cursor:
+                    break
+            return {"ids": ids, "total": total, "truncated": bool(page_cursor), "boolean_query": query, "query_source": source}
+
+        found = await asyncio.to_thread(
+            store.search_candidates, boolean_query=query, limit=limit, cursor=cursor, with_total=not cursor, exclude_ids=applied)
+        rows = await asyncio.to_thread(store.candidate_rows, found["ids"])
+        fields = CVSearchResultItem.model_fields
+        results = [CVSearchResultItem(**{**{k: r.get(k) for k in fields if k in r}, "matched_keywords": found["matched"].get(r["id"], [])}).model_dump()
+                   for r in rows]
+        return {"results": results, "next_cursor": found["next_cursor"], "count": len(results), "total": found["total"],
+                "total_is_estimate": found["total_is_estimate"], "boolean_query": query, "query_source": source,
+                "applicants_excluded": len(applied)}
+    except BooleanQueryError as e:
+        raise HTTPException(status_code=400, detail=f"The boolean search string could not be read: {e}")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Database candidates for a job failed")
+        raise HTTPException(status_code=500, detail="Could not search the database for this job. Please try again.")
+
+
 # ==================== UTILITY ENDPOINTS ====================
 
 @router.post("/admin/jobs/{jd_id}/extract-ui-data")

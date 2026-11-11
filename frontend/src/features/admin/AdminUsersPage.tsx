@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader, EmptyState } from '@/components/ui/page';
+import { ROLE_LABELS, STAFF_ROLES, roleLabel } from '@/lib/roles';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table';
 import { AlertCircle, X, Trash2, Pencil, Users as UsersIcon, Plus, Megaphone, Eye, EyeOff } from '@/components/icons';
 function roleBadgeVariant(role?: string) {
@@ -185,11 +186,10 @@ export default function AdminUsersPage() {
       const payload: CreateUserRequest = {
         ...createForm,
         email: createForm.email.trim(),
-        team_location: createForm.team_location?.trim() || null,
       };
       await api.createUser(token, payload);
       setShowCreateModal(false);
-      setCreateForm({ username: '', password: '', email: '', role: 'user', otp_mode: 'real', team_location: null });
+      setCreateForm({ username: '', password: '', email: '', role: 'user', otp_mode: 'real' });
       setCreateError(null);
       await fetchUsers();
     } catch (err: any) {
@@ -253,7 +253,7 @@ export default function AdminUsersPage() {
           <div className="mb-4 flex items-center gap-2 text-[13px] text-gray-500">
             <span>Signed in as</span>
             <span className="font-medium text-gray-900">{user?.username}</span>
-            <Badge variant={roleBadgeVariant(user?.role)}>{user?.role}</Badge>
+            <Badge variant={roleBadgeVariant(user?.role)}>{roleLabel(user?.role)}</Badge>
           </div>
 
           {/* Error Banner */}
@@ -307,7 +307,6 @@ export default function AdminUsersPage() {
                   <TH>User</TH>
                   <TH>Email</TH>
                   <TH>Role</TH>
-                  <TH>Team</TH>
                   <TH>Status</TH>
                   <TH className="text-right">Actions</TH>
                 </TR>
@@ -327,10 +326,7 @@ export default function AdminUsersPage() {
                       {u.email || <span className="italic text-amber-600" title="This person cannot sign in until an email is set">No email: cannot sign in</span>}
                     </TD>
                     <TD>
-                      <Badge variant={roleBadgeVariant(u.role)}>{u.role}</Badge>
-                    </TD>
-                    <TD>
-                      {u.role === 'admin' ? <span className="text-gray-400">All teams</span> : (u.team_location || <span className="text-gray-400">-</span>)}
+                      <Badge variant={roleBadgeVariant(u.role)}>{roleLabel(u.role)}</Badge>
                     </TD>
                     <TD>
                       {(() => {
@@ -543,25 +539,7 @@ export default function AdminUsersPage() {
                     }}
                     className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
                   >
-                    <option value="user">Recruiter (Read-only Tracker)</option>
-                    <option value="manager">Manager (Read/Write Tracker)</option>
-                    <option value="evp">EVP (Manager access + sees all locations)</option>
-                    <option value="account_manager">Account Manager (Tracker only)</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">
-                    Team Location <span className="ml-2 text-xs text-gray-500">(Abu Dhabi / Dubai)</span>
-                  </label>
-                  <select
-                    value={createForm.team_location || ''}
-                    onChange={(e) => setCreateForm({ ...createForm, team_location: e.target.value || null })}
-                    className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
-                  >
-                    <option value="">(None)</option>
-                    <option value="Abu Dhabi">Abu Dhabi</option>
-                    <option value="Dubai">Dubai</option>
+                    {STAFF_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
                   </select>
                 </div>
 
@@ -595,7 +573,7 @@ export default function AdminUsersPage() {
                     variant="secondary"
                     onClick={() => {
                       setShowCreateModal(false);
-                      setCreateForm({ username: '', password: '', email: '', role: 'user', otp_mode: 'real', team_location: null });
+                      setCreateForm({ username: '', password: '', email: '', role: 'user', otp_mode: 'real' });
                       setCreateError(null);
                     }}
                     className="flex-1"
@@ -651,7 +629,7 @@ export default function AdminUsersPage() {
                 </div>
                 {editUser.role === 'admin' ? (
                   <p className="rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                    The admin account always keeps the admin role, stays active, has access to every team and cannot be deleted. Its email and
+                    The admin account always keeps the admin role, stays active and cannot be deleted. Its email and
                     password are set in the server&apos;s .env file and cannot be changed here.
                   </p>
                 ) : (
@@ -665,29 +643,7 @@ export default function AdminUsersPage() {
                     onChange={(e) => setEditForm({...editForm, role: e.target.value as UpdateUserRequest['role']})}
                     className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
                   >
-                    <option value="user">Recruiter (Read-only Tracker)</option>
-                    <option value="manager">Manager (Read/Write Tracker)</option>
-                    <option value="evp">EVP (Manager access + sees all locations)</option>
-                    <option value="account_manager">Account Manager (Tracker only)</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">
-                    Team Location <span className="ml-2 text-xs text-gray-500">(Abu Dhabi / Dubai)</span>
-                  </label>
-                  <select
-                    value={
-                      editForm.team_location !== undefined
-                        ? (editForm.team_location || '')
-                        : (editUser.team_location || '')
-                    }
-                    onChange={(e) => setEditForm({ ...editForm, team_location: e.target.value || null })}
-                    className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
-                  >
-                    <option value="">(None)</option>
-                    <option value="Abu Dhabi">Abu Dhabi</option>
-                    <option value="Dubai">Dubai</option>
+                    {STAFF_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
                   </select>
                 </div>
                 </>

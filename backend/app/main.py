@@ -23,8 +23,6 @@ from app.api.routers.interview_agent import router as interview_agent_router
 from app.api.routers.linkedin_agent import router as linkedin_agent_router
 from app.api.routers.admin import router as admin_router
 from app.api.routers.bug_reports import router as bug_reports_router
-from app.api.routers.tracker import router as tracker_router
-from app.api.routers.features import router as features_router
 
 # Services init
 from app.config.settings import settings
@@ -82,59 +80,10 @@ async def lifespan(app: FastAPI):
             init_database()
             logger.info("Database ready")
 
-        # Follow-up reminder scheduler (optional, uses tracker DB)
-        followup_task = None
-        followup_stop = None
-        followup_lock_file = None
-        if settings.SEND_EMAIL_REMINDER_FOLLOWUP and settings.ENABLE_CANDIDATE_TRACKER:
-            try:
-                import fcntl  # type: ignore
-                import asyncio
-
-                followup_lock_file = open("/tmp/followup_reminder_scheduler.lock", "w")
-                fcntl.flock(followup_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-                logger.info("Starting follow-up reminder scheduler (acquired lock)...")
-                from app.integrations.email.followup_reminder_scheduler import followup_reminder_loop
-
-                followup_stop = asyncio.Event()
-                followup_task = asyncio.create_task(followup_reminder_loop(followup_stop))
-                logger.info("Follow-up reminder scheduler started")
-            except BlockingIOError:
-                logger.info("Follow-up reminder scheduler already running on another worker")
-                if followup_lock_file:
-                    followup_lock_file.close()
-                followup_lock_file = None
-            except Exception as e:
-                logger.error(f"Failed to start follow-up reminder scheduler: {e}", exc_info=True)
-                if followup_lock_file:
-                    try:
-                        followup_lock_file.close()
-                    except Exception:
-                        pass
-                followup_lock_file = None
-        else:
-            logger.info("Follow-up reminder scheduler is DISABLED (SEND_EMAIL_REMINDER_FOLLOWUP!=true or tracker disabled)")
-
         logger.info("Startup complete")
         yield
         # Graceful shutdown
         logger.info("Shutting down CV Analyzer API...")
-        if followup_stop is not None:
-            followup_stop.set()
-        if followup_task:
-            try:
-                await asyncio.wait_for(followup_task, timeout=5.0)
-            except Exception:
-                followup_task.cancel()
-        if followup_lock_file:
-            try:
-                import fcntl  # type: ignore
-                fcntl.flock(followup_lock_file.fileno(), fcntl.LOCK_UN)
-                followup_lock_file.close()
-                os.remove("/tmp/followup_reminder_scheduler.lock")
-            except Exception:
-                pass
         logger.info("Shutdown complete")
     except Exception as e:
         logger.error(f"Startup failed: {e}")
@@ -243,8 +192,6 @@ app.include_router(interview_agent_router)
 app.include_router(linkedin_agent_router)
 app.include_router(admin_router)
 app.include_router(bug_reports_router)
-app.include_router(features_router)
-app.include_router(tracker_router)
 app.include_router(notices.router)
 
 # Core routes

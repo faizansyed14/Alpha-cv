@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { Role } from '@/lib/roles';
 import { api } from '@/lib/api';
 import { getToken, setToken, clearToken } from '@/lib/auth';
 import { UserProfile } from '@/lib/types';
@@ -15,12 +16,12 @@ interface AuthState {
 
 interface AuthActions {
   initFromStorage: () => Promise<void>;
-  login: (email: string, password: string) => Promise<{ success: boolean; role?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager'; error?: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; role?: Role; error?: string }>;
   verifyPassword: (email: string, password: string) => Promise<{ success: boolean; requires_otp?: boolean; auth_mode?: 'none' | 'otp' | 'captcha'; error?: string }>;
   sendOTP: (email: string, password: string) => Promise<{ success: boolean; masked_email?: string; error?: string }>;
-  verifyOTP: (email: string, otp: string) => Promise<{ success: boolean; role?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager'; error?: string }>;
+  verifyOTP: (email: string, otp: string) => Promise<{ success: boolean; role?: Role; error?: string }>;
   getCaptcha: (email: string, password: string) => Promise<{ success: boolean; captcha_id?: string; image?: string; error?: string }>;
-  verifyCaptcha: (email: string, captchaId: string, answer: string) => Promise<{ success: boolean; role?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager'; error?: string }>;
+  verifyCaptcha: (email: string, captchaId: string, answer: string) => Promise<{ success: boolean; role?: Role; error?: string }>;
   logout: () => void;
   clearError: () => void;
 }

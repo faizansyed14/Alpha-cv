@@ -13,7 +13,7 @@ Two scripts, for all three stacks (`local`, `dev`, `prod`):
 
 | Data | local | dev / prod | In the backup |
 |---|---|---|---|
-| Database (users, candidates, job descriptions, postings, applications, tracker, bug reports, saved CVs) | `postgres-local` container | AWS RDS | `postgres.dump` (pg_dump custom format) |
+| Database (users, candidates, job descriptions, postings, applications, bug reports, saved CVs) | `postgres-local` container | AWS RDS | `postgres.dump` (pg_dump custom format) |
 | Vectors (what matching reads) | Qdrant volume | Qdrant volume | `qdrant/<collection>.snapshot`, taken while the app runs |
 | Raw CV / JD files | `uploads-local-data` volume | S3 bucket | local: `files.tar.gz`. dev / prod: they stay in S3 (see below) |
 | Redis (caches, one-time codes, the match queue) | volume | volume | not saved: a restart rebuilds it |

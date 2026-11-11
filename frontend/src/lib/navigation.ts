@@ -19,7 +19,6 @@ export type WorkspaceId =
   | 'agent-interview'
   | 'agent-linkedin'
   | 'agent-usage'
-  | 'tracker'
   | 'report-bug'
   | 'admin-bugs'
   | 'admin';
@@ -41,7 +40,6 @@ export const WORKSPACE_PATHS: Record<WorkspaceId, string> = {
   'agent-interview': '/agents/interview',
   'agent-linkedin': '/agents/linkedin',
   'agent-usage': '/agents/usage',
-  tracker: '/tracker',
   'report-bug': '/report-bug',
   'admin-bugs': '/admin/bugs',
   admin: '/admin/users',
@@ -61,7 +59,6 @@ const PATH_TO_WORKSPACE: Record<string, WorkspaceId> = {
   '/agents/interview': 'agent-interview',
   '/agents/linkedin': 'agent-linkedin',
   '/agents/usage': 'agent-usage',
-  '/tracker': 'tracker',
   '/report-bug': 'report-bug',
   '/admin/bugs': 'admin-bugs',
   '/admin/users': 'admin',

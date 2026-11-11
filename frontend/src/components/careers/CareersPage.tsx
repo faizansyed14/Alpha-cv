@@ -1,18 +1,6 @@
 'use client';
-import React, { useState, useEffect, useMemo } from 'react';
-import {
-  Plus,
-  Check,
-  AlertCircle,
-  Briefcase,
-  ExternalLink,
-  Trash2,
-  RefreshCw,
-  Search,
-  Download,
-  Code2,
-  Copy,
-} from '@/components/icons';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertCircle, Briefcase, Copy, Download, ExternalLink, Globe, Plus, RefreshCw, Search, Trash2, X } from '@/components/icons';
 import { useCareersStore } from '@/stores/careersStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
@@ -20,116 +8,83 @@ import { useWorkspaceNav } from '@/hooks/useWorkspaceNav';
 import { JobPostingListItem } from '@/lib/types';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
+import { Menu } from '@/components/ui/menu';
+import { Segmented } from '@/components/ui/segmented';
 import { InfiniteScrollSentinel } from '@/components/ui/infinite-scroll';
 import { PageHeader, EmptyState } from '@/components/ui/page';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
+import { ToastContainer, useToast } from '@/components/ui/toast';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { CareersSkeleton } from '@/components/skeletons';
-import { AdminOnly } from '@/components/auth/RoleBasedAccess';
+import { cn } from '@/lib/utils';
 import JobPostingForm from './JobPostingForm';
-import JobCard from './JobCard';
-import JobDetailsPanel from './JobDetailsPanel';
+import JobRow, { JobListHeader, type JobHandlers, type JobTab, type MatchScope } from './JobRow';
+import JobWorkspace from './JobWorkspace';
+import JobAiDialog, { type JobAiKind } from './JobAiDialog';
+import WeeklyReportDialog from './WeeklyReportDialog';
 
-function toYmd(d: Date) {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
+type Owner = 'yours' | 'all' | 'others';
+type Status = 'all' | 'active' | 'inactive';
+const TABS: JobTab[] = ['applicants', 'database', 'details'];
 
-/** Text a person typed (a job title, a recruiter name) made safe to put inside the report's HTML. */
-function esc(value: unknown): string {
-  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-function downloadWordHtml(filename: string, html: string) {
-  const blob = new Blob(
-    [
-      `<!doctype html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`,
-    ],
-    { type: 'application/msword;charset=utf-8' }
-  );
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-/** The job whose panel is open is kept in the address (?job=ID), so coming back from a candidate's page reopens it. */
-function jobIdFromAddress(): string | null {
+/** The open job and its tab are kept in the address (?job=ID&tab=database), so coming back from a candidate's page reopens the same view. */
+function readAddress(): { job: string | null; tab: JobTab } {
   try {
-    return new URLSearchParams(window.location.search).get('job');
+    const p = new URLSearchParams(window.location.search);
+    const tab = p.get('tab') as JobTab | null;
+    return { job: p.get('job'), tab: tab && TABS.includes(tab) ? tab : 'applicants' };
   } catch {
-    return null;
+    return { job: null, tab: 'applicants' };
   }
 }
 
-function writeJobToAddress(jobId: string | null) {
+function writeAddress(jobId: string | null, tab: JobTab = 'applicants') {
   try {
     const url = new URL(window.location.href);
-    if (jobId) url.searchParams.set('job', jobId);
-    else url.searchParams.delete('job');
+    if (jobId) {
+      url.searchParams.set('job', jobId);
+      if (tab === 'applicants') url.searchParams.delete('tab');
+      else url.searchParams.set('tab', tab);
+    } else {
+      url.searchParams.delete('job');
+      url.searchParams.delete('tab');
+    }
     window.history.replaceState(window.history.state, '', url.toString());
   } catch {
     /* the address is only a convenience */
   }
 }
 
+function errorText(error: any, fallback: string): string {
+  return error?.detail || error?.response?.data?.detail || error?.message || fallback;
+}
+
 export default function CareersPage() {
   const { user } = useAuthStore();
-  const {
-    jobPostings,
-    totalJobPostings,
-    jobCounts,
-    isLoading,
-    error,
-    loadJobPostings,
-    loadMoreJobPostings,
-    updateJobStatus,
-    selectJob,
-    matchJobCandidates
-  } = useCareersStore();
-  const { setMatchingProgress, setLoading: setAppLoading } = useAppStore();
+  const { jobPostings, totalJobPostings, jobCounts, isLoading, error, loadJobPostings, loadMoreJobPostings, updateJobStatus, selectJob, matchJobCandidates } = useCareersStore();
+  const { setMatchingProgress, hideMatchingProgress, setLoading: setAppLoading } = useAppStore();
   const { go } = useWorkspaceNav();
+  const { toasts, showSuccess, showError, removeToast } = useToast();
 
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [openJobId, setOpenJobId] = useState<string | null>(null);
-  const [copiedOpeningsUrl, setCopiedOpeningsUrl] = useState(false);
+  const [open, setOpen] = useState<{ jobId: string; tab: JobTab; edit: boolean } | null>(null);
+  const [ai, setAi] = useState<{ job: JobPostingListItem; kind: JobAiKind } | null>(null);
+  const [showReport, setShowReport] = useState(false);
   const [openingsUrl, setOpeningsUrl] = useState('/careers/openings');
-  const [booleanModal, setBooleanModal] = useState<{ title: string; value: string } | null>(null);
-  const [booleanModalCopied, setBooleanModalCopied] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isDeletingJob, setIsDeletingJob] = useState<string | null>(null);
-  const [showJobDeleteConfirm, setShowJobDeleteConfirm] = useState<JobPostingListItem | null>(null);
-  const [jobFilter, setJobFilter] = useState<'all' | 'yours' | 'others'>('yours');
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<JobPostingListItem | null>(null);
+  const [owner, setOwner] = useState<Owner>('yours');
+  const [status, setStatus] = useState<Status>('all');
   const [query, setQuery] = useState('');
   const [firstLoadDone, setFirstLoadDone] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
-  const [reportFrom, setReportFrom] = useState(() => {
-    const end = new Date();
-    const start = new Date(end);
-    start.setDate(end.getDate() - 6);
-    return toYmd(start);
-  });
-  const [reportTo, setReportTo] = useState(() => toYmd(new Date()));
-  const [downloadingReport, setDownloadingReport] = useState(false);
 
   useEffect(() => {
     setOpeningsUrl(`${window.location.origin}/careers/openings`);
-    const fromAddress = jobIdFromAddress();
-    if (fromAddress) {
-      setOpenJobId(fromAddress);
-      setJobFilter('all');       // the job may be someone else's
+    const at = readAddress();
+    if (at.job) {
+      setOpen({ jobId: at.job, tab: at.tab, edit: false });
+      setOwner('all');       // the job may be someone else's
     }
   }, []);
 
@@ -137,103 +92,97 @@ export default function CareersPage() {
   useEffect(() => {
     const t = setTimeout(async () => {
       try {
-        await loadJobPostings({
-          q: query.trim(),
-          scope: jobFilter === 'yours' ? 'mine' : jobFilter === 'others' ? 'others' : 'all',
-          status: statusFilter,
-        });
+        await loadJobPostings({ q: query.trim(), scope: owner === 'yours' ? 'mine' : owner === 'others' ? 'others' : 'all', status });
       } finally {
         setFirstLoadDone(true);      // the loading skeleton is for the first load only: typing in the search box must not replace the page
       }
     }, query.trim() ? 300 : 0);
     return () => clearTimeout(t);
-  }, [jobFilter, statusFilter, query, loadJobPostings]);
+  }, [owner, status, query, loadJobPostings]);
 
-  const openJob = useMemo(() => jobPostings.find((j) => j.job_id === openJobId) ?? null, [jobPostings, openJobId]);
+  const openJob = useMemo(() => jobPostings.find((j) => j.job_id === open?.jobId) ?? null, [jobPostings, open?.jobId]);
 
-  const openPanel = (job: JobPostingListItem) => {
-    setOpenJobId(job.job_id);
-    writeJobToAddress(job.job_id);
-  };
-
-  const closePanel = React.useCallback(() => {
-    setOpenJobId(null);
-    writeJobToAddress(null);
+  const closeWorkspace = useCallback(() => {
+    setOpen(null);
+    writeAddress(null);
   }, []);
 
-  const handleToggleStatus = async (job: JobPostingListItem) => {
-    await updateJobStatus(job.job_id, !job.is_active);
-  };
+  const copy = useCallback((text: string, what: string) => {
+    if (!text) return;
+    navigator.clipboard?.writeText(text);
+    showSuccess(`${what} copied`);
+  }, [showSuccess]);
 
-  const handleRefresh = async () => {
+  const refresh = async () => {
     setIsRefreshing(true);
     try {
       await loadJobPostings();
-    } catch (error) {
-      console.error('Failed to refresh job postings:', error);
     } finally {
       setIsRefreshing(false);
     }
   };
 
-  const handleMatchCandidates = async (job: JobPostingListItem) => {
-    const totalCVs = job.application_count ?? 0;
-    if (totalCVs === 0) return;
+  /** Scores a job's applicants and/or the database candidates its boolean string finds, and shows the ranking on the Match page. */
+  const startMatch = async (job: JobPostingListItem, scope: MatchScope, customQuery: string | null = null, expected?: number) => {
+    setMatchingProgress({
+      totalCVs: expected ?? job.application_count ?? 0,
+      processedCVs: 0,
+      currentStage: 'initializing',
+      isVisible: true,
+      estimatedTimeRemaining: undefined,
+    });
+    setAppLoading('careersMatching', true);
+    closeWorkspace();
+    go('match');
     try {
-      setMatchingProgress({
-        totalCVs,
-        processedCVs: 0,
-        currentStage: 'initializing',
-        isVisible: true,
-        estimatedTimeRemaining: Math.max(30, totalCVs * 3),
-      });
-      setAppLoading('careersMatching', true);
-      closePanel();
-      go('match');
+      let databaseIds: string[] = [];
+      if (scope !== 'applicants') {
+        databaseIds = (await api.getJobDatabaseCandidateIds(job.job_id, customQuery)).ids;
+      }
       selectJob(job);
-      await new Promise((r) => setTimeout(r, 500));
-      await matchJobCandidates(job.job_id);
-    } catch (error) {
-      console.error('Failed to match candidates:', error);
-      alert('Failed to match candidates. Please try again.');
+      await matchJobCandidates(job.job_id, { applicants: scope !== 'database', databaseIds });
+    } catch (e) {
+      // matchJobCandidates reports its own failure; this covers a failure before it started (the database search)
+      hideMatchingProgress();
+      setAppLoading('careersMatching', false, errorText(e, 'Matching could not be started. Please try again.'));
     }
   };
 
-  const handleDeleteJob = async (job: JobPostingListItem) => {
-    setIsDeletingJob(job.job_id);
+  const removeJob = async (job: JobPostingListItem) => {
+    setDeleting(true);
     try {
       const response = await api.deleteJobPosting(job.job_id);
-      if (response.success) {
-        closePanel();
-        await loadJobPostings();
-        alert(`Successfully deleted job posting "${job.job_title}"!\n\nDetails:\n- Job posting deleted: ${response.details.job_posting_deleted ? 'Yes' : 'No'}\n- JD documents deleted: ${response.details.jd_documents_deleted}\n- JD structured data deleted: ${response.details.jd_structured_deleted}\n- JD embeddings deleted: ${response.details.jd_embeddings_deleted}\n- Applications archived: ${response.details.applications_archived}`);
-      } else {
-        alert('Failed to delete job posting. Please try again.');
-      }
-    } catch (error: any) {
-      console.error('Failed to delete job posting:', error);
-      if (error.message?.includes('404') || error.message?.includes('not found')) {
-        alert('Job posting not found. It may have already been deleted.');
-      } else if (error.message?.includes('403') || error.message?.includes('You can only delete job postings that you created')) {
-        alert('Access denied. You can only delete job postings that you created.');
-      } else if (error.message?.includes('401')) {
-        alert('Access denied. Please make sure you are logged in.');
-      } else {
-        alert('Failed to delete job posting. Please try again.');
-      }
+      if (!response.success) throw new Error('The job could not be deleted.');
+      closeWorkspace();
+      await loadJobPostings();
+      showSuccess('Job deleted', `"${job.job_title}" was removed. Its ${response.details?.applications_archived ?? 0} application(s) were archived.`);
+    } catch (e: any) {
+      const text = String(e?.message || '');
+      showError('Job not deleted',
+        text.includes('404') || text.includes('not found') ? 'It may have been deleted already.'
+          : text.includes('403') || text.includes('only delete') ? 'You can only delete jobs that you posted.'
+            : 'Please try again.');
     } finally {
-      setIsDeletingJob(null);
-      setShowJobDeleteConfirm(null);
+      setDeleting(false);
+      setConfirmDelete(null);
     }
   };
 
-  const showBoolean = (job: JobPostingListItem) => {
-    setBooleanModalCopied(false);
-    setBooleanModal({ title: job.job_title || 'Job', value: job.boolean_search_string || '' });
+  const handlers: JobHandlers = {
+    onOpen: (job, tab = 'applicants', edit = false) => {
+      setOpen({ jobId: job.job_id, tab, edit });
+      writeAddress(job.job_id, tab);
+    },
+    onMatch: (job, scope) => void startMatch(job, scope),
+    onAi: (job, kind) => setAi({ job, kind }),
+    onToggleStatus: async (job) => {
+      const ok = await updateJobStatus(job.job_id, !job.is_active);
+      if (ok) showSuccess(job.is_active ? 'Job deactivated' : 'Job is live', job.is_active ? 'It no longer takes applications.' : 'It takes applications again.');
+      else showError('Status not changed', 'Please try again.');
+    },
+    onDelete: (job) => setConfirmDelete(job),
+    onCopy: copy,
   };
-
-  const mayHaveMoreOnServer = totalJobPostings != null && jobPostings.length < totalJobPostings;
-  const stats = { total: jobCounts.all, active: jobCounts.active, inactive: jobCounts.inactive };   // counted by the server, not from the loaded page
 
   if (!user) {
     return (
@@ -246,369 +195,190 @@ export default function CareersPage() {
     );
   }
 
-  if (!firstLoadDone) {
-    return <CareersSkeleton />;
-  }
+  if (!firstLoadDone) return <CareersSkeleton />;
 
   if (error) {
     return (
       <div className="p-4 sm:p-6">
-        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-[13px] text-red-800">
+        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-[13px] text-red-800" role="alert">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>Error loading job postings: {error}</span>
+          <div>
+            <p>The jobs could not be loaded: {error}</p>
+            <button type="button" className="mt-1 font-semibold underline underline-offset-2" onClick={refresh}>Try again</button>
+          </div>
         </div>
       </div>
     );
   }
 
-  const postJobAction = (
-    <Button
-      variant="primary"
-      icon={<Plus className="h-4 w-4" />}
-      onClick={() => setShowCreateForm(true)}
-    >
-      Post job
+  const filtered = !!query.trim() || status !== 'all' || owner !== 'all';
+  const shownTotal = totalJobPostings ?? jobPostings.length;
+  const hasMore = totalJobPostings != null && jobPostings.length < totalJobPostings;
+  const postJob = (
+    <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setShowCreateForm(true)} disabled={showCreateForm}>
+      Post a job
     </Button>
   );
 
   return (
     <div className="min-h-[calc(100vh-8rem)]">
+      <ToastContainer toasts={toasts} onClose={removeToast} />
+
       <PageHeader
         title="Careers"
-        description={
-          user.role === 'admin'
-            ? 'Manage job postings and applications'
-            : `Your job postings (${user.username})`
-        }
+        description="Post jobs, review who applied, find people you already have in the database, and match them to the job."
         actions={
           <>
-            <Button
-              variant="secondary"
-              icon={<RefreshCw className="h-4 w-4" />}
-              onClick={handleRefresh}
-              loading={isRefreshing}
-            >
-              Refresh
-            </Button>
-            {postJobAction}
+            <IconButton label="Refresh the list" icon={<RefreshCw />} loading={isRefreshing} onClick={refresh} tip="bottom" className="!h-9 !w-9" />
+            <Menu
+              trigger={({ ref, ...props }) => (
+                <Button ref={ref} variant="secondary" icon={<Globe className="h-4 w-4" />} {...props}>Public jobs page</Button>
+              )}
+              items={[
+                { label: 'Open the public jobs page', hint: 'What candidates see', icon: <ExternalLink />, onSelect: () => window.open(openingsUrl, '_blank', 'noopener') },
+                { label: 'Copy its link', icon: <Copy />, onSelect: () => copy(openingsUrl, 'Public jobs page link') },
+                user.role === 'admin' && { label: 'Weekly analysis report', hint: 'Word document for a date range', icon: <Download />, separated: true, onSelect: () => setShowReport(true) },
+              ]}
+            />
+            {postJob}
           </>
         }
       />
 
-      {/* Weekly analysis report (admin only) */}
-      <AdminOnly>
-        <div className="surface-panel mb-4 px-4 py-2.5">
-          <div className="flex flex-nowrap items-center justify-between gap-3 overflow-x-auto">
-            <p className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-slate-900" title="Select a date range and download a Word report of recruiting activity.">
-              Weekly analysis report
-            </p>
-            <div className="flex flex-nowrap items-center gap-2">
-              <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-slate-600">
-                From
-                <input
-                  type="date"
-                  value={reportFrom}
-                  onChange={(e) => setReportFrom(e.target.value)}
-                  className="field-input !h-8 !px-2 !text-xs"
-                />
-              </label>
-              <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-slate-600">
-                To
-                <input
-                  type="date"
-                  value={reportTo}
-                  onChange={(e) => setReportTo(e.target.value)}
-                  className="field-input !h-8 !px-2 !text-xs"
-                />
-              </label>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="shrink-0 whitespace-nowrap"
-                icon={<Download className="h-4 w-4" />}
-                disabled={!reportFrom || !reportTo}
-                loading={downloadingReport}
-                onClick={async () => {
-                  if (downloadingReport) return;
-                  setDownloadingReport(true);
-                  try {
-                    const r = await api.getWeeklyAnalysisReport({ startDate: reportFrom, endDate: reportTo });
-                    const title = `Alpha CV – weekly Analysis Report`;
-                    const dateLine = `(Date: ${r.range.start_date} – ${r.range.end_date})`;
-
-                    const recruiters = r.recruiters_posted
-                      .map((x, i) => `${i + 1}. ${esc(x.recruiter)} – ${x.jobs_posted}`)
-                      .join('<br/>');
-
-                    const appsByRecruiter = Object.entries(r.applications_by_recruiter)
-                      .sort((a, b) => a[0].localeCompare(b[0]))
-                      .map(([recruiter, jobs], idx) => {
-                        const jobsHtml = jobs
-                          .map((j, jIdx) => `${String.fromCharCode(97 + (jIdx % 26))}. ${esc(j.job_title)} – ${j.applications}`)
-                          .join('<br/>');
-                        return `${idx + 1}. <b>${esc(recruiter)}</b><br/>${jobsHtml}`;
-                      })
-                      .join('<br/><br/>');
-
-                    const html = `
-                      <div style="font-family:Calibri, Arial, sans-serif; font-size:11pt;">
-                        <div style="font-weight:700; font-size:16pt;">${title}</div>
-                        <div style="margin-top:4px; font-size:11pt;">${dateLine}</div>
-                        <div style="margin-top:16px;">
-                          <div><b>1. How many total jobs posted?</b></div>
-                          <div>Total jobs posted – ${r.total_jobs_posted}</div>
-                        </div>
-                        <div style="margin-top:14px;">
-                          <div><b>2. Which Recruiters Posted?</b></div>
-                          <div style="margin-top:6px;">${recruiters || '-'}</div>
-                        </div>
-                        <div style="margin-top:14px;">
-                          <div><b>3. How many applications got for each job?</b></div>
-                          <div style="margin-top:6px;">${appsByRecruiter || '-'}</div>
-                        </div>
-                        <div style="margin-top:14px;">
-                          <div><b>4. Any selections?</b></div>
-                          <div style="margin-top:6px;">-</div>
-                        </div>
-                      </div>
-                    `;
-
-                    downloadWordHtml(`weekly_analysis_report_${r.range.start_date}_to_${r.range.end_date}.doc`, html);
-                  } catch (e: any) {
-                    alert(e?.message || 'Failed to generate report');
-                  } finally {
-                    setDownloadingReport(false);
-                  }
-                }}
-              >
-                Download report
-              </Button>
-            </div>
-          </div>
-        </div>
-      </AdminOnly>
-
-      {/* Live / inactive tabs */}
-      <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-surface-border">
-        {([['all', 'All jobs', stats.total], ['active', 'Live jobs', stats.active], ['inactive', 'Inactive', stats.inactive]] as const).map(([id, label, n]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setStatusFilter(id)}
-            className={`-mb-px border-b-2 pb-2.5 text-[13px] font-medium transition-colors ${
-              statusFilter === id ? 'border-navy-600 text-navy-700' : 'border-transparent text-slate-500 hover:text-slate-900'
-            }`}
-          >
-            {label} <span className="ml-1 text-xs text-slate-400 tabular-nums">({n.toLocaleString()})</span>
-          </button>
-        ))}
-        <div className="ml-auto flex min-w-0 max-w-full items-center gap-1.5 pb-2.5">
-          <span className="hidden shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-400 sm:inline">All jobs URL</span>
-          <a
-            href={openingsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="min-w-0 truncate text-[12.5px] font-medium text-navy-700 hover:underline"
-            title={openingsUrl}
-          >
-            {openingsUrl}
-          </a>
-          <button
-            type="button"
-            title={copiedOpeningsUrl ? 'Copied' : 'Copy all-jobs URL'}
-            aria-label="Copy all-jobs URL"
-            onClick={() => {
-              navigator.clipboard.writeText(openingsUrl);
-              setCopiedOpeningsUrl(true);
-              setTimeout(() => setCopiedOpeningsUrl(false), 1500);
-            }}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-surface-border bg-white text-slate-500 transition-colors hover:border-navy-200 hover:bg-navy-50 hover:text-navy-700"
-          >
-            {copiedOpeningsUrl ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-          </button>
-          <button
-            type="button"
-            title="Open all jobs page"
-            aria-label="Open all jobs page"
-            onClick={() => window.open(openingsUrl, '_blank')}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-surface-border bg-white text-slate-500 transition-colors hover:border-navy-200 hover:bg-navy-50 hover:text-navy-700"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="toolbar-bar flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative w-full sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search title, poster, subject…"
-            className="field-input w-full !pl-10 pr-3"
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-          <select
-            value={jobFilter}
-            onChange={(e) => setJobFilter(e.target.value as 'all' | 'yours' | 'others')}
-            className="field-input text-slate-700"
-            title="Ownership filter"
-          >
-            <option value="all">All jobs</option>
-            <option value="yours">Your jobs</option>
-            <option value="others">Others&apos; jobs</option>
-          </select>
-          <span className="text-[13px] text-slate-500">
-            {(totalJobPostings ?? jobPostings.length).toLocaleString()} result{(totalJobPostings ?? jobPostings.length) === 1 ? '' : 's'}
-          </span>
-        </div>
-      </div>
-
-      {/* Create Job Form */}
+      {/* new job */}
       {showCreateForm && (
-        <div className="mb-4">
+        <section className="mb-5" aria-label="Post a new job">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-[14px] font-semibold text-slate-900">New job</h2>
+            <Button variant="ghost" size="sm" icon={<X className="h-3.5 w-3.5" />} onClick={() => setShowCreateForm(false)}>Close</Button>
+          </div>
           <JobPostingForm
             onSuccess={() => {
               setShowCreateForm(false);
-              loadJobPostings();
+              void loadJobPostings();
             }}
           />
-        </div>
+        </section>
       )}
 
-      {/* Job postings as cards, three to a row */}
+      {/* filters: status tabs, search, whose jobs */}
+      <div className="mb-3 flex flex-wrap items-end gap-x-5 gap-y-3 border-b border-surface-border">
+        <div role="tablist" aria-label="Job status" className="flex items-center gap-5">
+          {([['all', 'All', jobCounts.all], ['active', 'Live', jobCounts.active], ['inactive', 'Inactive', jobCounts.inactive]] as const).map(([id, label, n]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={status === id}
+              onClick={() => setStatus(id)}
+              className={cn(
+                '-mb-px border-b-2 pb-2.5 text-[13.5px] font-semibold transition-colors',
+                status === id ? 'border-navy-700 text-navy-800' : 'border-transparent text-slate-500 hover:text-slate-900',
+              )}
+            >
+              {label}
+              <span className={cn('ml-1.5 rounded-full px-1.5 py-0.5 text-[11px] tabular-nums', status === id ? 'bg-navy-50 text-navy-800' : 'bg-slate-100 text-slate-600')}>
+                {n.toLocaleString()}
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto flex w-full flex-wrap items-center gap-2 pb-2 sm:w-auto">
+          <div className="relative min-w-0 flex-1 sm:w-72 sm:flex-none">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <label htmlFor="job-search" className="sr-only">Search jobs</label>
+            <input
+              id="job-search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by title, recruiter or subject"
+              className="field-input w-full !pl-9 pr-8"
+            />
+            {query && (
+              <button type="button" aria-label="Clear search" onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:text-slate-700">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <Segmented<Owner>
+            value={owner}
+            onChange={setOwner}
+            size="sm"
+            items={[
+              { value: 'yours', label: 'My jobs' },
+              { value: 'all', label: 'Everyone' },
+              { value: 'others', label: 'Others' },
+            ]}
+          />
+        </div>
+      </div>
+
+      {/* the jobs */}
       {jobPostings.length === 0 ? (
         <EmptyState
           icon={Briefcase}
-          title={query.trim() || statusFilter !== 'all' || jobFilter !== 'all' ? 'No jobs match your filters' : 'No job postings yet'}
-          hint={
-            query.trim() || statusFilter !== 'all' || jobFilter !== 'all'
-              ? 'Try changing the filters or create a new job posting.'
-              : 'Create your first job posting to get started.'
-          }
-          action={postJobAction}
+          title={filtered ? 'No jobs match these filters' : 'No jobs yet'}
+          hint={filtered ? (owner === 'yours' ? 'You are looking at your own jobs. Switch to Everyone to see the whole team\'s.' : 'Change the search or the filters above.') : 'Post your first job to start receiving applications.'}
+          action={filtered && owner === 'yours' ? <Button variant="secondary" onClick={() => setOwner('all')}>Show everyone&apos;s jobs</Button> : postJob}
         />
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="rounded-2xl border border-surface-border bg-white shadow-card" role="table" aria-label="Jobs">
+            <div className="overflow-hidden rounded-t-2xl"><JobListHeader /></div>
             {jobPostings.map((job) => (
-              <JobCard key={job.job_id} job={job} currentUser={user.username} onOpen={() => openPanel(job)} />
+              <JobRow key={job.job_id} job={job} currentUser={user.username} handlers={handlers} />
             ))}
           </div>
-
-          {/* The next page of the same search loads by itself when the list is scrolled to its end. */}
-          <p className="mt-4 text-center text-[13px] text-slate-500 tabular-nums">
-            {`Showing ${jobPostings.length.toLocaleString()} of ${(totalJobPostings ?? jobPostings.length).toLocaleString()}`}
+          <p className="mt-3 text-center text-[12.5px] text-slate-500 tabular-nums">
+            Showing {jobPostings.length.toLocaleString()} of {shownTotal.toLocaleString()} job{shownTotal === 1 ? '' : 's'}
           </p>
-          <InfiniteScrollSentinel
-            hasMore={mayHaveMoreOnServer}
-            loading={isLoading}
-            itemCount={jobPostings.length}
-            onLoadMore={() => loadMoreJobPostings()}
-          />
+          <InfiniteScrollSentinel hasMore={hasMore} loading={isLoading} itemCount={jobPostings.length} onLoadMore={() => loadMoreJobPostings()} />
         </>
       )}
 
-      {/* Everything about one job: applicants, match, edit, activate, delete, boolean string */}
-      {openJob && (
-        <JobDetailsPanel
+      {/* one job: applicants, database matches, details */}
+      {openJob && open && (
+        <JobWorkspace
           job={openJob}
           currentUser={user.username}
-          onClose={closePanel}
-          onMatch={handleMatchCandidates}
-          onToggleStatus={handleToggleStatus}
-          onDelete={(j) => setShowJobDeleteConfirm(j)}
-          onBoolean={showBoolean}
-          onChanged={() => loadJobPostings()}
+          tab={open.tab}
+          startInEdit={open.edit}
+          onTab={(tab) => {
+            setOpen((o) => (o ? { ...o, tab } : o));
+            writeAddress(openJob.job_id, tab);
+          }}
+          onClose={closeWorkspace}
+          onChanged={() => void loadJobPostings()}
+          onMatchScope={(job, scope, customQuery, expected) => void startMatch(job, scope, customQuery, expected)}
+          handlers={handlers}
         />
       )}
 
-      {/* Individual job delete confirmation */}
-      <Dialog open={!!showJobDeleteConfirm} onOpenChange={(o) => !o && setShowJobDeleteConfirm(null)}>
+      {ai && <JobAiDialog job={ai.job} kind={ai.kind} onClose={() => setAi(null)} />}
+      {showReport && <WeeklyReportDialog onClose={() => setShowReport(false)} />}
+
+      {/* delete confirmation */}
+      <Dialog open={!!confirmDelete} onOpenChange={(o) => !o && !deleting && setConfirmDelete(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete job posting</DialogTitle>
-            <DialogDescription>
-              Delete &ldquo;{showJobDeleteConfirm?.job_title}&rdquo;? This is a soft deletion, data can be
-              recovered if needed.
-            </DialogDescription>
+            <DialogTitle>Delete this job?</DialogTitle>
+            <DialogDescription>&ldquo;{confirmDelete?.job_title}&rdquo;</DialogDescription>
           </DialogHeader>
-          {showJobDeleteConfirm && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-800">
-              <p className="font-medium">This action will:</p>
-              <ul className="mt-1 list-inside list-disc space-y-0.5">
-                <li>Mark the job posting as deleted</li>
-                <li>Archive {showJobDeleteConfirm.application_count || 0} application(s)</li>
-                <li>Remove the job from public view</li>
+          {confirmDelete && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-900">
+              <ul className="list-inside list-disc space-y-0.5">
+                <li>The job disappears from this list and from the public jobs page.</li>
+                <li>Its {confirmDelete.application_count || 0} application(s) are archived, and the candidates stay in the database.</li>
               </ul>
-              {user.role === 'admin' && showJobDeleteConfirm.posted_by_user !== user.username && (
-                <p className="mt-2 text-blue-800">
-                  Admin action: you are deleting a job posted by {showJobDeleteConfirm.posted_by_user}.
-                </p>
+              {user.role === 'admin' && confirmDelete.posted_by_user !== user.username && (
+                <p className="mt-2 font-medium">This job was posted by {confirmDelete.posted_by_user}.</p>
               )}
             </div>
           )}
           <DialogFooter>
-            <Button
-              variant="secondary"
-              onClick={() => setShowJobDeleteConfirm(null)}
-              disabled={!!showJobDeleteConfirm && isDeletingJob === showJobDeleteConfirm.job_id}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="danger"
-              icon={<Trash2 className="h-4 w-4" />}
-              onClick={() => showJobDeleteConfirm && handleDeleteJob(showJobDeleteConfirm)}
-              loading={!!showJobDeleteConfirm && isDeletingJob === showJobDeleteConfirm.job_id}
-            >
-              Delete job
-            </Button>
+            <Button variant="secondary" onClick={() => setConfirmDelete(null)} disabled={deleting}>Keep the job</Button>
+            <Button variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => confirmDelete && removeJob(confirmDelete)} loading={deleting}>Delete job</Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-
-      {/* Boolean search string viewer */}
-      <Dialog open={!!booleanModal} onOpenChange={(open) => { if (!open) setBooleanModal(null); }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Code2 className="h-5 w-5 text-navy-600" />
-              Naukri Gulf boolean search string
-            </DialogTitle>
-            <DialogDescription>{booleanModal?.title}</DialogDescription>
-          </DialogHeader>
-          {booleanModal?.value ? (
-            <div className="space-y-3">
-              <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-surface-border bg-slate-50 p-3 font-mono text-[13px] leading-relaxed text-slate-800">
-                {booleanModal.value}
-              </pre>
-              <div className="flex justify-end">
-                <Button
-                  variant="primary"
-                  icon={booleanModalCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                  onClick={() => {
-                    navigator.clipboard?.writeText(booleanModal.value);
-                    setBooleanModalCopied(true);
-                    setTimeout(() => setBooleanModalCopied(false), 2000);
-                  }}
-                >
-                  {booleanModalCopied ? 'Copied' : 'Copy to clipboard'}
-                </Button>
-              </div>
-              <p className="text-[12px] text-slate-500">
-                Paste this into Naukri Gulf Resdex to find matching candidates.
-              </p>
-            </div>
-          ) : (
-            <p className="text-[13px] text-slate-500">
-              No boolean string is stored for this job yet. Editing &amp; saving the job (or re-posting it)
-              will generate one from the title and skills.
-            </p>
-          )}
         </DialogContent>
       </Dialog>
     </div>

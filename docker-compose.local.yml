@@ -26,7 +26,7 @@ x-local-storage: &local-storage
   S3_BUCKET: ""
   S3_REGION: ""
   S3_PREFIX: ""
-  # ONE database for users, tracker and email intake
+  # ONE database for users, candidates, jobs, AI agents and bug reports
   DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-local:5432/${POSTGRES_DB:-cv_analyzer_dev}
   QDRANT_HOST: qdrant-local
   QDRANT_PORT: "6333"

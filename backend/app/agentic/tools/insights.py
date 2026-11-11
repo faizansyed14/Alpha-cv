@@ -8,8 +8,9 @@ from typing import Any, Dict
 
 from app.agentic.guardrails.output_guard import safe_text
 from app.agentic.tools.base import Tool, ToolContext, ToolError, ToolOutput, number, obj, text
+from app.security.rbac_rules import ALL_ROLES
 
-CORE = frozenset({"admin", "user", "manager", "evp"})
+CORE = frozenset(ALL_ROLES)
 ADMIN = frozenset({"admin"})
 
 

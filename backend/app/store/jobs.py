@@ -466,6 +466,11 @@ class JobStore:
         with Session(self.engine) as s:
             return int(s.execute(select(func.count()).select_from(JobApplication).where(JobApplication.job_posting_id == posting_id)).scalar() or 0)
 
+    def applicant_ids(self, posting_id: str) -> List[str]:
+        """The candidate id of everyone who applied to a posting."""
+        with Session(self.engine) as s:
+            return [r[0] for r in s.execute(select(JobApplication.candidate_id).where(JobApplication.job_posting_id == posting_id))]
+
     def applications_for_job(self, posting_id: str, limit: int = 1000, offset: int = 0) -> List[Dict[str, Any]]:
         """The applications to a posting (newest first, at most ``limit`` from ``offset``) with the candidate's details and notes; those with
         notes come first on the page, latest note first."""

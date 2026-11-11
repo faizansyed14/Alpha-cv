@@ -5,7 +5,7 @@
 # Usage: ./scripts/backup.sh local|dev|prod [--out DIR] [--keep N] [--include-env] [--skip postgres,qdrant,files]
 #
 # Makes one dated folder  DIR/<stack>/<UTC time>/  (default DIR = ./backups) holding:
-#   postgres.dump     the whole database (pg_dump custom format): users, candidates, job descriptions, postings, applications, tracker
+#   postgres.dump     the whole database (pg_dump custom format): users, candidates, job descriptions, postings, applications
 #   qdrant/*.snapshot the vector store, one snapshot per collection (taken while the app runs)
 #   files.tar.gz      local stack only: the raw CV / JD files in the uploads volume
 #   files-s3.txt      dev / prod: where the raw files are (S3); see BACKUP_S3_URI below

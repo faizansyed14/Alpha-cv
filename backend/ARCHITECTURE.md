@@ -11,7 +11,7 @@ backend/
 │   │   ├── deps.py             # auth dependencies (require_core_app, require_admin, ...)
 │   │   ├── middleware/         # request rate limiting
 │   │   └── routers/            # HTTP layer only: auth, admin, cvs, job_descriptions, matching, system,
-│   │                           #   careers, tracker, email, notices, monitor, storage, features
+│   │                           #   careers, notices, monitor, storage
 │   ├── matching/               # engine.py (scoring), runner.py (job pipeline), llm_scoring.py
 │   ├── ingestion/              # pipeline.py (THE way a CV enters: upload / job page),
 │   │                           #   cv_parser.py (pdf/docx/doc/rtf/odt/html/txt/images), ocr.py (RapidOCR),
@@ -24,7 +24,7 @@ backend/
 │   │   ├── llm/                # service.py (OpenAI standardisation + extraction)
 │   │   ├── cache/              # redis.py (shared), memory.py (in-process)
 │   │   └── storage/            # base.py, local.py, s3.py
-│   ├── integrations/email/     # login OTP e-mail (Microsoft Graph), follow-up reminders
+│   ├── integrations/email/     # login OTP e-mail (Microsoft Graph)
 │   ├── security/               # auth.py (hashing + JWT), captcha.py, login_guard.py
 │   ├── services/               # careers_service, careers_helpers, locations_service, presence, auth_mode
 │   ├── db/                     # database.py (the single engine + session, runs the Alembic migrations at startup)
@@ -32,7 +32,7 @@ backend/
 │   ├── store/                  # THE data layer: Postgres tables (candidates.py, jobs.py, stats.py) + Qdrant vectors only (vectors.py)
 │   └── data/                   # static datasets (cities.json)
 ├── model_server/               # separate container: multilingual-e5-small on ONNX Runtime (no torch) behind POST /embed
-├── migrations/                 # alembic (auth, tracker, talent tables)
+├── migrations/                 # alembic (auth, agents, talent tables)
 └── tests/
 ```
 
@@ -101,7 +101,7 @@ Everything comes from the env file (`.env.local`, `.env.dev` or `.env.prod`) thr
 ## Agentic mode (`app/agentic/`)
 
 One assistant that can use the application's own features: post jobs, match candidates, review candidates, write interview
-questions and LinkedIn posts, read and update the tracker, keep notes on candidates, open/close/edit job postings, add CVs and job
+questions and LinkedIn posts, keep notes on candidates, open/close/edit job postings, add CVs and job
 descriptions to the library, and (admins) read system health and AI token usage, answer token reset requests and set the notice. Switched on with the toggle at the top right
 (`/agentic`, a full page). It follows the same shape as the `Al-ain-Rag-Enterprise` reference: guardrails first, a planner that
 picks a specialist, specialists with narrow tool lists, hard limits, and a trace of what was done.
@@ -112,7 +112,7 @@ picks a specialist, specialists with narrow tool lists, hard limits, and a trace
 | `guardrails/confirmation.py` | The write rule: a job is posted only after a plain "yes" to the draft just shown (checked in code) |
 | `guardrails/output_guard.py` | Tool results wrapped as data (tags neutralised, contact details masked, cut); replies cleaned (no ids) |
 | `routing/` | Which specialist: keyword rules -> sticky follow-up -> tiny router-model call only if unsure -> clarifying question |
-| `specialists/` | jobs, matching, candidates, interview, linkedin, tracker, admin: each has its own prompt, tools and allowed roles |
+| `specialists/` | jobs, matching, candidates, interview, linkedin, admin: each has its own prompt, tools and allowed roles |
 | `tools/` | The tools. `gateway.py` is the only door to the app: in-process API calls as the signed-in user, in two tiers. Tools can GET and POST a few whitelisted paths; changes (PATCH/PUT/POST on listed paths) can only be made by `act()`, which only the confirmed-action executor calls. There is no DELETE anywhere. `propose_*` tools only put a change on screen (checked at import and in tests) |
 | `actions/` | Confirmed actions. `flow.py` builds the proposal card (Confirm / Cancel), finds the one that is waiting (only while it is the latest message) and answers it in code; `catalog.py` holds each kind of change and the one endpoint call it makes. The details run are the ones SAVED with the proposal, never anything sent from the browser. The conversation history is the audit trail |
 | `loop.py` | The bounded tool loop (steps, tools per step, result size, token budget before every call, no tools on the last step) |

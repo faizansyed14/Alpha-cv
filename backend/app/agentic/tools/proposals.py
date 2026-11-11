@@ -9,11 +9,10 @@ from typing import Any, Dict
 from app.agentic.actions import catalog, flow
 from app.agentic.guardrails.output_guard import safe_text
 from app.agentic.tools.base import Tool, ToolContext, ToolError, ToolOutput, obj, text
+from app.security.rbac_rules import ALL_ROLES
 
-CORE = frozenset({"admin", "user", "manager", "evp"})
-TRACKER = catalog.TRACKER_ALL
+CORE = frozenset(ALL_ROLES)
 ADMIN = frozenset({"admin"})
-_AREAS = {"type": "string", "enum": list(catalog.TRACKER_FIELDS), "description": "follow-ups, job-openings, candidates or applications."}
 
 
 def propose_candidate_note(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
@@ -75,35 +74,6 @@ def propose_job_changes(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
     return flow.propose(ctx, "job.edit", rows, {"job_id": job_id, "changes": changes})
 
 
-def propose_tracker_add(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
-    area = text(args.get("area"), 30)
-    if area in catalog.TRACKER_WRITERS and ctx.role not in catalog.TRACKER_WRITERS[area]:
-        raise ToolError("Your role cannot add to that part of the tracker.")
-    fields = catalog.clean_fields(area, args.get("details"))
-    rows = [(k.replace("_", " ").capitalize(), v) for k, v in fields.items()]
-    return flow.propose(ctx, "tracker.create", rows, {"resource": area, "fields": fields}, title=f"Add a {catalog.TRACKER_LABEL[area]}")
-
-
-def propose_tracker_change(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
-    area = text(args.get("area"), 30)
-    if area in catalog.TRACKER_WRITERS and ctx.role not in catalog.TRACKER_WRITERS[area]:
-        raise ToolError("Your role cannot change that part of the tracker.")
-    ref = text(args.get("ref"), 64)
-    if not ref:
-        raise ToolError("ref is required: read the tracker first and use the row's ref.")
-    fields = catalog.clean_fields(area, args.get("details"))
-    rows = [("Row", text(args.get("label"), 120) or catalog.TRACKER_LABEL[area])] + [(k.replace("_", " ").capitalize(), v) for k, v in fields.items()]
-    return flow.propose(ctx, "tracker.update", rows, {"resource": area, "ref": ref, "fields": fields}, title=f"Update the {catalog.TRACKER_LABEL[area]}")
-
-
-def propose_follow_up_reminder(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
-    ref = text(args.get("ref"), 64)
-    if not ref:
-        raise ToolError("ref is required: read the follow-ups first and use the row's ref.")
-    return flow.propose(ctx, "tracker.reminder", [("Follow-up", text(args.get("label"), 160) or "the follow-up")], {"ref": ref},
-                        warning="This sends an email to the people on that follow-up.")
-
-
 def propose_notice(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
     message = str(args.get("message") or "").strip()
     if len(message) < 3:
@@ -150,14 +120,6 @@ TOOLS = [
     Tool("propose_job_changes", "Change details of a job posting that exists (shown as before and after, for confirmation first). Pass only what changes.",
          obj(job_id={"type": "string"}, job_title={"type": "string"}, job_location={"type": "string"}, job_summary={"type": "string"},
              key_responsibilities={"type": "string"}, qualifications={"type": "string"}, required=["job_id"]), CORE, propose_job_changes, writes=True),
-    Tool("propose_tracker_add", "Add a row to the tracker: a follow-up, job opening, tracker candidate or application (shown for confirmation first). "
-         "details holds the fields, for example for a follow-up: client_name, position, current_stage, next_follow_up_date (YYYY-MM-DD), remarks.",
-         obj(area=_AREAS, details={"type": "object", "description": "Field names and values."}, required=["area", "details"]), TRACKER, propose_tracker_add, writes=True),
-    Tool("propose_tracker_change", "Change a tracker row (shown for confirmation first). ref comes from the tracker read tools; details holds only the fields that change.",
-         obj(area=_AREAS, ref={"type": "string"}, label={"type": "string", "description": "A short name for the row, shown to the person."},
-             details={"type": "object"}, required=["area", "ref", "details"]), TRACKER, propose_tracker_change, writes=True),
-    Tool("propose_follow_up_reminder", "Send the reminder email for one follow-up (shown for confirmation first). ref comes from tracker_follow_ups.",
-         obj(ref={"type": "string"}, label={"type": "string"}, required=["ref"]), TRACKER, propose_follow_up_reminder, writes=True),
     Tool("propose_notice", "Admin: show a notice to every user (shown for confirmation first).", obj(message={"type": "string"}, required=["message"]), ADMIN, propose_notice, writes=True),
     Tool("propose_token_answer", "Admin: approve or reject a waiting token reset request (shown for confirmation first). ref comes from pending_token_requests.",
          obj(ref={"type": "string"}, decision={"type": "string", "enum": ["approve", "reject"]}, required=["ref", "decision"]), ADMIN, propose_token_answer, writes=True),

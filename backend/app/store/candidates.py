@@ -412,9 +412,11 @@ class CandidateStore:
         return self._padded_like(getattr(CandidateSearch, field), term)
 
     def _filters(self, *, experience_min, experience_max, locations, nationalities, languages, bool_node, added_after, added_before,
-                 categories=None, notes=None):
+                 categories=None, notes=None, exclude_ids=None):
         """The conditions of a search that are not about the typed keywords."""
         conds = []
+        if exclude_ids:
+            conds.append(Candidate.id.notin_(exclude_ids))
         clause = self._category_clause(categories)
         if clause is not None:
             conds.append(clause)
@@ -468,8 +470,9 @@ class CandidateStore:
     def search_candidates(self, *, keywords=None, match_all: bool = True, experience_min=None, experience_max=None, locations=None,
                           nationalities=None, languages=None, limit: int = 50, cursor: Optional[str] = None, with_total: bool = False,
                           boolean_query: Optional[str] = None, added_after=None, added_before=None, categories=None,
-                          notes: Optional[str] = None) -> Dict[str, Any]:
-        """The advanced search. A keyword matches as a whole word (a phrase as an exact phrase), anywhere in the CV; ``match_all`` false
+                          notes: Optional[str] = None, exclude_ids: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+        """The advanced search. ``exclude_ids``: candidates never returned or counted (a job's own applicants, when its boolean string
+        is run against the rest of the database). A keyword matches as a whole word (a phrase as an exact phrase), anywhere in the CV; ``match_all`` false
         puts the CVs with every keyword first, then those with some. A pasted boolean string is decided exactly on the CV's own text.
         Returns {ids, matched: {id: [terms as typed]}, next_cursor, total, total_is_estimate}; the cursor is "<tier>:<timestamp>|<id>"."""
         bool_node = bq.parse(boolean_query) if (boolean_query or "").strip() else None   # raises BooleanQueryError
@@ -499,7 +502,7 @@ class CandidateStore:
 
         filters = dict(experience_min=experience_min, experience_max=experience_max, locations=locations, nationalities=nationalities,
                        languages=languages, bool_node=bool_node, added_after=added_after, added_before=added_before,
-                       categories=categories, notes=notes)
+                       categories=categories, notes=notes, exclude_ids=list(dict.fromkeys(exclude_ids or [])))
         found: List[Tuple[str, str]] = []
         next_cursor: Optional[str] = None
         with Session(self.engine) as s:

@@ -69,7 +69,7 @@ running services. Set `E2E_REAL_MODEL=1` to use the real embedding model.
   (negative) vector-sharding assessment.
 - **File storage** is pluggable: `STORAGE_BACKEND=local` (default, docker
   volume) or `s3` (AWS S3 + `S3_BUCKET`; uses the EC2 instance role). Relational
-  data (users, tracker, email) lives in ONE PostgreSQL database and moves to AWS RDS by changing
+  data (users, candidates, jobs, AI agents) lives in ONE PostgreSQL database and moves to AWS RDS by changing
   `DATABASE_URL` in `.env.prod`, no code changes.
 - **Email dedup**: processed email ids persist in Postgres, and each extracted
   CV stores a `content_sha256`, the same CV file arriving in another email is

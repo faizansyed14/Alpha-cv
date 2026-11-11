@@ -41,7 +41,7 @@ def _ask_model(message: str, allowed: List[Specialist]) -> tuple[Optional[str], 
                                       "below, or none if none of them fits.\n" + listing},
         {"role": "user", "content": message[:600]},
     ]
-    response = models.complete(messages, role="router", max_tokens=12)
+    response = models.complete(messages, role="router", max_tokens=12, cache="system")
     if response is None or not response.success:
         return None, 0, 0.0
     reply = ((response.data or {}).get("_text") or "").lower()

@@ -91,7 +91,7 @@ def build_messages(agent, jd_text: str, history: List[Any], request: str, cv_tex
 def _call_model(agent, messages: List[Dict[str, str]], max_tokens: int):
     return get_llm_service()._call_openai_api(
         messages=messages, max_tokens=max_tokens, json_schema=None, raw=True,
-        timeout=settings.AGENT_TIMEOUT_SECONDS, role=f"agent_{agent.id}", detail={"agent": agent.id})
+        timeout=settings.AGENT_TIMEOUT_SECONDS, role=f"agent_{agent.id}", detail={"agent": agent.id}, cache="rolling")
 
 
 def handle_turn(session: Session, *, agent_id: str, username: str, message: str, conversation_id: Optional[str],

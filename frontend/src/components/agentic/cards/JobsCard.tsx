@@ -68,7 +68,7 @@ export function JobDescriptionsCard({ card, onSend }: { card: AgenticCard; onSen
   );
 }
 
-/** A generic table for tracker and admin answers. Columns come from the rows themselves. */
+/** A generic table for admin answers. Columns come from the rows themselves. */
 export function TableCard({ card }: { card: AgenticCard }) {
   const rows: Array<Record<string, any>> = card.rows ?? [];
   const columns = Array.from(new Set(rows.flatMap((r) => Object.keys(r)))).slice(0, 6);

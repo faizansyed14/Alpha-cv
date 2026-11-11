@@ -5,9 +5,10 @@
  * default request started, so the person lands on the answer instead of on an empty chat. The agent reads the documents itself
  * from the library, as the signed-in user; only ids and display labels travel in the link.
  */
+import { STAFF_ROLES } from '@/lib/roles';
 
-/** Roles that can open the AI agents (same list the sidebar uses). */
-const AGENT_ROLES = ['admin', 'user', 'recruiter', 'manager', 'evp'];
+/** Every role can open the AI agents. */
+const AGENT_ROLES: string[] = ['admin', ...STAFF_ROLES];
 
 export function canUseAgents(role?: string | null): boolean {
   return !!role && AGENT_ROLES.includes(role);

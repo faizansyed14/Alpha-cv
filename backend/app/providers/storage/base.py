@@ -2,7 +2,7 @@
 
 CV/JD original files are stored through one of these backends, selected by
 the STORAGE_BACKEND env var ("local" or "s3"). Relational data (auth,
-tracker, email metadata) lives in Postgres and is switched to AWS RDS by
+candidates, jobs) lives in Postgres and is switched to AWS RDS by
 changing DATABASE_URL only, it does not go through here.
 """
 from abc import ABC, abstractmethod

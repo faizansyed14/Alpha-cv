@@ -194,7 +194,6 @@ export const TOUR_NAV = [
   { id: 'match', label: 'Match', section: 'Recruiting' },
   { id: 'upload', label: 'Upload', section: 'Recruiting' },
   { id: 'careers', label: 'Careers', section: 'Hiring' },
-  { id: 'tracker', label: 'Tracker', section: 'Hiring' },
 ] as const;
 
 export type TourScene =

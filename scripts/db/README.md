@@ -8,7 +8,7 @@
 
 Notes:
 
-- There is ONE relational database (users, tracker, AI agents). Its schema is owned by Alembic: a single
+- There is ONE relational database (users, candidates, jobs, AI agents, bug reports). Its schema is owned by Alembic: a single
   migration history in `backend/migrations`, applied automatically at startup (`alembic upgrade head`).
   To change a table: edit the model in `backend/app/models`, then
   `cd backend && alembic revision --autogenerate -m "describe the change"` and commit the new file.

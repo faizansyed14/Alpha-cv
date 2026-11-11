@@ -24,7 +24,7 @@ _DELETE = re.compile(
 
 _ATS_TERMS = re.compile(
     r"\b(?:jobs?|candidates?|cvs?|resumes?|applicants?|applications?|match(?:ing|es)?|interview\w*|linkedin|posts?|hir(?:e|ing)|"
-    r"vacanc\w+|positions?|roles?|jds?|shortlist\w*|tracker|pipeline|follow[- ]?ups?|skills?|experience|salary|recruit\w*|"
+    r"vacanc\w+|positions?|roles?|jds?|shortlist\w*|pipeline|skills?|experience|salary|recruit\w*|"
     r"openings?|screen\w*|review\w*|search\w*|find|list|show|top|best|draft|publish|create|post|usage|tokens?|reset|notes?|notice|status|"
     r"close|reopen|upload|reminders?|health|users?|approve|reject)\b", re.I)
 

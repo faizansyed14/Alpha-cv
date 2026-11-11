@@ -36,6 +36,7 @@ import {
   PublicJobView,
   JobApplicationResponse,
   JobApplicationListItem,
+  JobDatabaseCandidatesPage,
   NotesSummaryResponse,
   WeeklyAnalysisReport,
   CareersOverview,
@@ -882,6 +883,21 @@ export class ApiClient {
         }
       }
     );
+    return response.data;
+  }
+
+  /** Candidates in the database who fit the job's boolean search string and have not applied to it (one page; newest first). */
+  async getJobDatabaseCandidates(jobId: string, params: { limit?: number; cursor?: string | null; q?: string | null } = {}): Promise<JobDatabaseCandidatesPage> {
+    const response = await this.client.get<JobDatabaseCandidatesPage>(`/api/careers/admin/jobs/${jobId}/database-candidates`, {
+      params: { limit: params.limit ?? 50, ...(params.cursor ? { cursor: params.cursor } : {}), ...(params.q ? { q: params.q } : {}) },
+    });
+    return response.data;
+  }
+
+  /** The id of every database candidate who fits the job's boolean string (what "match" scores besides the applicants). */
+  async getJobDatabaseCandidateIds(jobId: string, q?: string | null): Promise<{ ids: string[]; total: number | null; truncated: boolean }> {
+    const response = await this.client.get<{ ids: string[]; total: number | null; truncated: boolean }>(
+      `/api/careers/admin/jobs/${jobId}/database-candidates`, { params: { ids_only: true, ...(q ? { q } : {}) }, timeout: 120000 });
     return response.data;
   }
 

@@ -10,8 +10,9 @@ from typing import Any, Dict, List
 
 from app.agentic.tools.base import Tool, ToolContext, ToolError, ToolOutput, number, obj, text
 from app.config.settings import settings
+from app.security.rbac_rules import ALL_ROLES
 
-ROLES = frozenset({"admin", "user", "manager", "evp"})
+ROLES = frozenset(ALL_ROLES)
 
 
 def _shape(body: Dict[str, Any], limit: int, job_id: str) -> ToolOutput:

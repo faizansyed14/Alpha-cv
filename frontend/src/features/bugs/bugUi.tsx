@@ -2,7 +2,7 @@ import { cn } from '@/lib/utils';
 import type { BugSeverity, BugStatus } from '@/lib/types';
 
 export const BUG_AREAS = [
-  'Dashboard', 'Candidates', 'Job descriptions', 'Match', 'Upload', 'Careers', 'Tracker', 'AI agents', 'Login or account', 'Other',
+  'Dashboard', 'Candidates', 'Job descriptions', 'Match', 'Upload', 'Careers', 'AI agents', 'Login or account', 'Other',
 ] as const;
 
 export const SEVERITIES: { value: BugSeverity; label: string; hint: string; chip: string; dot: string }[] = [

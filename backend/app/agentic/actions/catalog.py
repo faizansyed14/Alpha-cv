@@ -4,79 +4,20 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date
-from typing import Any, Callable, Dict, FrozenSet, Tuple
+from typing import Any, Callable, Dict, FrozenSet
 
 from app.agentic import uploads
 from app.agentic.tools.base import ToolError, text
 from app.agentic.tools.gateway import ApiGateway
+from app.security.rbac_rules import ALL_ROLES
 
-CORE = frozenset({"admin", "user", "manager", "evp"})
-TRACKER_ALL = CORE | {"account_manager"}
-TRACKER_MANAGE = frozenset({"manager", "account_manager"})
+CORE = frozenset(ALL_ROLES)          # every role has the same access; only ADMIN actions are limited
 ADMIN = frozenset({"admin"})
 
 _ID = re.compile(r"^[\w-]{8,64}$")
 _CV_ID = re.compile(r"^[0-9a-fA-F-]{32,40}$")
-_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-# The fields the tracker accepts, per resource: (field, kind, max length). Anything else is dropped before it is proposed.
-TRACKER_FIELDS: Dict[str, Tuple[Tuple[str, str, int], ...]] = {
-    "follow-ups": (("client_name", "str", 300), ("position", "str", 300), ("recruiter_name", "str", 300), ("account_manager", "str", 300),
-                   ("recruitment_manager", "str", 300), ("cv_submitted_date", "date", 10), ("current_stage", "str", 50),
-                   ("last_follow_up_date", "date", 10), ("next_follow_up_date", "date", 10), ("interview_date", "date", 10),
-                   ("client_feedback", "str", 4000), ("interview_feedback", "str", 4000), ("remarks", "str", 4000)),
-    "job-openings": (("title", "str", 300), ("department", "str", 200), ("client", "str", 200), ("status", "str", 50), ("hiring_manager", "str", 200),
-                     ("recruitment_manager", "str", 200), ("req_date", "date", 10), ("submission_date", "date", 10), ("cvs_submitted_count", "int", 100000),
-                     ("comments", "str", 4000)),
-    "candidates": (("name", "str", 300), ("email", "str", 300), ("phone", "str", 50)),
-    "applications": (("candidate_id", "id", 64), ("job_opening_id", "id", 64), ("applied_date", "date", 10), ("position", "str", 300), ("client", "str", 300),
-                     ("status", "str", 100), ("recruiter", "str", 100), ("account_manager", "str", 100), ("recruitment_manager", "str", 100),
-                     ("comment", "str", 2000)),
-}
-TRACKER_WRITERS: Dict[str, FrozenSet[str]] = {"follow-ups": TRACKER_ALL, "job-openings": TRACKER_MANAGE, "candidates": TRACKER_MANAGE, "applications": TRACKER_MANAGE}
-TRACKER_LABEL = {"follow-ups": "follow-up", "job-openings": "job opening", "candidates": "tracker candidate", "applications": "tracker application"}
 JOB_FIELDS = ("job_title", "job_location", "job_summary", "key_responsibilities", "qualifications")
-
-
-def clean_fields(resource: str, raw: Any) -> Dict[str, Any]:
-    """Keep only fields the tracker knows, with the right type and size. Raises ToolError with what is wrong."""
-    if resource not in TRACKER_FIELDS:
-        raise ToolError("Unknown tracker area. Use follow-ups, job-openings, candidates or applications.")
-    if not isinstance(raw, dict) or not raw:
-        raise ToolError("Say which details to set.")
-    allowed = {name: (kind, size) for name, kind, size in TRACKER_FIELDS[resource]}
-    out: Dict[str, Any] = {}
-    for key, value in raw.items():
-        if key not in allowed or value in (None, ""):
-            continue
-        kind, size = allowed[key]
-        label = key.replace("_", " ")
-        if kind == "date":
-            try:
-                if not _DATE.match(str(value)):
-                    raise ValueError
-                date.fromisoformat(str(value))
-            except ValueError:
-                raise ToolError(f"{label} must be a real date written as YYYY-MM-DD.")
-            out[key] = str(value)
-        elif kind == "int":
-            try:
-                number = int(value)
-            except (TypeError, ValueError):
-                raise ToolError(f"{label} must be a whole number.")
-            if not 0 <= number <= size:
-                raise ToolError(f"{label} must be between 0 and {size}.")
-            out[key] = number
-        elif kind == "id":
-            if not _ID.match(str(value)):
-                raise ToolError(f"{label} is not a valid reference. Read the tracker first and use the one shown.")
-            out[key] = str(value)
-        else:
-            out[key] = (" ".join(str(value).split()) if size <= 300 else str(value).strip())[:size]
-    if not out:
-        raise ToolError("None of those details can be set. They are: " + ", ".join(n.replace("_", " ") for n, _, _ in TRACKER_FIELDS[resource]) + ".")
-    return out
 
 
 @dataclass(frozen=True)
@@ -122,30 +63,6 @@ def _job_edit(gw: ApiGateway, p: Dict[str, Any], _user: str) -> str:
     return f"Updated {text(form['job_title'], 90)}."
 
 
-def _tracker_create(gw: ApiGateway, p: Dict[str, Any], _user: str) -> str:
-    resource = str(p.get("resource") or "")
-    fields = clean_fields(resource, p.get("fields"))
-    gw.act("POST", f"/api/tracker/{resource}", json=fields)
-    return f"Added the {TRACKER_LABEL[resource]}."
-
-
-def _tracker_update(gw: ApiGateway, p: Dict[str, Any], _user: str) -> str:
-    resource = str(p.get("resource") or "")
-    ref = str(p.get("ref") or "")
-    if not _ID.match(ref):
-        raise ToolError("That row could not be identified. Read the tracker first.")
-    gw.act("PATCH", f"/api/tracker/{resource}/{ref}", json=clean_fields(resource, p.get("fields")))
-    return f"Updated the {TRACKER_LABEL[resource]}."
-
-
-def _reminder(gw: ApiGateway, p: Dict[str, Any], _user: str) -> str:
-    ref = str(p.get("ref") or "")
-    if not _ID.match(ref):
-        raise ToolError("That follow-up could not be identified.")
-    gw.act("POST", f"/api/tracker/follow-ups/{ref}/send-reminder")
-    return "The reminder email was sent."
-
-
 def _notice(gw: ApiGateway, p: Dict[str, Any], _user: str) -> str:
     message = str(p.get("message") or "").strip()[:4000]
     gw.act("PUT", "/api/admin/notice", json={"message": message, "active": bool(message)})
@@ -180,9 +97,6 @@ ACTIONS: Dict[str, Action] = {a.kind: a for a in (
     Action("note.add", "Add a note to a candidate", CORE, _note_add),
     Action("job.status", "Open or close a job posting", CORE, _job_status),
     Action("job.edit", "Edit a job posting", CORE, _job_edit),
-    Action("tracker.create", "Add to the tracker", TRACKER_ALL, _tracker_create),
-    Action("tracker.update", "Update the tracker", TRACKER_ALL, _tracker_update),
-    Action("tracker.reminder", "Send a follow-up reminder", TRACKER_ALL, _reminder, outward=True),
     Action("notice.set", "Change the notice shown to everyone", ADMIN, _notice, outward=True),
     Action("tokens.decide", "Answer a token reset request", ADMIN, _token_decision),
     Action("cv.upload", "Add a CV to the library", CORE, _library_upload("cv")),

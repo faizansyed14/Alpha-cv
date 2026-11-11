@@ -156,7 +156,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   const savedIds = useSavedCvsStore((st) => st.ids);
   const saveCvs = useSavedCvsStore((st) => st.save);
   const unsaveCvs = useSavedCvsStore((st) => st.unsave);
-  const canSave = user?.role !== 'account_manager';
+  const canSave = !!user;
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   const toggleSaved = (id: string) => {

@@ -5,7 +5,6 @@ import {
   Calendar,
   FileText,
   Globe2,
-  KanbanSquare,
   LayoutDashboard,
   Plus,
   Sparkles,
@@ -24,7 +23,6 @@ const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   match: Target,
   upload: Upload,
   careers: Globe2,
-  tracker: KanbanSquare,
 };
 
 /** Static marketing preview matching real AlphaCV dashboard chrome. */

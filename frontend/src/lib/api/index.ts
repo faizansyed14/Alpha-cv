@@ -97,6 +97,8 @@ export const api = {
   getAgentUsage: () => RequestRetryHandler.withRetry(() => apiClient.getAgentUsage()),
   getAgentUsageAdmin: () => RequestRetryHandler.withRetry(() => apiClient.getAgentUsageAdmin()),
   resetAgentUsage: (username: string) => apiClient.resetAgentUsage(username),
+  getJobDatabaseCandidates: (jobId: string, params?: { limit?: number; cursor?: string | null; q?: string | null }) => apiClient.getJobDatabaseCandidates(jobId, params),
+  getJobDatabaseCandidateIds: (jobId: string, q?: string | null) => apiClient.getJobDatabaseCandidateIds(jobId, q),
   getAgentInfo: (agent: string) => RequestRetryHandler.withRetry(() => apiClient.getAgentInfo(agent)),
   listAgentConversations: (agent: string) => RequestRetryHandler.withRetry(() => apiClient.listAgentConversations(agent)),
   getAgentConversation: (agent: string, id: string) => RequestRetryHandler.withRetry(() => apiClient.getAgentConversation(agent, id)),

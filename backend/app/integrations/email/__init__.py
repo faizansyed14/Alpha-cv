@@ -1,1 +1,1 @@
-"""Email services: Azure Graph intake, OTP, scheduling, follow-up reminders."""
+"""Email services: Azure Graph mail: sign-in codes."""

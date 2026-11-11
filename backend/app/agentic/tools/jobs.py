@@ -11,8 +11,9 @@ from typing import Any, Dict, Optional
 from app.agentic import uploads
 from app.agentic.tools import pages
 from app.agentic.tools.base import Tool, ToolContext, ToolError, ToolOutput, number, obj, text
+from app.security.rbac_rules import ALL_ROLES
 
-ROLES = frozenset({"admin", "user", "manager", "evp"})
+ROLES = frozenset(ALL_ROLES)
 
 _DRAFT_FIELDS = ("job_title", "job_location", "job_summary", "key_responsibilities", "qualifications")
 _LIMITS = {"job_title": 200, "job_location": 120, "job_summary": 2500, "key_responsibilities": 3500, "qualifications": 3500}

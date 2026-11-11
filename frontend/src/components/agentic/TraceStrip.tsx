@@ -10,13 +10,13 @@ const LABELS: Record<string, string> = {
   search_candidates: 'Searched the candidates', get_candidate: 'Read a candidate profile', get_job_applications: 'Read the applications',
   list_jobs: 'Looked at the job postings', list_job_descriptions: 'Looked at the job descriptions', draft_job_post: 'Prepared a job draft',
   publish_job_post: 'Posted the confirmed job', run_matching: 'Ran matching', get_match_results: 'Checked the matching run',
-  generate_interview_questions: 'Wrote interview questions', generate_linkedin_post: 'Wrote the LinkedIn post', tracker_candidates: 'Read the tracker',
-  tracker_follow_ups: 'Read the follow-ups', tracker_job_openings: 'Read the tracker openings', token_usage_overview: 'Read token usage',
+  generate_interview_questions: 'Wrote interview questions', generate_linkedin_post: 'Wrote the LinkedIn post',
+  token_usage_overview: 'Read token usage',
   pending_token_requests: 'Read the reset requests',
 };
 
 const SPECIALISTS: Record<string, string> = {
-  jobs: 'Jobs', matching: 'Matching', candidates: 'Candidates', interview: 'Interview questions', linkedin: 'LinkedIn post', tracker: 'Tracker', admin: 'Admin insights',
+  jobs: 'Jobs', matching: 'Matching', candidates: 'Candidates', interview: 'Interview questions', linkedin: 'LinkedIn post', admin: 'Admin insights',
 };
 
 /** A quiet "how I got this" line under an answer: which skill answered and which steps it took. Nothing is hidden from the person. */

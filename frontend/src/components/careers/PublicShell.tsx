@@ -9,7 +9,7 @@ import { ease } from '@/lib/motion';
 export function PublicHeader({ right }: { right?: React.ReactNode }) {
   return (
     <header className="sticky top-0 z-30 border-b border-white/60 bg-white/70 backdrop-blur-xl">
-      <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link href="/careers/openings" className="flex items-center gap-3" aria-label="AlphaData careers">
           <img src="/alphadatalogo.svg" alt="" className="h-8 w-8 object-contain" />
           <span className="leading-tight">

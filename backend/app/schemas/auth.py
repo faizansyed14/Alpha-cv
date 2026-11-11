@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
 
 from app.security.password_policy import password_problem
+from app.security.rbac_rules import ROLE_PATTERN
 from typing import Optional
 
 
@@ -87,7 +88,6 @@ class UserRead(BaseModel):
     is_active: bool
     email: Optional[str] = None
     otp_mode: str = "real"
-    team_location: Optional[str] = None
 
 class MeRead(BaseModel):
     """What /api/auth/me tells the page about whoever is signed in. No email: nothing in the app needs it, and it should not travel
@@ -102,17 +102,11 @@ class UserCreate(BaseModel):
     password: str = Field(..., max_length=256)
     email: EmailStr   # what the person signs in with: required, and one account per address
     otp_mode: str = Field(default="real", pattern="^(real|captcha)$")
-    # Roles:
-    # - admin: full access (all pages + user management)
-    # - manager: tracker requirements + candidates (location-scoped)
-    # - user: recruiter persona (tracker read + follow-ups; core ATS pages)
-    # - evp: manager-level access across all locations
-    # - account_manager: TRACKER ONLY (no CV/JD/match/careers/upload access)
-    role: str = Field(default="user", pattern="^(user|manager|admin|evp|account_manager)$")
-    team_location: Optional[str] = Field(default=None, max_length=100)
+    # Roles (see app/security/rbac_rules.py): user = recruiter, manager = recruitment manager, evp, account_manager = sales manager.
+    # All of them have the same access; only the admin (never created here) can manage users, agents, monitoring and bug reports.
+    role: str = Field(default="user", pattern=ROLE_PATTERN)
 
     _norm_email = field_validator("email", mode="before")(_blank_to_none)
-    _norm_team = field_validator("team_location", mode="before")(_blank_to_none)
 
     @model_validator(mode="after")
     def _password_rules(self):
@@ -125,8 +119,7 @@ class UserUpdate(BaseModel):
     password: Optional[str] = Field(default=None, max_length=256)
     email: Optional[EmailStr] = None
     otp_mode: Optional[str] = Field(default=None, pattern="^(real|captcha)$")
-    role: Optional[str] = Field(default=None, pattern="^(user|manager|admin|evp|account_manager)$")
-    team_location: Optional[str] = Field(default=None, max_length=100)
+    role: Optional[str] = Field(default=None, pattern=ROLE_PATTERN)
     is_active: Optional[bool] = None
 
     _norm_email = field_validator("email", mode="before")(_blank_to_none)

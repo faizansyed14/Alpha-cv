@@ -226,27 +226,7 @@ export function AdminSkeleton() {
     <SkeletonRegion label="Loading admin">
       <SkeletonHeader withActions />
       <Bone className="mb-4 h-9 w-64" />
-      <SkeletonTable columns={['User', 'Email', 'Role', 'Team', 'Status']} rows={8} />
-    </SkeletonRegion>
-  );
-}
-
-export function TrackerSkeleton() {
-  return (
-    <SkeletonRegion label="Loading tracker" className="flex h-screen overflow-hidden bg-[var(--app-bg)]">
-      <div className="hidden w-52 shrink-0 flex-col gap-2 border-r border-surface-border bg-white p-3 md:flex">
-        <Bone className="h-8 w-full" />
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Bone key={i} className="h-8 w-full" />
-        ))}
-      </div>
-      <div className="min-w-0 flex-1 p-4">
-        <div className="mb-3 flex items-center justify-between border-b border-surface-border pb-3">
-          <Bone className="h-4 w-40" />
-          <Bone className="h-8 w-28" />
-        </div>
-        <SkeletonTable columns={['Name', 'Role', 'Status', 'Owner', 'Updated']} rows={10} />
-      </div>
+      <SkeletonTable columns={['User', 'Email', 'Role', 'Status']} rows={8} />
     </SkeletonRegion>
   );
 }
@@ -320,7 +300,7 @@ export function OpeningsSkeleton() {
 export function JobDetailSkeleton() {
   return (
     <SkeletonRegion label="Loading job" className="min-h-screen bg-[var(--app-bg)] py-16">
-      <div className="mx-auto max-w-3xl space-y-4 px-4">
+      <div className="mx-auto max-w-7xl space-y-4 px-4 sm:px-6 lg:px-8">
         <Bone className="h-8 w-2/3" />
         <Bone className="h-4 w-1/3" />
         <div className="rounded-2xl border border-surface-border bg-paper p-6">

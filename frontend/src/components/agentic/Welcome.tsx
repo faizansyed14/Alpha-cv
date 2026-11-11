@@ -2,12 +2,13 @@
 
 import type { ComponentType } from 'react';
 import { motion } from 'framer-motion';
-import { Briefcase, Cpu, KanbanSquare, Megaphone, MessageSquare, Target, Users } from '@/components/icons';
+import { roleLabel } from '@/lib/roles';
+import { Briefcase, Cpu, Megaphone, MessageSquare, Target, Users } from '@/components/icons';
 import { ease } from '@/lib/motion';
 import type { AgenticCapabilities } from '@/lib/types';
 
 const ICONS: Record<string, ComponentType<{ className?: string }>> = {
-  jobs: Briefcase, matching: Target, candidates: Users, interview: MessageSquare, linkedin: Megaphone, tracker: KanbanSquare, admin: Cpu,
+  jobs: Briefcase, matching: Target, candidates: Users, interview: MessageSquare, linkedin: Megaphone, admin: Cpu,
 };
 
 function greeting(): string {
@@ -20,7 +21,7 @@ const ROLE_LINE: Record<string, string> = {
   manager: 'Post jobs, find and review candidates, run matching and write interview questions and posts.',
   evp: 'Post jobs, find and review candidates, run matching and write interview questions and posts.',
   user: 'Post jobs, find and review candidates, run matching and write interview questions and posts.',
-  account_manager: 'Your role covers the candidate tracker: stages, follow-ups and openings.',
+  account_manager: 'Post jobs, find and review candidates, run matching and write interview questions and posts.',
 };
 
 /** The first screen: who you are signed in as, what your role can ask for, and one click to start. */
@@ -43,7 +44,7 @@ export function Welcome({ caps, onSend, disabled }: { caps: AgenticCapabilities 
         </p>
         {caps && (
           <p className="mx-auto mt-3 inline-flex rounded-full bg-white/70 px-3.5 py-1 text-[12px] font-medium text-slate-600 ring-1 ring-inset ring-white/80 backdrop-blur">
-            Signed in as {caps.role.replace('_', ' ')}. {ROLE_LINE[caps.role] ?? ''}
+            Signed in as {roleLabel(caps.role)}. {ROLE_LINE[caps.role] ?? ''}
           </p>
         )}
       </motion.div>

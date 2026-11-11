@@ -1,4 +1,4 @@
-import { finishMatchProgress, runMatchJob, toMatchingProgress } from '@/lib/matchRun';
+import { MATCH_MAX_CVS, finishMatchProgress, runMatchJob, toMatchingProgress } from '@/lib/matchRun';
 import { create } from 'zustand';
 import { api } from '@/lib/api';
 import {
@@ -16,6 +16,13 @@ export interface JobFilters {
   status: 'all' | 'active' | 'inactive';
 }
 
+export interface MatchJobOptions {
+  /** Include everyone who applied to the job (default true) */
+  applicants?: boolean;
+  /** Database candidates to score as well (ids from the job's boolean search) */
+  databaseIds?: string[];
+}
+
 const NO_JOB_FILTERS: JobFilters = { q: '', scope: 'all', status: 'all' };
 
 interface CareersState {
@@ -30,6 +37,8 @@ interface CareersState {
   
   // Applications
   applications: JobApplicationListItem[];
+  /** The last match started from a job: which description it used and who of the matched people had applied (the rest came from the database). */
+  lastMatch: { jdId: string; applicantIds: string[] } | null;
   
   // Public job viewing
   publicJob: PublicJobView | null;
@@ -58,7 +67,8 @@ interface CareersActions {
   
   // Application management
   loadJobApplications: (jobId: string) => Promise<void>;
-  matchJobCandidates: (jobId: string, minScore?: number) => Promise<any>;
+  /** Scores a job's candidates against it: its applicants, and/or the given database candidates (found by the job's boolean string). */
+  matchJobCandidates: (jobId: string, options?: MatchJobOptions) => Promise<any>;
   convertToMatchResponse: (matchResults: any, jobData: any) => any;
   
   // Public actions (no auth required)
@@ -94,6 +104,7 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
   selectedJob: null,
   totalJobPostings: null,
   applications: [],
+  lastMatch: null,
   publicJob: null,
   viewingCVData: null,
   isLoading: false,
@@ -258,7 +269,8 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
     }
   },
 
-  matchJobCandidates: async (jobId: string, minScore?: number) => {
+  matchJobCandidates: async (jobId: string, options: MatchJobOptions = {}) => {
+    const { applicants: withApplicants = true, databaseIds = [] } = options;
     set({ isLoading: true, error: null });
     
     // Set careers matching loading state in app store
@@ -266,14 +278,17 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
     const appStore = useAppStore.getState();
     appStore.setLoading('careersMatching', true);
     try {
-      logger.info('Matching candidates for job', { jobId, minScore });
-      
-      // Get current applications to extract CV IDs
-      const currentApplications = get().applications;
-      const cvIds = currentApplications.map(app => app.application_id);
-      
+      logger.info('Matching candidates for job', { jobId, withApplicants, databaseCandidates: databaseIds.length });
+
+      // The applicants are read fresh from the server (not from whatever list happens to be on screen), then the database
+      // candidates are added; a person is scored once even if both lists name them.
+      const currentApplications = await api.getJobApplications(jobId);
+      set({ applications: currentApplications });
+      const applicantIds = withApplicants ? currentApplications.map(app => app.application_id) : [];
+      const cvIds = Array.from(new Set([...applicantIds, ...databaseIds])).slice(0, MATCH_MAX_CVS);
+
       if (cvIds.length === 0) {
-        throw new Error('No applications found to match');
+        throw new Error('There is nobody to match yet: this job has no applicants and no database candidates fit its search.');
       }
 
       appStore.setMatchingProgress({
@@ -386,6 +401,8 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
         matchResults: matchResults
       });
       
+      set({ lastMatch: { jdId: originalJdId, applicantIds: currentApplications.map(app => app.application_id) } });
+
       // Store match results in app store for display in match tab
       appStore.setCareersMatchResult(matchResults);
       appStore.setCareersMatchData({
@@ -531,6 +548,7 @@ loadPublicJob: async (token: string) => {
       jobFilters: NO_JOB_FILTERS,
       selectedJob: null,
       applications: [],
+      lastMatch: null,
       publicJob: null,
       viewingCVData: null,
       isLoading: false,

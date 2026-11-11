@@ -301,6 +301,8 @@ class LLMResponse:
     attempts: int = 1
     cost_usd: Optional[float] = None
     truncated: bool = False                # the model stopped because it ran out of output tokens, not because it was finished
+    tokens_cached: int = 0                 # prompt tokens read from the provider's prompt cache (billed at a fraction)
+    tokens_cache_write: int = 0            # prompt tokens written to it by this call
 
 
 # ============================
@@ -425,29 +427,68 @@ class LLMService:
         detail: Optional[Dict[str, Any]] = None,
         raw: bool = False,
         tools: Optional[List[Dict[str, Any]]] = None,
+        cache: str = "blocks",
     ) -> LLMResponse:
         """Call OpenAI and record the call (latency, tokens, estimated cost, errors, retries) for the Monitor page.
 
         ``role`` names what the call is for (cv_extract, jd_extract, match_analysis) so the page can split usage.
+        ``cache`` is the prompt-cache plan, see ``_prepare_messages``.
         """
         started = time.perf_counter()
         response: Optional[LLMResponse] = None
         try:
             response = self._send_openai_request(messages, model=model, max_tokens=max_tokens,
-                                                 json_schema=json_schema, timeout=timeout, raw=raw, tools=tools)
+                                                 json_schema=json_schema, timeout=timeout, raw=raw, tools=tools, cache=cache)
             return response
         finally:
             ok = bool(response and response.success)
             info = dict(detail or {})
             if response is not None and response.attempts > 1:
                 info["attempts"] = response.attempts
+            if response is not None and (response.tokens_cached or response.tokens_cache_write):
+                info["cached"], info["cache_write"] = response.tokens_cached, response.tokens_cache_write
             if not ok:
                 info["error"] = ((response.error_message if response else "exception") or "")[:300]
             get_recorder().record(
                 "llm", role, (response.model_used if response else None) or model or self.default_model,
                 (time.perf_counter() - started) * 1000, status="ok" if ok else "error",
                 tokens_in=response.tokens_in if response else 0, tokens_out=response.tokens_out if response else 0,
+                cost=(response.cost_usd if response is not None else None),      # the real price OpenRouter charged, cache discount included
                 detail=info, notable=True)
+
+    @staticmethod
+    def _prepare_messages(messages: List[Dict[str, Any]], model: str, cache: str) -> List[Dict[str, Any]]:
+        """The messages as they are sent, with prompt-cache breakpoints for Anthropic models (other models cache a repeated start by themselves).
+        The caller's list is never changed. ``cache`` says where the stable start of the prompt ends:
+
+        * ``"blocks"``  only where a message carries ``cache_prefix`` (the length of its stable start, in characters): the long
+                        instructions of a CV / JD extraction or a match, before the document that differs every time.
+        * ``"system"``  also the whole system message.
+        * ``"rolling"`` the system message and the latest user message: in a chat or a tool loop the next call repeats everything
+                        up to there, so it is read from the cache instead of being billed again.
+
+        A breakpoint on text shorter than the model's minimum (512 tokens on the Claude 5 models) is ignored by the provider, not an error.
+        """
+        on = bool(settings.LLM_PROMPT_CACHE) and (model or "").lower().startswith("anthropic/")
+        mark: Dict[str, Any] = {"type": "ephemeral"}
+        if settings.LLM_PROMPT_CACHE_TTL == "1h":
+            mark["ttl"] = "1h"
+        last_user = max((i for i, m in enumerate(messages) if m.get("role") == "user" and isinstance(m.get("content"), str)), default=None)
+        out: List[Dict[str, Any]] = []
+        for i, original in enumerate(messages):
+            m = dict(original)
+            split = m.pop("cache_prefix", None)                  # our own marker: never sent to the provider
+            content = m.get("content")
+            if on and isinstance(content, str) and content.strip():
+                if isinstance(split, int) and 0 < split < len(content):
+                    m["content"] = [{"type": "text", "text": content[:split], "cache_control": dict(mark)},
+                                    {"type": "text", "text": content[split:]}]
+                elif cache in ("system", "rolling") and m.get("role") == "system":
+                    m["content"] = [{"type": "text", "text": content, "cache_control": dict(mark)}]
+                elif cache == "rolling" and i == last_user:
+                    m["content"] = [{"type": "text", "text": content, "cache_control": dict(mark)}]
+            out.append(m)
+        return out
 
     def _send_openai_request(
         self,
@@ -459,6 +500,7 @@ class LLMService:
         timeout: Optional[int] = None,
         raw: bool = False,
         tools: Optional[List[Dict[str, Any]]] = None,
+        cache: str = "blocks",
     ) -> LLMResponse:
         """``tools`` (OpenAI function-calling format) lets the model ask for tool calls; with ``raw=True`` they come back as
         ``data["_tool_calls"]``. ``raw=True`` returns the model's text as ``data["_text"]`` without parsing it as JSON (the AI agents use a plain-text
@@ -471,7 +513,7 @@ class LLMService:
         # prompt in this app already demands "valid JSON only", which _parse_json_response then extracts and validates.
         body: Dict[str, Any] = {
             "model": model,
-            "messages": messages,
+            "messages": self._prepare_messages(messages, model, cache),
             "max_tokens": max_tokens,
             "temperature": 0.0,
             "usage": {"include": True},            # OpenRouter reports the real cost of each call
@@ -502,6 +544,7 @@ class LLMService:
 
                     data = {"_text": content, "_tool_calls": tool_calls} if raw else self._parse_json_response(content)
                     usage = payload.get("usage") or {}
+                    details = usage.get("prompt_tokens_details") or {}
                     return LLMResponse(
                         success=True,
                         data=data,
@@ -513,6 +556,8 @@ class LLMService:
                         attempts=attempt + 1,
                         cost_usd=(float(usage["cost"]) if usage.get("cost") is not None else None),
                         truncated=finish in ("length", "max_tokens"),
+                        tokens_cached=int(details.get("cached_tokens") or 0),
+                        tokens_cache_write=int(details.get("cache_write_tokens") or 0),
                     )
 
                 # Retryable HTTP statuses
@@ -548,11 +593,13 @@ class LLMService:
     # ------------- Prompt builders -------------
 
     def _build_cv_prompt(self, text: str) -> List[Dict[str, str]]:
-        # Using a single user message keeps prompt hashing simple/stable.
-        return [{"role": "user", "content": f"{DEFAULT_CV_PROMPT}\n\nCV CONTENT:\n{text}"}]
+        # The instructions never change; only the CV after them does. "cache_prefix" marks where the stable start ends.
+        head = f"{DEFAULT_CV_PROMPT}\n\nCV CONTENT:\n"
+        return [{"role": "user", "content": head + text, "cache_prefix": len(head)}]
 
     def _build_jd_prompt(self, text: str) -> List[Dict[str, str]]:
-        return [{"role": "user", "content": f"{DEFAULT_JD_PROMPT}\n\nJOB DESCRIPTION:\n{text}"}]
+        head = f"{DEFAULT_JD_PROMPT}\n\nJOB DESCRIPTION:\n"
+        return [{"role": "user", "content": head + text, "cache_prefix": len(head)}]
 
     # ------------- Parsing & validation -------------
 

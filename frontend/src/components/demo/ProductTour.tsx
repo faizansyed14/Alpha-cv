@@ -30,7 +30,7 @@ import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page';
 import { Avatar } from '@/components/ui/avatar';
 import CandidateCard from '@/components/database/CandidateCard';
-import JobCard from '@/components/careers/JobCard';
+import JobRow, { type JobHandlers } from '@/components/careers/JobRow';
 import MatchingFullPageAnimation from '@/components/results/MatchingFullPageAnimation';
 import { MonthBars, SplitBar, Sparkline, TrendChart } from '@/components/dashboard/charts';
 import { cn } from '@/lib/utils';
@@ -53,6 +53,14 @@ import {
 } from './fakeData';
 
 const noop = () => undefined;
+const tourJobHandlers: JobHandlers = {
+  onOpen: noop,
+  onMatch: noop,
+  onAi: noop,
+  onToggleStatus: noop,
+  onDelete: noop,
+  onCopy: noop,
+};
 const asyncNoop = async () => undefined;
 
 function Panel({
@@ -1020,11 +1028,11 @@ export default function ProductTour({ embedded = false }: { embedded?: boolean }
                     <PageHeader markSrc="/icons/careers.jpg" title="Careers" description="Your jobs" />
                     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
                       <div
-                        className={cn('max-w-md', tourTargetClass)}
+                        className={cn('max-w-md overflow-hidden rounded-2xl border border-surface-border bg-white shadow-card', tourTargetClass)}
                         data-tour="btn-open-public"
                         data-tour-label="Open public job page"
                       >
-                        <JobCard job={DEMO_JOB} currentUser="Aisha Demo" onOpen={noop} />
+                        <JobRow job={DEMO_JOB} currentUser="Aisha Demo" handlers={tourJobHandlers} />
                       </div>
                       <div className="rounded-2xl border border-surface-border bg-white p-5 shadow-card">
                         <p className="text-[12px] font-semibold uppercase tracking-[0.1em] text-slate-500">

@@ -16,6 +16,7 @@ from app.models.user import User
 from app.security.auth import decode_token, issued_before_floor
 import app.services.presence as presence
 from app.security.logsafe import security_event
+from app.security.rbac_rules import ALL_ROLES
 
 bearer = HTTPBearer(auto_error=True)
 
@@ -68,29 +69,20 @@ def require_user(user: User = Depends(get_current_user)) -> User:
     """Ensure a valid authenticated user is present (any active role).
 
     Used for endpoints every signed-in user needs regardless of role, e.g.
-    /api/auth/me and /api/features.
+    /api/auth/me.
     """
     return user
-
-
-# Roles that may use the core ATS pages (CV/JD database, upload, matching,
-# careers, email, performance). Tracker-only roles (e.g. account_manager) are
-# intentionally excluded and get 403 on these endpoints.
-CORE_APP_ROLES = ("admin", "user", "manager", "evp")
 
 
 def require_core_app(user: User = Depends(get_current_user)) -> User:
-    """Require a role that is allowed to use the core ATS pages.
-
-    Blocks tracker-only roles (account_manager) from CV/JD/match/careers/etc.
-    """
-    if user.role not in CORE_APP_ROLES:
-        security_event("access_denied", logging.WARNING, user=user.username, role=user.role, area="core_app")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This area is not available for your role.",
-        )
+    """Any signed-in staff member: admin, recruiter, recruitment manager, EVP or sales manager all use the application the same way.
+    (The name is kept from when some roles were limited; only ``require_admin`` is stricter.) A stored role the application does not
+    know is refused rather than trusted."""
+    if user.role not in ALL_ROLES:
+        security_event("access_denied", logging.WARNING, user=user.username, role=user.role, area="unknown_role")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your account has no valid role. Ask an administrator.")
     return user
+
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
     """Require the current user to have the `admin` role."""
@@ -100,21 +92,3 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
             status_code=status.HTTP_403_FORBIDDEN, detail="Admin only"
         )
     return user
-
-
-def require_roles(*roles: str):
-    """Return a dependency that requires the user to have one of `roles`."""
-    allowed = set(r for r in roles if r)
-    if not allowed:
-        raise ValueError("require_roles() called with no roles")
-
-    def _dep(user: User = Depends(get_current_user)) -> User:
-        if user.role not in allowed:
-            security_event("access_denied", logging.WARNING, user=user.username, role=user.role, area="roles:" + ",".join(sorted(allowed)))
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions",
-            )
-        return user
-
-    return _dep

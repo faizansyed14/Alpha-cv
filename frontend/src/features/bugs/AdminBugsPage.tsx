@@ -1,4 +1,5 @@
 'use client';
+import { roleLabel } from '@/lib/roles';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, Bug, RefreshCw, Search, Trash2, X } from '@/components/icons';
@@ -260,7 +261,7 @@ export default function AdminBugsPage() {
                       <Avatar name={b.reporter_username} size="sm" />
                       <div className="min-w-0">
                         <p className="truncate text-[13px] text-slate-800">{b.reporter_username}</p>
-                        <p className="truncate text-[11.5px] capitalize text-slate-400">{(b.reporter_role || '').replace('_', ' ')}</p>
+                        <p className="truncate text-[11.5px] capitalize text-slate-400">{roleLabel(b.reporter_role)}</p>
                       </div>
                     </div>
                   </TD>
@@ -303,7 +304,7 @@ export default function AdminBugsPage() {
               <dl className="grid gap-x-6 gap-y-3 rounded-xl border border-surface-border bg-white p-4 sm:grid-cols-2">
                 <Fact label="Reported by">
                   <span className="inline-flex items-center gap-2"><Avatar name={open.reporter_username} size="sm" />{open.reporter_username}
-                    <span className="capitalize text-slate-400">({(open.reporter_role || '').replace('_', ' ') || 'user'})</span></span>
+                    <span className="capitalize text-slate-400">({roleLabel(open.reporter_role) || 'user'})</span></span>
                 </Fact>
                 <Fact label="Email">{open.reporter_email ? <a className="text-navy-700 hover:underline" href={`mailto:${open.reporter_email}`}>{open.reporter_email}</a> : <span className="text-slate-400">Not set</span>}</Fact>
                 <Fact label="Browser">{open.user_agent ? <span className="text-[12px] text-slate-600">{open.user_agent}</span> : <span className="text-slate-400">Unknown</span>}</Fact>

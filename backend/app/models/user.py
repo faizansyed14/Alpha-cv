@@ -16,10 +16,8 @@ class User(SQLModel, table=True):
     # - real:    generate a random OTP and email it
     # - captcha: show an image CAPTCHA instead of email OTP (no email needed)
     otp_mode: str = Field(default="real")
-    # Role is stored as plain text for flexibility (no DB migration needed to add roles).
-    # Supported: "admin" | "manager" | "evp" | "user"
+    # Role is plain text. "admin" is the only role with extra powers (users, agents, monitoring, bug reports, agent usage);
+    # every other role (see app/security/rbac_rules.py) has exactly the same access.
     role: str = Field(default="user")
-    # Optional team/location scope for row-level filtering (e.g., "Abu Dhabi" | "Dubai").
-    team_location: Optional[str] = Field(default=None, index=True)
     is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)

@@ -207,12 +207,12 @@ def test_job_that_keeps_crashing_is_failed_not_retried_forever(cache):
     assert mq.queue_depth() == 0
 
 
-def test_no_limits_by_default_so_any_number_of_users_can_match_at_once(monkeypatch):
+def test_shipped_limits_are_a_few_matches_per_person_and_a_deep_queue_but_never_a_cap_on_workers(monkeypatch):
     c = FakeCache()
     monkeypatch.setattr(mq, "get_redis_cache", lambda: c)
     defaults = type(settings).model_fields                      # the shipped defaults, whatever this machine's environment sets
-    assert defaults["MATCH_QUEUE_MAX_CONCURRENT_JOBS"].default == 0
-    assert defaults["MATCH_QUEUE_MAX_JOBS_PER_USER"].default == 0 and defaults["MATCH_QUEUE_MAX_DEPTH"].default == 0
+    assert defaults["MATCH_QUEUE_MAX_CONCURRENT_JOBS"].default == 0                     # the workers are the bound, not a counter
+    assert defaults["MATCH_QUEUE_MAX_JOBS_PER_USER"].default == 3 and defaults["MATCH_QUEUE_MAX_DEPTH"].default == 100
     for name in ("MATCH_QUEUE_MAX_CONCURRENT_JOBS", "MATCH_QUEUE_MAX_JOBS_PER_USER", "MATCH_QUEUE_MAX_DEPTH"):
         monkeypatch.setattr(settings, name, 0)
     for n in range(30):  # 30 submissions at once, several users submitting more than one

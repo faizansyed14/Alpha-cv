@@ -9,8 +9,9 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from app.agentic.tools.base import Tool, ToolContext, ToolError, ToolOutput, obj, text
+from app.security.rbac_rules import ALL_ROLES
 
-ROLES = frozenset({"admin", "user", "manager", "evp"})
+ROLES = frozenset(ALL_ROLES)
 
 
 def switch_skill(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
@@ -23,6 +24,6 @@ def switch_skill(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
 
 TOOLS = [
     Tool("switch_skill", "Hand this request to another of your skills when it belongs there (for example a request about matching, categories, candidates, "
-         "interview questions, a LinkedIn post, job postings or the tracker). Use it instead of saying you cannot do something. Call it with no other tool.",
+         "interview questions, a LinkedIn post, or job postings). Use it instead of saying you cannot do something. Call it with no other tool.",
          obj(skill={"type": "string", "description": "The skill name to hand over to."}, reason={"type": "string"}, required=["skill"]), ROLES, switch_skill),
 ]

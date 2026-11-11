@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import dynamic from 'next/dynamic';
 import {
@@ -248,8 +248,8 @@ export default function MatchingPage() {
     }))
   );
 
-  const { applications } = useCareersStore(
-    useShallow((s) => ({ applications: s.applications }))
+  const { applications, lastJobMatch } = useCareersStore(
+    useShallow((s) => ({ applications: s.applications, lastJobMatch: s.lastMatch }))
   );
   const { user } = useAuthStore();
 
@@ -313,12 +313,14 @@ export default function MatchingPage() {
     }
   }, [jds?.length, totalJDs, loadingStates.jds.isLoading, loadingStates.jds.error, loadMoreJDs]);
 
-  // Keep the JD dropdown selection valid as JDs load.
+  // Start the dropdown on the job that was matched last (a match started from Careers, or the one just run). This happens once: after
+  // that the dropdown belongs to the person, so clearing it with the X must leave it empty instead of putting the old job back.
+  const jdPrefilled = useRef(false);
   useEffect(() => {
-    if (!launchJdId && selectedJD) {
-      setLaunchJdId(selectedJD);
-    }
-  }, [selectedJD, launchJdId]);
+    if (jdPrefilled.current || !selectedJD) return;
+    jdPrefilled.current = true;
+    setLaunchJdId((current) => current || selectedJD);
+  }, [selectedJD]);
 
   const jobOptions = useMemo<ComboboxOption[]>(
     () =>
@@ -946,6 +948,11 @@ export default function MatchingPage() {
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                               <h4 className="truncate text-[14px] font-semibold tracking-[-0.01em] text-slate-900">{displayName}</h4>
+                              {lastJobMatch && lastJobMatch.jdId === matchResult?.jd_id && (
+                                lastJobMatch.applicantIds.includes(candidate.cv_id)
+                                  ? <span className="chip chip-brand shrink-0">Applied</span>
+                                  : <span className="chip chip-neutral shrink-0" title="Found in your database by the job's boolean search">Database</span>
+                              )}
                               {(notesSummary[candidate.cv_id]?.notes_count || (candidateNotes[candidate.cv_id]?.length || 0)) > 0 && (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
                                   <MessageSquare className="h-3 w-3" />

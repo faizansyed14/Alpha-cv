@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const matchCandidates = vi.fn();
 const getMatchJob = vi.fn();
@@ -12,6 +12,8 @@ const running = (percent: number, extra = {}) => ({
   progress: { phase: 'scoring', progress_percent: percent, total_candidates: 1000, processed_candidates: Math.round(percent * 10), ...extra },
 });
 const done = { is_queued: false, candidates: [{ cv_id: 'a' }] };
+
+afterEach(() => { vi.useRealTimers(); });          // a test that fails with fake timers on must not stall the ones after it
 
 beforeEach(() => {
   matchCandidates.mockReset();
@@ -127,7 +129,8 @@ describe('the percentage shown while a match runs', () => {
       .mockResolvedValueOnce(ai(10)).mockResolvedValueOnce(ai(20)).mockResolvedValueOnce(done);
     const seen: MatchUpdate[] = [];
     const run = runMatchJob({ jd_id: 'jd', cv_ids: new Array(20).fill('x') } as never, (u) => seen.push(u), { pollMs: 5_000 });
-    await vi.advanceTimersByTimeAsync(5_000 * 7);
+    await vi.advanceTimersByTimeAsync(5_000 * 6);   // six polls, 5 s apart
+    await vi.advanceTimersByTimeAsync(10_000);      // the seventh comes after 30 s of running, when the interval has doubled
     await run;
     vi.useRealTimers();
     const p = seen.map((u) => u.percent);

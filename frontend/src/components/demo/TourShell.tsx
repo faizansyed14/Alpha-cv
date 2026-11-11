@@ -4,7 +4,6 @@ import { cn } from '@/lib/utils';
 import {
   FileText,
   Globe2,
-  KanbanSquare,
   LayoutDashboard,
   Target,
   Upload,
@@ -20,7 +19,6 @@ const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   match: Target,
   upload: Upload,
   careers: Globe2,
-  tracker: KanbanSquare,
 };
 
 /** Same sidebar chrome as AppShell. Main area is white for the product tour. */

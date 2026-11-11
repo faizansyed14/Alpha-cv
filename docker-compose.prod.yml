@@ -9,7 +9,7 @@
 # durable application data and can be replaced/rebuilt/scaled without a data
 # migration:
 #   - DATABASE_URL -> points at an AWS RDS (PostgreSQL) endpoint: one database
-#     for users, tracker and email intake. Enable "Multi-AZ" + automated backups on
+#     for users, candidates, jobs, AI agents and bug reports. Enable "Multi-AZ" + automated backups on
 #     the RDS instance itself; see scripts/db/init/rds-bootstrap.sql for the one-time setup.
 #   - STORAGE_BACKEND=s3, S3_BUCKET / S3_REGION -> CV/JD files go straight to
 #     S3 (credentials via the EC2 instance's IAM role, no static keys on the

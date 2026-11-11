@@ -194,7 +194,7 @@ export default function PublicJobOpeningsPage() {
           </div>
         </section>
 
-        <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
+        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
           {error ? (
             <div className="mx-auto mb-6 flex max-w-xl items-start gap-2.5 rounded-2xl border border-danger/25 bg-danger-50 p-4 text-sm text-danger">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -302,7 +302,7 @@ export default function PublicJobOpeningsPage() {
               variants={stagger(0.04, 0)}
               initial="hidden"
               animate="show"
-              className="mx-auto grid max-w-5xl grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3"
+              className="mx-auto grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
             >
               {pageJobs.map((job) => {
                 const tokenOk = job.public_token && job.public_token !== 'unknown';

@@ -1,11 +1,12 @@
 'use client';
+import type { Role } from '@/lib/roles';
 
 import { ReactNode } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 
 interface RoleBasedAccessProps {
   children: ReactNode;
-  allowedRoles: ('admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager')[];
+  allowedRoles: Role[];
   fallback?: ReactNode;
   hideWhenUnauthorized?: boolean;
 }

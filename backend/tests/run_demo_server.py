@@ -1,9 +1,9 @@
 """Run a fully self-contained demo backend for frontend testing.
 
 Same offline harness as the smoke tests (in-memory Qdrant, deterministic fake
-embeddings, stubbed OpenAI, sqlite auth/tracker DBs) plus seeded demo data:
+embeddings, stubbed OpenAI, sqlite auth DB) plus seeded demo data:
 admin login admin/admin, several CVs and JDs, a published job posting with a
-public application, and tracker records.
+public application..
 
 Usage:  cd backend && PYTHONPATH=. python3 tests/run_demo_server.py
 Serves on http://localhost:8000, point the frontend at it via
@@ -16,7 +16,6 @@ os.environ.setdefault("OPENAI_API_KEY", "stub-key-for-demo")
 os.environ["DATABASE_URL"] = "sqlite:///./demo_auth.db"      # always its own throwaway file, whatever the environment says: never a real database
 os.environ["ADMIN_EMAIL"] = "admin@harness.test"        # the harness admin signs in with this (see harness_login.ADMIN_EMAIL)
 os.environ["REDIS_HOST"], os.environ["REDIS_PORT"] = "127.0.0.1", "1"       # nothing listens there: the in-memory cache is used, never the real Redis
-os.environ.setdefault("ENABLE_CANDIDATE_TRACKER", "true")
 os.environ.setdefault("LOCAL_STORAGE_DIR", "/tmp/demo_uploads")
 os.environ.setdefault("CV_UPLOAD_DIR", "/tmp/demo_uploads/cv")
 os.environ.setdefault("OTP_DISABLE_EMAIL", "true")
@@ -159,41 +158,17 @@ def seed():
                               "applicant_phone": "+971501112233", "expected_salary": "18000",
                               "years_of_experience": "7"})
 
-        # Tracker demo data needs a manager
+        # one more staff account (every non-admin role has the same access)
         client.post("/api/admin/users", headers=admin, json={
-            "username": "manager", "password": "Manager!234", "role": "manager",
-            "email": "manager@demo-org.org", "team_location": "dubai"})
-        r = client.post("/api/auth/verify-password", json={"email": "manager@demo-org.org", "password": "Manager!234"})
-        sr = client.post("/api/auth/send-otp", json={"email": "manager@demo-org.org", "password": "Manager!234"})
-        dev_otp = (sr.json() or {}).get("dev_otp", "")
-        r = client.post("/api/auth/verify-otp", json={"email": "manager@demo-org.org", "otp": dev_otp})
-        mgr = {"Authorization": f"Bearer {r.json().get('access_token', '')}"}
-        r = client.post("/api/tracker/job-openings", headers=mgr,
-                        json={"title": "Site Reliability Engineer", "client": "Acme Corp", "status": "Open"})
-        opening = (r.json() or {}).get("id")
-        r = client.post("/api/tracker/candidates", headers=mgr,
-                        json={"name": "Sara Ali", "email": "sara@demo.test", "phone": "+971511111111"})
-        cand = (r.json() or {}).get("id")
-        if cand and opening:
-            client.post("/api/tracker/applications", headers=mgr,
-                        json={"candidate_id": cand, "job_opening_id": opening, "status": "Submitted"})
-        client.post("/api/tracker/follow-ups", headers=mgr, json={
-            "client_name": "Acme Corp", "position": "SRE", "current_stage": "Feedback Pending",
-            "next_follow_up_date": "2026-06-20", "remarks": "call after interview"})
-
-        # Tracker-only role: account_manager (no access to other pages)
-        client.post("/api/admin/users", headers=admin, json={
-            "username": "accountmgr", "password": "AccountMgr!234", "role": "account_manager",
-            "email": "accountmgr@demo-org.org", "team_location": "dubai"})
+            "username": "manager", "password": "Manager!234", "role": "manager", "email": "manager@demo-org.org"})
 
         print("Demo data seeded")
         print(f"   {ADMIN_EMAIL} / admin")
-        print("   manager@demo-org.org / Manager!234        (email OTP; dev returns code in response), tracker read/write")
-        print("   accountmgr@demo-org.org / AccountMgr!234  (email OTP; dev returns code in response), TRACKER ONLY")
+        print("   manager@demo-org.org / Manager!234        (email OTP; dev returns code in response)")
 
 
 if __name__ == "__main__":
-    for f in ("demo_auth.db", "demo_tracker.db"):
+    for f in ("demo_auth.db",):
         if os.path.exists(f):
             os.remove(f)
     seed()

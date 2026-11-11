@@ -1,7 +1,7 @@
 """Alembic environment for the application's single database.
 
 The URL comes from DATABASE_URL (app settings), so it works against local Postgres or AWS RDS unchanged. Every model
-(users, tracker, AI agents) is registered on one metadata, so autogenerate sees the whole schema.
+(users, AI agents, bug reports, candidates) is registered on one metadata, so autogenerate sees the whole schema.
 """
 from logging.config import fileConfig
 
@@ -13,7 +13,6 @@ from app.config.settings import settings
 import app.models.agent  # noqa: F401  (registers tables)
 import app.models.bug_report  # noqa: F401
 import app.models.talent  # noqa: F401
-import app.models.tracker.models  # noqa: F401
 import app.models.user  # noqa: F401
 
 config = context.config

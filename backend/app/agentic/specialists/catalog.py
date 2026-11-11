@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 from app.agentic.specialists.base import Specialist
+from app.security.rbac_rules import ALL_ROLES
 
-CORE = frozenset({"admin", "user", "manager", "evp"})
+CORE = frozenset(ALL_ROLES)
 
 JOBS = Specialist(
     name="jobs", label="Post & manage jobs", description="Draft and post job openings, and see the postings that exist.",
@@ -53,15 +54,6 @@ LINKEDIN = Specialist(
           "generate_linkedin_post once, passing tone or length wishes in request. The post appears on screen: do not repeat it; offer a shorter or friendlier version."),
     examples=("Write a LinkedIn post for the IT Engineer job", "A short, friendly LinkedIn post for the Senior .NET role"))
 
-TRACKER = Specialist(
-    name="tracker", label="Tracker", description="See the candidate tracker: stages, follow-ups and job openings.",
-    roles=CORE | {"account_manager"}, tool_names=("tracker_candidates", "tracker_follow_ups", "tracker_job_openings", "propose_tracker_add", "propose_tracker_change",
-                                                    "propose_follow_up_reminder"),
-    task=("answer questions about the candidate tracker using tracker_candidates, tracker_follow_ups and tracker_job_openings. Summarise what is there; "
-          "if a list is empty, say the tracker has nothing for them yet. To add a follow-up, job opening, candidate or application call propose_tracker_add; to change a row read it first and call propose_tracker_change with its ref and only the fields that change (dates as YYYY-MM-DD); "
-          "propose_follow_up_reminder emails the people on a follow-up. Each puts a card with Confirm and Cancel on screen: nothing has changed until the person confirms, so never say it is done. Ask for any detail that is required and missing."),
-    examples=("What follow-ups are open?", "Show the tracker candidates", "Which job openings are in the tracker?"))
-
 ADMIN = Specialist(
     name="admin", label="Admin insights", description="AI token usage, reset requests, system health, users, weekly report and the notice shown to everyone.",
     roles=frozenset({"admin"}), tool_names=("token_usage_overview", "pending_token_requests", "propose_token_answer", "system_status", "list_users", "weekly_report",
@@ -71,4 +63,4 @@ ADMIN = Specialist(
           "To change the notice every user sees call propose_notice. Each propose_ tool puts a card with Confirm and Cancel on screen: nothing has changed until the admin confirms, so never say it is done. You cannot create users or change passwords here."),
     examples=("Who used the most AI tokens today?", "Are there any token reset requests waiting?", "Is the system healthy?"))
 
-ALL = (JOBS, MATCHING, CANDIDATES, INTERVIEW, LINKEDIN, TRACKER, ADMIN)
+ALL = (JOBS, MATCHING, CANDIDATES, INTERVIEW, LINKEDIN, ADMIN)

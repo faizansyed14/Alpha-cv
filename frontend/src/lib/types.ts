@@ -1,3 +1,4 @@
+import type { Role } from './roles';
 
 // Base types
 export interface BaseDocument {
@@ -387,7 +388,7 @@ export interface LoginResponse {
   access_token: string;
   token_type: string;
   username: string;
-  role: 'admin' | 'user';
+  role: Role;
 }
 
 export interface VerifyPasswordResponse {
@@ -416,19 +417,17 @@ export interface OTPResponse {
 export interface UserProfile {
   id: string;
   username: string;
-  role: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager';
+  role: Role;
   is_active: boolean;
-  team_location?: string | null;
 }
 
 export interface AdminUser {
   id: string;
   username: string;
-  role: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager';
+  role: Role;
   is_active: boolean;
   email?: string;
   otp_mode?: 'real' | 'captcha';
-  team_location?: string | null;
 }
 
 export interface UserPresence {
@@ -448,97 +447,16 @@ export interface CreateUserRequest {
   username: string;
   password: string;
   email: string;   // what the person signs in with
-  role: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager';
+  role: Role;
   otp_mode?: 'real' | 'captcha';
-  team_location?: string | null;
 }
 
 export interface UpdateUserRequest {
   password?: string;
   email?: string;
-  role?: 'admin' | 'user' | 'recruiter' | 'manager' | 'evp' | 'account_manager';
+  role?: Role;
   is_active?: boolean;
   otp_mode?: 'real' | 'captcha';
-  team_location?: string | null;
-}
-
-// Candidate Tracker types
-export interface TrackerJobOpening {
-  id: string;
-  title: string;
-  requirement?: string | null;
-  department?: string | null;
-  client?: string | null;
-  status: string;
-  hiring_manager?: string | null;
-  recruitment_manager?: string | null;
-  req_date?: string | null;
-  submission_date?: string | null;
-  cvs_submitted_count?: number | null;
-  comments?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface TrackerCandidate {
-  id: string;
-  name: string;
-  email?: string | null;
-  phone?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface TrackerApplication {
-  id: string;
-  candidate_id: string;
-  job_opening_id: string;
-  applied_date?: string | null;
-  position?: string | null;
-  client?: string | null;
-  status: string;
-  recruiter?: string | null;
-  account_manager?: string | null;
-  recruitment_manager?: string | null;
-  comment?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface TrackerCandidateRow {
-  candidate: TrackerCandidate;
-  application?: TrackerApplication | null;
-}
-
-export interface TrackerOption {
-  id: string;
-  kind: string;
-  value: string;
-  email?: string | null;
-  email_enabled?: boolean;
-  is_deleted?: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface TrackerFollowUp {
-  id: string;
-  client_name: string;
-  position?: string | null;
-  recruiter_name?: string | null;
-  account_manager?: string | null;
-  recruitment_manager?: string | null;
-  cv_submitted_date?: string | null;
-  current_stage: string;
-  last_follow_up_date?: string | null;
-  next_follow_up_date?: string | null;
-  interview_date?: string | null;
-  client_feedback?: string | null;
-  interview_feedback?: string | null;
-  remarks?: string | null;
-  reminder_last_sent_at?: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 // Careers types
@@ -601,6 +519,41 @@ export interface JobPostingListItem {
   email_subject_template?: string;
   // Naukri Gulf Boolean recruiter search string (LLM-generated from the JD)
   boolean_search_string?: string;
+}
+
+/** A candidate found in the database by a job's boolean search string (not an applicant of that job). */
+export interface JobDatabaseCandidate {
+  id: string;
+  filename: string;
+  upload_date: string;
+  full_name: string;
+  job_title: string;
+  years_of_experience?: number | string | null;
+  category?: string | null;
+  skill_keywords: string[];
+  location?: string | null;
+  nationality?: string | null;
+  notice_period?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  linkedin_url?: string | null;
+  github_url?: string | null;
+  /** Set when this person applied to ANOTHER job */
+  applied_job_title?: string | null;
+  /** The words of the boolean string found in this CV */
+  matched_keywords: string[];
+}
+
+export interface JobDatabaseCandidatesPage {
+  results: JobDatabaseCandidate[];
+  next_cursor: string | null;
+  count: number;
+  total: number | null;
+  total_is_estimate: boolean;
+  /** The boolean string that was searched, and where it came from */
+  boolean_query: string;
+  query_source: 'job' | 'custom' | 'generated';
+  applicants_excluded: number;
 }
 
 export type BugStatus = 'open' | 'in_progress' | 'resolved' | 'closed';

@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     PRESENCE_TTL_SECONDS: int = 120
 
     # ---- Relational database ----
-    # ONE PostgreSQL database holds everything relational: users, the candidate tracker and email-intake tables.
+    # ONE PostgreSQL database holds everything relational: users, the AI agents' history and bug reports.
     # A full SQLAlchemy URL; point it at an AWS RDS endpoint to move it off-box (add ?sslmode=require for RDS).
     # The default is a local SQLite file, for tests and quick tries only.
     DATABASE_URL: str = "sqlite:///./app.db"
@@ -89,9 +89,8 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT_SECONDS: int = 10
     # A search that runs longer than this is cancelled by PostgreSQL, so one expensive query cannot hold the database for everyone.
     SEARCH_STATEMENT_TIMEOUT_SECONDS: int = 30
-    ENABLE_CANDIDATE_TRACKER: bool = False
     ALLOW_PROD_DATA_ACCESS: bool = False
-    TRACKER_PROD_URL_HINTS: str = ""  # comma-separated substrings treated as prod
+    PROD_DB_URL_HINTS: str = ""  # comma-separated substrings treated as prod
 
     # ---- Qdrant (vector store) ----
     QDRANT_HOST: str = "qdrant"
@@ -138,6 +137,13 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     LLM_MODEL: str = "anthropic/claude-haiku-5.5"      # CV / JD extraction, match analysis and the agents
+    # Prompt caching (Anthropic models through OpenRouter): the long instructions every call starts with are billed at about a tenth of
+    # the normal input price when the same start was sent in the last few minutes, and the model begins answering sooner. The call that
+    # writes an entry pays 25% more on that part (100% more with "1h"), so it pays off when calls come in bursts (bulk uploads, matching, a
+    # chat that goes back and forth). "5m" or "1h" is how long an entry lives; false turns the marking off (other models cache a
+    # repeated start by themselves, with no marking).
+    LLM_PROMPT_CACHE: bool = True
+    LLM_PROMPT_CACHE_TTL: str = "5m"
     LLM_MAX_RETRIES: int = 2
     LLM_RETRY_BASE_DELAY: float = 0.5
     # true = only route to providers that keep no prompts or completions (OpenRouter zero-data-retention); CVs are personal data
@@ -184,7 +190,7 @@ class Settings(BaseSettings):
     MAX_TEXT_INPUT_CHARS: int = 50000
     # Data retention: raw CV files/text + embeddings older than this can be
     # purged by db/cleanup_old_cvs.py (0 = keep forever). Structured data,
-    # notes, tracker, auth and email-dedup records are always kept.
+    # notes, auth and email-dedup records are always kept.
 
     # ---- Embeddings / matching ----
     # multilingual-e5-small: 384-d vectors. Changing the model or EMBEDDING_DIM means recreating the Qdrant collections and
@@ -320,8 +326,6 @@ class Settings(BaseSettings):
     CPU_THRESHOLD_PERCENT: int = 85
 
     # ---- Feature flags ----
-    SEND_EMAIL_REMINDER_FOLLOWUP: bool = False
-    FOLLOWUP_REMINDER_TZ: str = "Asia/Dubai"
 
     # ---------------- Derived helpers ----------------
 
@@ -412,6 +416,3 @@ def get_otp_from_email() -> str:
     return (os.getenv("OTP_FROM_EMAIL") or settings.OTP_FROM_EMAIL or settings.AZURE_MAILBOX_EMAIL).strip()
 
 
-def is_followup_email_reminder_enabled() -> bool:
-    """Master flag for follow-up reminder emails."""
-    return _env_truthy("SEND_EMAIL_REMINDER_FOLLOWUP")

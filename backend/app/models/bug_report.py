@@ -9,7 +9,7 @@ from sqlmodel import Field, SQLModel
 
 BUG_STATUSES = ("open", "in_progress", "resolved", "closed")
 BUG_SEVERITIES = ("low", "medium", "high", "critical")
-BUG_AREAS = ("Dashboard", "Candidates", "Job descriptions", "Match", "Upload", "Careers", "Tracker", "AI agents", "Login or account", "Other")
+BUG_AREAS = ("Dashboard", "Candidates", "Job descriptions", "Match", "Upload", "Careers", "AI agents", "Login or account", "Other")
 
 
 def _in(column: str, values) -> str:

@@ -61,7 +61,7 @@ def script(monkeypatch, steps):
     """Replace the model: each call takes the next step ({"text": ..., "calls": [...]}). Returns the list of calls it saw."""
     seen = []
 
-    def fake(messages, *, role, max_tokens, tools=None):
+    def fake(messages, *, role, max_tokens, tools=None, cache="rolling"):
         seen.append({"role": role, "tools": [t["function"]["name"] for t in tools] if tools else None, "messages": list(messages)})
         assert steps, "the model was called more often than the test expected"
         step = steps.pop(0)
@@ -176,7 +176,7 @@ def test_the_gateway_refuses_every_method_except_get_and_post(method):
 
 @pytest.mark.parametrize("method,path", [
     ("GET", "/api/cv/cvs"), ("GET", f"/api/cv/{UUID1}"), ("GET", "/api/jd/jds"), ("GET", "/api/careers/admin/jobs"),
-    ("GET", "/api/careers/admin/jobs/abcdefgh-1234/applications"), ("GET", "/api/match/jobs/abcdef123456"), ("GET", "/api/tracker/follow-ups"),
+    ("GET", "/api/careers/admin/jobs/abcdefgh-1234/applications"), ("GET", "/api/match/jobs/abcdef123456"),
     ("POST", "/api/match"), ("POST", "/api/careers/admin/jobs/post")])
 def test_the_gateway_allows_exactly_the_listed_paths(method, path):
     ApiGateway.check(method, path)
@@ -195,7 +195,9 @@ def test_everything_else_is_unreachable(method, path):
 def test_no_tool_can_delete_edit_or_reset_and_roles_are_least_privilege():
     tool_registry.assert_no_destructive_tools()
     assert not [n for n in tool_registry.ALL_TOOLS if any(w in n for w in ("delete", "remove", "erase", "purge", "wipe", "drop", "destroy", "clear"))]
-    assert [s.name for s in specialists.available("account_manager")] == ["tracker"]
+    # every non-admin role (recruiter, recruitment manager, EVP, sales manager) has exactly the same skills; only the admin has one more
+    for role in ("manager", "evp", "account_manager"):
+        assert [s.name for s in specialists.available(role)] == [s.name for s in specialists.available("user")]
     assert "admin" in [s.name for s in specialists.available("admin")] and "admin" not in [s.name for s in specialists.available("manager")]
     for role in ("user", "manager", "evp"):
         names = {t.name for s in specialists.available(role) for t in specialists.tools_of(s, role)}
@@ -203,8 +205,7 @@ def test_no_tool_can_delete_edit_or_reset_and_roles_are_least_privilege():
     writing = {t.name for t in tool_registry.ALL_TOOLS.values() if t.writes}
     # a tool that writes either only creates/starts something (and is guarded in code) or is a proposal the person must confirm
     assert {n for n in writing if not n.startswith("propose_")} == {"read_job_file", "draft_job_post", "publish_job_post", "run_matching", "generate_interview_questions", "generate_linkedin_post"}
-    assert {n for n in writing if n.startswith("propose_")} == {"propose_candidate_note", "propose_job_status", "propose_job_changes", "propose_tracker_add", "propose_tracker_change",
-                                                                 "propose_follow_up_reminder", "propose_notice", "propose_token_answer", "propose_cv_upload", "propose_jd_upload"}
+    assert {n for n in writing if n.startswith("propose_")} == {"propose_candidate_note", "propose_job_status", "propose_job_changes", "propose_notice", "propose_token_answer", "propose_cv_upload", "propose_jd_upload"}
 
 
 def test_each_specialist_holds_only_its_own_tools():
@@ -223,8 +224,7 @@ def route(message, role="user", previous=None, pending=False):
     ("Post a job for a Senior Python Developer in Dubai", "jobs"), ("show me the jobs we have open", "jobs"),
     ("Match candidates for the AI Consultant job", "matching"), ("who are the best fits for the IT role", "matching"),
     ("Find python developers in Dubai", "candidates"), ("Who applied for the IT Engineer job?", "candidates"),
-    ("Interview questions for the .NET role", "interview"), ("Write a LinkedIn post for the IT Engineer job", "linkedin"),
-    ("What follow-ups are open?", "tracker")])
+    ("Interview questions for the .NET role", "interview"), ("Write a LinkedIn post for the IT Engineer job", "linkedin")])
 def test_keyword_rules_pick_the_specialist_without_a_model(message, expected, monkeypatch):
     no_model(monkeypatch)
     r = route(message)
@@ -398,19 +398,8 @@ def test_the_model_being_down_gives_a_plain_error_and_the_chat_continues(session
 # ----------------------------------------------------------------------------------------------- roles, budget, privacy
 def test_a_role_without_the_skill_is_told_so_without_a_model_call(session, monkeypatch):
     no_model(monkeypatch)
-    out = turn(session, "Post a job for a Senior Python Developer in Dubai", role="account_manager")
-    assert isinstance(out, Refusal) and out.reason == "role" and "isn't available for your role" in out.reply
     admin_only = turn(session, "Who used the most AI tokens today?", role="user")
     assert isinstance(admin_only, Refusal) and admin_only.reason == "role"
-
-
-def test_a_tracker_only_role_can_still_use_the_tracker(session, monkeypatch, gateway):
-    gateway.responses["/api/tracker/follow-ups"] = [{"id": "x", "candidate": "Aisha", "due": "2026-11-06", "email": "a@x.com", "note": "call back"}]
-    seen = script(monkeypatch, [{"calls": [call("tracker_follow_ups")]}, {"text": "One follow-up is open."}])
-    out = turn(session, "What follow-ups are open?", role="account_manager")
-    assert seen[0]["tools"] == ["tracker_candidates", "tracker_follow_ups", "tracker_job_openings", "propose_tracker_add", "propose_tracker_change", "propose_follow_up_reminder"]
-    row = out.assistant_message.meta["cards"][0]["rows"][0]
-    assert row == {"candidate": "Aisha", "due": "2026-11-06", "note": "call back"}                       # ids and contact fields are left out
 
 
 def test_admin_insights_are_read_only_and_admin_only(session, monkeypatch, gateway):
@@ -1058,13 +1047,6 @@ def test_a_bad_selection_is_refused_with_the_reason_and_never_matches_everything
     assert gateway.posts == []
 
 
-def test_a_selection_from_a_role_without_matching_is_not_run(session, monkeypatch, gateway):
-    no_model(monkeypatch)
-    out = orchestrator.handle_turn(session, user=principal("account_manager"), message="Match IT", conversation_id=None,
-                                   selection={"kind": "match", "jd_id": UUID1, "categories": ["IT"], "max_cvs": 5})
-    assert (out.reason if isinstance(out, Refusal) else out.assistant_message.meta["specialist"]) in ("role", "tracker") and gateway.posts == []
-
-
 def test_the_conversation_from_the_transcript_stays_on_the_task_and_every_jd_row_is_choosable(session, monkeypatch, gateway):
     _setup_gateway(gateway)
     gateway.responses["/api/jd/jds"] = _jds(5, 5)
@@ -1269,13 +1251,14 @@ def test_the_model_itself_cannot_edit_a_job_through_the_create_path():
 
 def test_only_the_confirmed_tier_can_use_patch_put_and_the_changing_paths():
     for method, path in (("PATCH", f"/api/careers/admin/jobs/{JOB}/status"), ("PUT", "/api/admin/notice"), ("POST", f"/api/cv/{UUID1}/note"),
-                         ("POST", "/api/cv/upload-cv"), ("POST", "/api/tracker/follow-ups"), ("PATCH", "/api/tracker/follow-ups/abcdefgh-1"),
+                         ("POST", "/api/cv/upload-cv"),
                          ("POST", "/api/agents/admin/reset-requests/abcdefgh-1/approve")):
         ApiGateway.check(method, path, confirmed=True)
         with pytest.raises(ToolError):
             ApiGateway.check(method, path)
     for method, path in (("DELETE", "/api/admin/notice"), ("DELETE", f"/api/cv/{UUID1}"), ("PATCH", "/api/admin/users/abcdefgh"), ("POST", "/api/admin/users"),
-                         ("PUT", "/api/tracker/manager-settings/followup-email"), ("POST", f"/api/cv/{UUID1}/delete"), ("PATCH", "/api/tracker/admin/clear-team")):
+                         ("POST", f"/api/cv/{UUID1}/delete"),
+                         ("POST", "/api/tracker/follow-ups"), ("GET", "/api/tracker/follow-ups")):          # the tracker no longer exists: not reachable even when confirmed
         with pytest.raises(ToolError):
             ApiGateway.check(method, path, confirmed=True)
 
@@ -1288,54 +1271,13 @@ def test_no_confirmed_action_can_delete_and_every_executor_path_is_whitelisted(m
     samples = {
         "note.add": {"cv_id": UUID1, "name": "A", "note": "n"}, "job.status": {"job_id": JOB, "title": "T", "is_active": True},
         "job.edit": {"job_id": JOB, "changes": {"job_title": "New"}},
-        "tracker.create": {"resource": "follow-ups", "fields": {"client_name": "Acme", "next_follow_up_date": "2026-11-20"}},
-        "tracker.update": {"resource": "job-openings", "ref": "abcdefgh-1", "fields": {"status": "Closed"}},
-        "tracker.reminder": {"ref": "abcdefgh-1"}, "notice.set": {"message": "Maintenance tonight"},
+        "notice.set": {"message": "Maintenance tonight"},
         "tokens.decide": {"request_id": "abcdefgh-1", "username": "sara", "decision": "reject"},
         "cv.upload": {"ref": "a" * 32}, "jd.upload": {"ref": "a" * 32}}
     assert set(samples) == set(action_catalog.ACTIONS)
     for kind, payload in samples.items():
         assert action_catalog.ACTIONS[kind].run(gateway, payload, "faizan")
     assert {a[0] for a in gateway.acts} <= {"GET", "POST", "PATCH", "PUT"} and not [a for a in gateway.acts if a[0] == "DELETE"]
-
-
-def test_a_role_cannot_use_an_action_it_does_not_have(session, monkeypatch, gateway):
-    _note_gateway(gateway)
-    out = _propose_note(session, monkeypatch, gateway)
-    usage._busy.clear()
-    no_model(monkeypatch)
-    card = _card(out)
-    done = orchestrator.handle_turn(session, user=principal("account_manager"), message="Yes", conversation_id=out.conversation.id,
-                                    selection={"kind": "confirm", "action_id": card["id"]})
-    assert gateway.acts == [] and ("not allowed" in done.assistant_message.content or "isn't waiting" in done.assistant_message.content)
-
-
-def test_the_tracker_proposals_check_the_role_and_the_fields(session, monkeypatch, gateway):
-    script(monkeypatch, [{"calls": [call("propose_tracker_add", area="job-openings", details={"title": "Accountant"})]}, {"text": "No."}])
-    out = turn(session, "Add a job opening to the tracker called Accountant", role="evp")
-    assert out.assistant_message.meta["trace"][0]["ok"] is False and not out.assistant_message.meta["cards"]        # only managers and account managers
-    usage._busy.clear()
-    script(monkeypatch, [{"calls": [call("propose_tracker_add", area="follow-ups", details={"client_name": "Acme", "next_follow_up_date": "20/11/2026"})]}, {"text": "Bad date."}])
-    bad = turn(session, "Add a follow-up for Acme next on 20/11/2026", role="evp")
-    assert bad.assistant_message.meta["trace"][0]["ok"] is False
-    usage._busy.clear()
-    script(monkeypatch, [{"calls": [call("propose_tracker_add", area="follow-ups", details={"client_name": "Acme", "next_follow_up_date": "2026-11-20", "password": "x", "id": "z"})]},
-                         {"text": "Add it?"}])
-    good = turn(session, "Add a follow-up for Acme, next on 2026-11-20", role="evp")
-    assert _card(good)["payload"]["fields"] == {"client_name": "Acme", "next_follow_up_date": "2026-11-20"}        # unknown fields are dropped
-
-
-def test_tracker_rows_carry_a_ref_for_the_model_but_not_for_the_card(session, monkeypatch, gateway):
-    gateway.responses["/api/tracker/follow-ups"] = [{"id": "abcdefgh-1", "client_name": "Acme", "current_stage": "Feedback Pending", "email": "x@y.z"}]
-    gateway.responses["/api/tracker/candidate-rows"] = [{"candidate": {"id": "cand-1234567", "name": "Omar", "email": "o@x.com"},
-                                                         "application": {"id": "app-12345678", "status": "Interview", "position": "Analyst"}}]
-    seen = script(monkeypatch, [{"calls": [call("tracker_follow_ups"), call("tracker_candidates", "c2")]}, {"text": "Here they are."}])
-    out = turn(session, "Show the tracker follow-ups and candidates", role="manager")
-    cards = out.assistant_message.meta["cards"]
-    assert cards[0]["rows"] == [{"client_name": "Acme", "current_stage": "Feedback Pending"}]
-    assert cards[1]["rows"] == [{"name": "Omar", "status": "Interview", "position": "Analyst"}]
-    tool_text = " ".join(m["content"] for m in seen[1]["messages"] if m["role"] == "tool")
-    assert "abcdefgh-1" in tool_text and "app-12345678" in tool_text and "o@x.com" not in tool_text
 
 
 def test_the_admin_can_approve_a_waiting_request_from_the_chat_after_confirming(session, monkeypatch, gateway):
@@ -1393,7 +1335,7 @@ def test_attaching_a_cv_goes_to_the_candidates_skill_and_proposes_the_upload(ses
 
 
 @pytest.mark.parametrize("message,expected", [("Add a note to Aisha saying strong", "candidates"), ("Close the Finance Manager job", "jobs"),
-                                              ("Change the location of the Analyst job", "jobs"), ("Send a reminder for the Acme follow-up", "tracker"),
+                                              ("Change the location of the Analyst job", "jobs"),
                                               ("Is the system healthy?", "admin"), ("Approve the reset request", "admin"), ("Change the notice to say maintenance tonight", "admin"),
                                               ("Upload this CV", "candidates"), ("Save this job description", "jobs")])
 def test_the_new_requests_reach_the_right_skill(message, expected, monkeypatch):

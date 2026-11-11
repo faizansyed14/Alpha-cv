@@ -3,13 +3,13 @@
 Tools never touch the database or the vector store on their own. They call the application's own API, in-process, carrying the
 signed-in person's token. That gives Agentic mode, for free and without a second copy of any rule:
 
-* the same authentication, role checks (a tracker-only account still gets 403 on the CV endpoints) and row scoping
+* the same authentication, role checks (the same access rules as the person's own session) and row scoping
 * the same validation, rate limits and audit as the normal screens
 
 On top of that the gateway itself is a whitelist, in two tiers:
 
 * tools (the model's hands) can only GET, and POST the few paths listed in POST_PATHS (searches, a match run, creating a job posting);
-* changes (a note, a job's status, a tracker row, a notice, an upload, a token decision) go through ``act``, which only the
+* changes (a note, a job's status, a notice, an upload, a token decision) go through ``act``, which only the
   confirmed-action executor calls, after the person pressed Confirm on a card that was saved in their conversation. It may use
   POST, PATCH and PUT on the paths in ACTION_PATHS and nothing else.
 
@@ -35,7 +35,6 @@ GET_PATHS = tuple(re.compile(p) for p in (
     r"^/api/careers/admin/jobs$",
     rf"^/api/careers/admin/jobs/{_ID}/(?:applications|edit-data)$",
     rf"^/api/match/jobs/{_ID}$",
-    r"^/api/tracker/(?:candidate-rows|follow-ups|job-openings)$",
     r"^/api/agents/admin/usage$",
     r"^/api/agents/admin/reset-requests$",
     # read-only extras
@@ -43,7 +42,6 @@ GET_PATHS = tuple(re.compile(p) for p in (
     r"^/api/careers/admin/(?:jobs-trends|reports/weekly)$",
     r"^/api/(?:health|system-stats|database/status|notice)$",
     r"^/api/admin/users$",
-    r"^/api/tracker/(?:options|applications)$",
 ))
 POST_PATHS = tuple(re.compile(p) for p in (
     r"^/api/match$",
@@ -60,9 +58,6 @@ ACTION_PATHS = tuple((m, re.compile(p)) for m, p in (
     ("POST", r"^/api/jd/upload-jd$"),                                       # add a job description to the library
     ("PATCH", rf"^/api/careers/admin/jobs/{_ID}/status$"),                  # open or close a job posting
     ("POST", r"^/api/careers/admin/jobs/unified-update$"),                  # edit a job posting (job_id given)
-    ("POST", r"^/api/tracker/(?:job-openings|candidates|applications|follow-ups)$"),
-    ("PATCH", rf"^/api/tracker/(?:job-openings|candidates|applications|follow-ups)/{_ID}$"),
-    ("POST", rf"^/api/tracker/follow-ups/{_ID}/send-reminder$"),
     ("PUT", r"^/api/admin/notice$"),                                        # the notice every user sees
     ("POST", rf"^/api/agents/admin/reset-requests/{_ID}/(?:approve|reject)$"),
 ))
