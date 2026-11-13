@@ -249,7 +249,8 @@ class ParsingService:
             xml = zf.read("content.xml")
             if b"<!DOCTYPE" in xml[:4096].upper() or b"<!ENTITY" in xml.upper():       # a real ODT has neither; both are how XML bombs are built
                 raise ValueError("The document's XML declares entities, which is not allowed")
-            root = ET.fromstring(xml)  # nosec B314: DTDs and entities are refused just above
+            # DTDs and entities are refused just above, so this parse is safe.
+            root = ET.fromstring(xml)  # nosec B314
         ns = "{urn:oasis:names:tc:opendocument:xmlns:text:1.0}"
         lines = []
         for el in root.iter():

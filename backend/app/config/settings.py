@@ -23,7 +23,8 @@ class Settings(BaseSettings):
         default="development",
         validation_alias=AliasChoices("ENVIRONMENT", "NODE_ENV"),
     )
-    HOST: str = "0.0.0.0"
+    # The API runs in a container, where it must listen on every interface to be reachable; only the reverse proxy is published.
+    HOST: str = "0.0.0.0"  # nosec B104
     PORT: int = 8000
 
     # ---- Compute ----
