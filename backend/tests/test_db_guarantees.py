@@ -56,8 +56,13 @@ def test_the_migration_holds_the_same_lists_as_the_models():
     spec = importlib.util.spec_from_file_location("m0030", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert set(module.ROLES) == set(ALL_ROLES) and set(module.OTP_MODES) == set(OTP_MODES)
+    assert set(module.ROLES) == set(ALL_ROLES)
     assert set(module.LOCATIONS) == set(LOCATIONS) and set(module.LOCATION_ROLES) == set(LOCATION_ROLES)
+    # the second-step modes were widened later (migration 0031 replaced the constraint 0030 created, adding the authenticator app)
+    later = importlib.util.spec_from_file_location("m0031", os.path.join(os.path.dirname(path), "0031_authenticator_mfa.py"))
+    later_module = importlib.util.module_from_spec(later)
+    later.loader.exec_module(later_module)
+    assert set(later_module.NEW_MODES) == set(OTP_MODES)
 
 
 def test_the_storage_report_is_postgresql_only():

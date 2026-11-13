@@ -47,7 +47,33 @@ def _read(user: User) -> UserRead:
     return UserRead(
         id=user.id, username=user.username, role=user.role, is_active=user.is_active, email=user.email, location=user.location,
         otp_mode=normalize_otp_mode(getattr(user, "otp_mode", "real")),
+        totp_enrolled=bool(getattr(user, "totp_enrolled", False)),
     )
+
+def _forget_authenticator(user: User) -> None:
+    """Remove the authenticator secret: the person scans a new QR code at their next sign-in."""
+    user.totp_secret = None
+    user.totp_enrolled = False
+    user.totp_last_step = None
+
+
+@router.post("/users/{user_id}/reset-authenticator", response_model=UserRead)
+def reset_authenticator(user_id: str, actor: User = Depends(require_admin), session: Session = Depends(get_session)):
+    """For a lost or replaced phone: the account's authenticator secret is removed (and its sessions end), so the next sign-in shows a new
+    QR code to scan. The account stays on the authenticator."""
+    user = session.exec(select(User).where(User.id == user_id)).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if normalize_otp_mode(user.otp_mode) != "totp":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This account does not use an authenticator app.")
+    _forget_authenticator(user)
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    invalidate_user_tokens(user.username)
+    security_event("totp_reset", by=actor.username, user=user.username)
+    return _read(user)
+
 
 @router.get("/presence")
 def users_presence(_: User = Depends(require_admin)):
@@ -135,9 +161,14 @@ def update_user(user_id: str, data: UserUpdate, actor: User = Depends(require_ad
         user.password_hash = hash_password(data.password)
         credentials_changed = True
     if data.otp_mode:
-        # The MFA (second sign-in step): "captcha" or email code ("real"). An email code needs an address to send to.
+        # The MFA (second sign-in step): "captcha", email code ("real") or the authenticator app ("totp"). An email code needs an address to
+        # send to.
         if data.otp_mode == "real" and not (data.email or user.email):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This account has no email address, so a code cannot be sent to it.")
+        if data.otp_mode != normalize_otp_mode(user.otp_mode):
+            if normalize_otp_mode(user.otp_mode) == "totp":
+                credentials_changed = True                # leaving the authenticator: its sessions end
+            _forget_authenticator(user)                   # a different step: any authenticator secret goes, and a later setup starts fresh
         user.otp_mode = data.otp_mode
     if data.email is not None:
         email = str(data.email).strip().lower()

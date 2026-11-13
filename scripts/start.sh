@@ -58,14 +58,16 @@ if [ ! -f "$ENV_FILE" ]; then
   fi
   cp "$ENV_EXAMPLE" "$ENV_FILE"
   echo -e "${YELLOW}Created $ENV_FILE from $ENV_EXAMPLE.${NC}"
-  if grep -q "CHANGE_ME" "$ENV_FILE"; then
-    echo -e "${YELLOW}Fill in the CHANGE_ME values in $ENV_FILE (at least OPENAI_API_KEY and the secrets), then run this again.${NC}" >&2
+  if grep -v '^[[:space:]]*#' "$ENV_FILE" | grep -q "CHANGE_ME"; then
+    echo -e "${YELLOW}Fill in the CHANGE_ME values in $ENV_FILE (the secrets, the database, the API keys), then run this again.${NC}" >&2
     exit 1
   fi
 fi
 
-if [ "$MODE" = "prod" ] && grep -q "CHANGE_ME" "$ENV_FILE"; then
-  echo -e "${RED}Refusing to start: $ENV_FILE still contains CHANGE_ME placeholders.${NC}" >&2
+# Comment lines may mention CHANGE_ME; only a real setting with that value is a leftover placeholder.
+if [ "$MODE" = "prod" ] && grep -v '^[[:space:]]*#' "$ENV_FILE" | grep -q "CHANGE_ME"; then
+  echo -e "${RED}Refusing to start: $ENV_FILE still contains CHANGE_ME placeholders:${NC}" >&2
+  grep -n -v '^[[:space:]]*#' "$ENV_FILE" | grep "CHANGE_ME" | sed 's/=.*/=.../' >&2
   exit 1
 fi
 

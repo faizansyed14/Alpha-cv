@@ -17,11 +17,13 @@ interface AuthState {
 interface AuthActions {
   initFromStorage: () => Promise<void>;
   login: (email: string, password: string) => Promise<{ success: boolean; role?: Role; error?: string }>;
-  verifyPassword: (email: string, password: string) => Promise<{ success: boolean; requires_otp?: boolean; auth_mode?: 'none' | 'otp' | 'captcha'; error?: string }>;
+  verifyPassword: (email: string, password: string) => Promise<{ success: boolean; requires_otp?: boolean; auth_mode?: 'none' | 'otp' | 'captcha' | 'totp'; totp_enrolled?: boolean | null; error?: string }>;
   sendOTP: (email: string, password: string) => Promise<{ success: boolean; masked_email?: string; error?: string }>;
   verifyOTP: (email: string, otp: string) => Promise<{ success: boolean; role?: Role; error?: string }>;
   getCaptcha: (email: string, password: string) => Promise<{ success: boolean; captcha_id?: string; image?: string; error?: string }>;
   verifyCaptcha: (email: string, captchaId: string, answer: string) => Promise<{ success: boolean; role?: Role; error?: string }>;
+  totpSetup: (email: string, password: string) => Promise<{ success: boolean; qr?: string; secret?: string; error?: string }>;
+  verifyTotp: (email: string, password: string, code: string) => Promise<{ success: boolean; role?: Role; error?: string }>;
   logout: () => void;
   clearError: () => void;
 }
@@ -105,7 +107,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       if (response.success) {
         set({ loading: false, error: null });
         logger.info(`Password verified successfully. Requires OTP: ${response.requires_otp}, mode: ${response.auth_mode}`);
-        return { success: true, requires_otp: response.requires_otp, auth_mode: response.auth_mode };
+        return { success: true, requires_otp: response.requires_otp, auth_mode: response.auth_mode, totp_enrolled: response.totp_enrolled };
       } else {
         throw new Error('Password verification failed');
       }
@@ -194,6 +196,37 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || error.message || 'CAPTCHA verification failed';
       logger.error('CAPTCHA verification failed:', error);
+      set({ loading: false, error: errorMessage });
+      return { success: false, error: errorMessage };
+    }
+  },
+
+  totpSetup: async (email: string, password: string) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await api.totpSetup(email, password);
+      set({ loading: false, error: null });
+      return { success: true, qr: response.qr, secret: response.secret };
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.detail || error.message || 'Failed to start the authenticator setup';
+      logger.error('Authenticator setup failed:', error);
+      set({ loading: false, error: errorMessage });
+      return { success: false, error: errorMessage };
+    }
+  },
+
+  verifyTotp: async (email: string, password: string, code: string) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await api.verifyTotp(email, password, code);
+      setToken(response.access_token);
+      const user = await api.me(response.access_token);
+      set({ token: response.access_token, user, loading: false, error: null, authHydrated: true });
+      logger.info('Authenticator verification successful');
+      return { success: true, role: user.role };
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.detail || error.message || 'Authenticator verification failed';
+      logger.error('Authenticator verification failed:', error);
       set({ loading: false, error: errorMessage });
       return { success: false, error: errorMessage };
     }

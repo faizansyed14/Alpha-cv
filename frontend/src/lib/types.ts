@@ -397,8 +397,18 @@ export interface VerifyPasswordResponse {
   success: boolean;
   requires_otp: boolean;  // True for regular users, False for admin
   message: string;
-  /** Second factor the client should present: "none" (admin), "otp" (email), or "captcha". */
-  auth_mode?: 'none' | 'otp' | 'captcha';
+  /** Second factor the client should present: "none" (admin), "otp" (email), "captcha" or "totp" (authenticator app). */
+  auth_mode?: 'none' | 'otp' | 'captcha' | 'totp';
+  /** For "totp": false = the app is not set up yet (show the QR code first), true = just ask for the code. */
+  totp_enrolled?: boolean | null;
+}
+
+export interface TotpSetupResponse {
+  success: boolean;
+  qr: string;        // data:image/svg+xml;base64,... the QR code to scan
+  secret: string;    // the same secret in groups of four, to type into the app by hand
+  issuer: string;
+  account: string;
 }
 
 export interface CaptchaResponse {
@@ -431,7 +441,9 @@ export interface AdminUser {
   role: Role;
   is_active: boolean;
   email?: string;
-  otp_mode?: 'real' | 'captcha';
+  otp_mode?: 'real' | 'captcha' | 'totp';
+  /** On the authenticator: the person has finished setting the app up */
+  totp_enrolled?: boolean;
   location?: string | null;
 }
 
@@ -453,7 +465,7 @@ export interface CreateUserRequest {
   password: string;
   email: string;   // what the person signs in with
   role: Role;
-  otp_mode?: 'real' | 'captcha';
+  otp_mode?: 'real' | 'captcha' | 'totp';
   /** Required for recruiters, recruitment managers and sales managers; chosen once, here */
   location?: string;
 }
@@ -463,7 +475,7 @@ export interface UpdateUserRequest {
   email?: string;
   role?: Role;
   is_active?: boolean;
-  otp_mode?: 'real' | 'captcha';
+  otp_mode?: 'real' | 'captcha' | 'totp';
   /** Only for an account that has no location yet; it cannot be changed afterwards */
   location?: string;
 }

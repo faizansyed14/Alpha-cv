@@ -132,6 +132,12 @@ class Settings(BaseSettings):
     OTP_MAX_SENDS_PER_WINDOW: int = 5
     OTP_SEND_WINDOW_SECONDS: int = 900
 
+    # ---- Authenticator app (TOTP: Microsoft Authenticator, Google Authenticator ...), another second factor ----
+    TOTP_ISSUER: str = "AlphaCV"            # the name the app shows above the 6-digit code
+    # Encrypts the authenticator secrets stored in the database. Empty = derived from SECRET_KEY (then changing SECRET_KEY makes every
+    # authenticator secret unreadable and each person must be set up again). Set it to keep them when SECRET_KEY is rotated.
+    TOTP_ENCRYPTION_KEY: str = ""
+
     # ---- Image CAPTCHA (alternative second factor to email OTP) ----
     CAPTCHA_LENGTH: int = 6
     CAPTCHA_TTL_SECONDS: int = 300

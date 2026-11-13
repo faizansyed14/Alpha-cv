@@ -6,7 +6,7 @@ import uuid
 
 from app.security.rbac_rules import ALL_ROLES, LOCATION_ROLES, LOCATIONS
 
-OTP_MODES = ("real", "captcha")
+OTP_MODES = ("real", "captcha", "totp")
 
 
 def _in(column: str, values) -> str:
@@ -33,7 +33,13 @@ class User(SQLModel, table=True):
     # Second-factor auth mode (admin-controlled):
     # - real:    generate a random OTP and email it
     # - captcha: show an image CAPTCHA instead of email OTP (no email needed)
+    # - totp:    a 6-digit code from an authenticator app (Microsoft Authenticator ...); the secret below is set up at the first sign-in
     otp_mode: str = Field(default="real")
+    # The authenticator secret, ENCRYPTED (app/security/totp.py). Empty until the person starts the setup; the setup is finished (and
+    # totp_enrolled becomes true) with the first correct code. totp_last_step is the time step of the last code accepted: a code works once.
+    totp_secret: Optional[str] = Field(default=None)
+    totp_enrolled: bool = Field(default=False)
+    totp_last_step: Optional[int] = Field(default=None)
     # Role is plain text. "admin" is the only role with extra powers (users, agents, monitoring, bug reports, agent usage);
     # every other role (see app/security/rbac_rules.py) has exactly the same access.
     role: str = Field(default="user")

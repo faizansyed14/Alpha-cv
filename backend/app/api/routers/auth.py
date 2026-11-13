@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
-from sqlalchemy import func
+from sqlalchemy import func, or_, update as sa_update
 from sqlmodel import Session, select
 
 from app.config.settings import is_otp_email_sending_disabled, settings
@@ -20,6 +20,7 @@ from app.schemas.auth import (
     LoginRequest, MeRead, TokenResponse,
     SendOTPRequest, VerifyOTPRequest, VerifyPasswordRequest, VerifyPasswordResponse, OTPResponse,
     CaptchaRequest, CaptchaResponse, VerifyCaptchaRequest,
+    TotpSetupRequest, TotpSetupResponse, VerifyTotpRequest,
 )
 import logging
 
@@ -30,6 +31,7 @@ from app.security.logsafe import mask_email, security_event
 from app.integrations.email.otp_service import get_otp_service
 from app.integrations.email.email_otp_service import get_email_otp_service
 from app.security.captcha import get_captcha_service
+from app.security import totp as totp_factor
 from app.services.auth_mode import auth_mode_for_user
 from app.security.login_guard import check_lockout, record_failure, reset
 from app.api.middleware.rate_limiter import rate_limiter
@@ -171,7 +173,18 @@ def verify_password_endpoint(data: VerifyPasswordRequest, request: Request, sess
         
         # Every account needs a second factor; auth_mode_for_user() says which one this account uses.
 
-        mode = auth_mode_for_user(user)  # "otp" or "captcha"
+        mode = auth_mode_for_user(user)  # "otp", "captcha" or "totp"
+        if mode == "totp":
+            enrolled = bool(user.totp_enrolled)
+            logger.info(f"Password verified for {mask_email(data.email)} - authenticator code required (set up: {enrolled})")
+            return VerifyPasswordResponse(
+                success=True,
+                requires_otp=True,
+                message=("Password verified. Enter the 6-digit code from your authenticator app." if enrolled
+                         else "Password verified. Set up your authenticator app to continue."),
+                auth_mode="totp",
+                totp_enrolled=enrolled,
+            )
         if mode == "captcha":
             logger.info(f"Password verified for regular user: {mask_email(data.email)} - CAPTCHA required")
             return VerifyPasswordResponse(
@@ -261,6 +274,11 @@ async def send_otp(data: SendOTPRequest, request: Request, session: Session = De
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="This account uses CAPTCHA verification. Use the CAPTCHA flow."
+            )
+        if auth_mode_for_user(user) == "totp":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This account uses an authenticator app. No code is emailed."
             )
 
         otp_service = get_otp_service()
@@ -434,7 +452,7 @@ def get_captcha(data: CaptchaRequest, request: Request, session: Session = Depen
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     if auth_mode_for_user(user) != "captcha":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This account uses email OTP, not CAPTCHA")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This account does not use the CAPTCHA")
 
     reset(data.email, rate_limiter.get_client_ip(request))
     try:
@@ -487,6 +505,93 @@ def verify_captcha(data: VerifyCaptchaRequest, request: Request, session: Sessio
     reset(data.email, rate_limiter.get_client_ip(request))
     token = create_access_token(sub=user.username, role=user.role)
     security_event("login_ok", factor="captcha", user=user.username, role=user.role, ip=rate_limiter.get_client_ip(request))
+    return TokenResponse(access_token=token, token_type="bearer", username=user.username, role=user.role)
+
+
+def _totp_account(session: Session, request: Request, email: str, password: str, step: str) -> User:
+    """The account for an authenticator request: not locked out, the password is right and the account uses the authenticator.
+    The same lockout and the same generic answers as every other sign-in step."""
+    client_ip = rate_limiter.get_client_ip(request)
+    locked, retry_after = check_lockout(email, client_ip)
+    if locked:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Please try again later.",
+            headers={"Retry-After": str(retry_after or settings.LOGIN_LOCKOUT_SECONDS)},
+        )
+    user = _find_user(session, email)
+    if not user or not user.is_active:
+        burn_password_check(password)
+    if not user or not user.is_active or not verify_password_hash(password, user.password_hash):
+        record_failure(email, client_ip)
+        security_event("login_failed", logging.WARNING, reason=f"totp_{step}_bad_credentials", account=mask_email(email), ip=client_ip)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if auth_mode_for_user(user) != "totp":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This account does not use an authenticator app")
+    return user
+
+
+@router.post("/totp/setup", response_model=TotpSetupResponse)
+def totp_setup(data: TotpSetupRequest, request: Request, session: Session = Depends(get_session)) -> TotpSetupResponse:
+    """The QR code for setting up the authenticator app (after the password check), shown at the first sign-in of an account on the
+    authenticator. Asking again before the first code is accepted shows the same QR code, so a refresh does not invalidate a scan.
+    Once the setup is finished this refuses: only the admin can reset an account (Users page), e.g. after a lost phone."""
+    user = _totp_account(session, request, data.email, data.password, "setup")
+    if user.totp_enrolled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="The authenticator app is already set up. If you lost it, ask the administrator to reset it.")
+    secret = totp_factor.decrypt_secret(user.totp_secret)
+    if not secret:
+        secret = totp_factor.new_secret()
+        # only the first of two simultaneous requests stores its secret; the other shows that one
+        session.execute(sa_update(User).where(User.id == user.id, or_(User.totp_secret.is_(None), User.totp_secret == user.totp_secret))
+                        .where(User.totp_enrolled.is_(False)).values(totp_secret=totp_factor.encrypt_secret(secret)))
+        session.commit()
+        stored = session.exec(select(User.totp_secret).where(User.id == user.id)).first()
+        secret = totp_factor.decrypt_secret(stored) or secret
+    account = user.email or user.username
+    security_event("totp_setup_shown", user=user.username, ip=rate_limiter.get_client_ip(request))
+    return TotpSetupResponse(
+        success=True,
+        qr=totp_factor.qr_data_url(totp_factor.provisioning_uri(secret, account)),
+        secret=totp_factor.grouped(secret),
+        issuer=settings.TOTP_ISSUER,
+        account=account,
+    )
+
+
+@router.post("/totp/verify", response_model=TokenResponse)
+def verify_totp(data: VerifyTotpRequest, request: Request, session: Session = Depends(get_session)) -> TokenResponse:
+    """Check the 6-digit code from the authenticator app and sign the user in. The first correct code also finishes the setup.
+    A code works once (its time step is recorded), and wrong codes count towards the same lockout as wrong passwords."""
+    client_ip = rate_limiter.get_client_ip(request)
+    user = _totp_account(session, request, data.email, data.password, "verify")
+    secret = totp_factor.decrypt_secret(user.totp_secret)
+    if not secret:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The authenticator app is not set up yet. Start the setup first.")
+    step = totp_factor.matching_step(secret, data.code)
+    accepted = False
+    if step is not None:
+        # atomic: of two requests with the same code only one changes a row, the other is a replay
+        result = session.execute(sa_update(User).where(User.id == user.id, or_(User.totp_last_step.is_(None), User.totp_last_step < step))
+                                 .values(totp_last_step=step, totp_enrolled=True))
+        session.commit()
+        accepted = result.rowcount == 1
+    if not accepted:
+        record_failure(data.email, client_ip)
+        security_event("login_failed", logging.WARNING, reason="bad_totp" if step is None else "totp_replayed", account=mask_email(data.email), ip=client_ip)
+        if step is not None:
+            # The code is right but was already used (the app shows the same 6 digits for up to 30 seconds): say so, so nobody thinks the
+            # setup is broken. Only someone who knows the password can see this answer, and a used code is worth nothing to them.
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="That code was already used. Wait for the next code (it changes every 30 seconds) and enter the new one.")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired code")
+
+    reset(data.email, client_ip)
+    token = create_access_token(sub=user.username, role=user.role)
+    if not user.totp_enrolled:
+        security_event("totp_enrolled", user=user.username, ip=client_ip)
+    security_event("login_ok", factor="totp", user=user.username, role=user.role, ip=client_ip)
     return TokenResponse(access_token=token, token_type="bearer", username=user.username, role=user.role)
 
 

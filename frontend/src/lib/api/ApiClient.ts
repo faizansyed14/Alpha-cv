@@ -26,6 +26,7 @@ import {
   LoginResponse,
   UserProfile,
   VerifyPasswordResponse,
+  TotpSetupResponse,
   OTPResponse,
   CaptchaResponse,
   AdminUser,
@@ -453,6 +454,18 @@ export class ApiClient {
     return response.data;
   }
 
+  /** The QR code for setting up the authenticator app (after the password check). */
+  async totpSetup(email: string, password: string): Promise<TotpSetupResponse> {
+    const response = await this.client.post<TotpSetupResponse>('/api/auth/totp/setup', { email, password }, { timeout: 15000 });
+    return response.data;
+  }
+
+  /** Sign in with the 6-digit code from the authenticator app (the first correct code also finishes the setup). */
+  async verifyTotp(email: string, password: string, code: string): Promise<LoginResponse> {
+    const response = await this.client.post<LoginResponse>('/api/auth/totp/verify', { email, password, code }, { timeout: 10000 });
+    return response.data;
+  }
+
   // Admin methods
   async listUsers(token: string): Promise<AdminUser[]> {
     const response = await this.client.get<AdminUser[]>('/api/admin/users', {
@@ -474,6 +487,16 @@ export class ApiClient {
 
   async updateUser(token: string, id: string, body: UpdateUserRequest): Promise<AdminUser> {
     const response = await this.client.patch<AdminUser>(`/api/admin/users/${id}`, body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return response.data;
+  }
+
+  /** For a lost phone: the account's authenticator is removed; the next sign-in shows a new QR code. */
+  async resetAuthenticator(token: string, id: string): Promise<AdminUser> {
+    const response = await this.client.post<AdminUser>(`/api/admin/users/${id}/reset-authenticator`, {}, {
       headers: {
         Authorization: `Bearer ${token}`,
       },

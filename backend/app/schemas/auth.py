@@ -39,8 +39,10 @@ class VerifyPasswordResponse(BaseModel):
     success: bool
     requires_otp: bool  # True for regular users, False for admin
     message: str
-    # Second factor the client should present: "none" (admin), "otp" (email), or "captcha".
+    # Second factor the client should present: "none" (admin), "otp" (email), "captcha" or "totp" (authenticator app).
     auth_mode: str = "none"
+    # For "totp": false = the person has not set the app up yet (the next step shows the QR code), true = just ask for the code.
+    totp_enrolled: Optional[bool] = None
 
 class SendOTPRequest(_SignInBody):
     email: str = Field(..., max_length=320)
@@ -69,6 +71,23 @@ class VerifyCaptchaRequest(_SignInBody):
     answer: str = Field(..., max_length=32)
     fingerprint: str = Field("", max_length=256)
 
+# ---- Authenticator app (TOTP) ----
+class TotpSetupRequest(_SignInBody):
+    email: str = Field(..., max_length=320)
+    password: str = Field(..., max_length=256)  # verified before the QR code is shown
+
+class TotpSetupResponse(BaseModel):
+    success: bool
+    qr: str             # data:image/svg+xml;base64,... the QR code to scan
+    secret: str         # the same secret in groups of four, to type into the app by hand
+    issuer: str
+    account: str
+
+class VerifyTotpRequest(_SignInBody):
+    email: str = Field(..., max_length=320)
+    password: str = Field(..., max_length=256)  # a code alone proves nothing (any account has one), so the password is checked with it
+    code: str = Field(..., max_length=16)
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -89,6 +108,7 @@ class UserRead(BaseModel):
     email: Optional[str] = None
     otp_mode: str = "real"
     location: Optional[str] = None
+    totp_enrolled: bool = False     # on the authenticator: has the person finished setting the app up
 
 class MeRead(BaseModel):
     """What /api/auth/me tells the page about whoever is signed in. No email: nothing in the app needs it, and it should not travel
@@ -103,7 +123,7 @@ class UserCreate(BaseModel):
     username: str = Field(..., min_length=2, max_length=64)
     password: str = Field(..., max_length=256)
     email: EmailStr   # what the person signs in with: required, and one account per address
-    otp_mode: str = Field(default="real", pattern="^(real|captcha)$")
+    otp_mode: str = Field(default="real", pattern="^(real|captcha|totp)$")
     # Roles (see app/security/rbac_rules.py): user = recruiter, manager = recruitment manager, evp, account_manager = sales manager.
     # All of them have the same access; only the admin (never created here) can manage users, agents, monitoring and bug reports.
     role: str = Field(default="user", pattern=ROLE_PATTERN)
@@ -135,7 +155,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     password: Optional[str] = Field(default=None, max_length=256)
     email: Optional[EmailStr] = None
-    otp_mode: Optional[str] = Field(default=None, pattern="^(real|captcha)$")
+    otp_mode: Optional[str] = Field(default=None, pattern="^(real|captcha|totp)$")
     role: Optional[str] = Field(default=None, pattern=ROLE_PATTERN)
     is_active: Optional[bool] = None
     # Only accepted for an account that has no location yet (an account made before locations existed). Once set it cannot be changed.

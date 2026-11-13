@@ -8,7 +8,9 @@ ARG PYTHON_IMAGE=python:3.12-slim
 
 # ---- build: resolve the pinned dependencies into /opt/venv ---------------------------------------------------------
 FROM ${PYTHON_IMAGE} AS build
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+# A dropped connection during the long install used to end the build with "No matching distribution ... (from versions: none)":
+# retry more often and wait longer before giving up on the package index.
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_RETRIES=10 PIP_DEFAULT_TIMEOUT=100
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /src

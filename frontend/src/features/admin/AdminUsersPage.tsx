@@ -76,6 +76,7 @@ export default function AdminUsersPage() {
   const [editUser, setEditUser] = useState<AdminUser | null>(null);
   const [editForm, setEditForm] = useState<UpdateUserRequest>({});
   const [editLoading, setEditLoading] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
 
   // Notice popup management state
@@ -243,6 +244,21 @@ export default function AdminUsersPage() {
       await fetchUsers();
     } catch (err: any) {
       setError(err.message || 'Failed to deactivate user');
+    }
+  };
+
+  const handleResetAuthenticator = async (u: AdminUser) => {
+    if (!token || resetting) return;
+    if (!window.confirm(`Reset the authenticator for ${u.username}? Their current sessions end, and a new QR code is shown at their next sign-in.`)) return;
+    setResetting(true);
+    try {
+      const updated = await api.resetAuthenticator(token, u.id);
+      setEditUser((current) => (current && current.id === u.id ? { ...current, ...updated } : current));
+      await fetchUsers();
+    } catch (err: any) {
+      setError(errText(err, 'Failed to reset the authenticator'));
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -573,6 +589,11 @@ export default function AdminUsersPage() {
                       CAPTCHA mode shows an image challenge after the password, no code is emailed.
                     </p>
                   )}
+                  {createForm.otp_mode === 'totp' && (
+                    <p className="text-xs text-amber-700">
+                      At the first sign-in the person scans a QR code with Microsoft Authenticator. No code is emailed.
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-1.5">
@@ -627,6 +648,7 @@ export default function AdminUsersPage() {
                   >
                     <option value="real">Email OTP</option>
                     <option value="captcha">CAPTCHA (image, no email)</option>
+                    <option value="totp">Authenticator app (Microsoft Authenticator)</option>
                   </select>
                 </div>
 
@@ -679,6 +701,11 @@ export default function AdminUsersPage() {
                   {(editForm.otp_mode || editUser.otp_mode) === 'captcha' && (
                     <p className="text-xs text-amber-700">
                       CAPTCHA mode shows an image challenge after the password, no code is emailed.
+                    </p>
+                  )}
+                  {(editForm.otp_mode || editUser.otp_mode) === 'totp' && (
+                    <p className="text-xs text-amber-700">
+                      The authenticator app asks for a 6-digit code after the password, no code is emailed.
                     </p>
                   )}
                 </div>
@@ -748,9 +775,29 @@ export default function AdminUsersPage() {
                   >
                     <option value="captcha">CAPTCHA (image, no email)</option>
                     <option value="real">Email OTP</option>
+                    <option value="totp">Authenticator app (Microsoft Authenticator)</option>
                   </select>
-                  {(editForm.otp_mode || editUser.otp_mode) !== 'captcha' && !(editForm.email ?? editUser.email) && (
+                  {(editForm.otp_mode || editUser.otp_mode) === 'real' && !(editForm.email ?? editUser.email) && (
                     <p className="text-xs text-amber-700">Email OTP needs an email address on the account.</p>
+                  )}
+                  {editUser.otp_mode === 'totp' && (editForm.otp_mode === undefined || editForm.otp_mode === 'totp') && (
+                    <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                      <p className="text-xs text-gray-600">
+                        {editUser.totp_enrolled
+                          ? 'The authenticator app is set up on this account.'
+                          : 'Not set up yet: the QR code appears at their next sign-in.'}
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        loading={resetting}
+                        onClick={() => handleResetAuthenticator(editUser)}
+                        title="For a lost or replaced phone: removes the current authenticator so a new QR code is shown at the next sign-in"
+                      >
+                        Reset authenticator
+                      </Button>
+                    </div>
                   )}
                 </div>
                 {editUser.role !== 'admin' && (

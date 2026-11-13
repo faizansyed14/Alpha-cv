@@ -25,11 +25,20 @@
 # notes at the bottom of this file for how to harden them later).
 # =============================================================================
 
+# Every container's log is capped: Docker keeps container output forever by default, and nginx also copies each request to stdout, so over
+# months the logs would fill the disk. 3 files of 10 MB per container is about 30 MB, and the newest lines are always kept.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   # ---------------------------------------------------------------------------
   # Backend (FastAPI)
   # ---------------------------------------------------------------------------
   backend:
+    logging: *default-logging
     image: alpha-backend:prod
     build:
       context: ./backend
@@ -73,6 +82,7 @@ services:
   # CPU-bound Hungarian/cosine scoring never runs inside the API process.
   # Scale with `--scale match-worker=N` once the host has spare cores.
   match-worker:
+    logging: *default-logging
     image: alpha-backend:prod
     pull_policy: never
     command: ["python", "-m", "app.jobs.match_worker"]
@@ -125,6 +135,7 @@ services:
   # (the one genuinely CPU-hungry job) still gets its own dedicated
   # match-worker container above.
   background-worker:
+    logging: *default-logging
     image: alpha-backend:prod
     pull_policy: never
     command: ["python", "-m", "app.jobs.background_worker"]
@@ -160,6 +171,7 @@ services:
   # and the workers call it over the internal network, so the backend image has no ML runtime and the model sits in RAM once.
   # ---------------------------------------------------------------------------
   model-server:
+    logging: *default-logging
     image: alpha-model-server:prod
     build:
       context: ./backend/model_server
@@ -183,6 +195,7 @@ services:
   # Frontend (Next.js)
   # ---------------------------------------------------------------------------
   frontend:
+    logging: *default-logging
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -225,6 +238,7 @@ services:
   # Qdrant (vector store)
   # ---------------------------------------------------------------------------
   qdrant:
+    logging: *default-logging
     image: qdrant/qdrant:v1.12.4
     volumes:
       - qdrant_data:/qdrant/storage
@@ -250,6 +264,7 @@ services:
   # Redis (cache, rate-limit state, OTP, queue broker)
   # ---------------------------------------------------------------------------
   redis:
+    logging: *default-logging
     image: redis:7-alpine
     volumes:
       - redis_data:/data
@@ -281,6 +296,7 @@ services:
   # Nginx (only service that publishes ports; DOMAIN comes from .env.prod)
   # ---------------------------------------------------------------------------
   nginx:
+    logging: *default-logging
     image: nginx:alpine
     ports:
       - "80:80"

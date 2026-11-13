@@ -81,12 +81,16 @@ export const api = {
   verifyOTP: (email: string, otp: string) => RequestRetryHandler.withRetry(() => apiClient.verifyOTP(email, otp)),
   getCaptcha: (email: string, password: string) => RequestRetryHandler.withRetry(() => apiClient.getCaptcha(email, password)),
   verifyCaptcha: (email: string, captchaId: string, answer: string) => RequestRetryHandler.withRetry(() => apiClient.verifyCaptcha(email, captchaId, answer)),
+  totpSetup: (email: string, password: string) => RequestRetryHandler.withRetry(() => apiClient.totpSetup(email, password)),
+  // not retried: a code works once, so a repeated request would be refused as a replay
+  verifyTotp: (email: string, password: string, code: string) => apiClient.verifyTotp(email, password, code),
   logout: (token: string) => apiClient.logout(token),
 
   // Admin Users (admin only)
   listUsers: (token: string) => RequestRetryHandler.withRetry(() => apiClient.listUsers(token)),
   createUser: (token: string, body: CreateUserRequest) => RequestRetryHandler.withRetry(() => apiClient.createUser(token, body)),
   updateUser: (token: string, id: string, body: UpdateUserRequest) => RequestRetryHandler.withRetry(() => apiClient.updateUser(token, id, body)),
+  resetAuthenticator: (token: string, id: string) => RequestRetryHandler.withRetry(() => apiClient.resetAuthenticator(token, id)),
   deleteUser: (token: string, id: string) => RequestRetryHandler.withRetry(() => apiClient.deleteUser(token, id)),
   getUsersPresence: (token: string) => RequestRetryHandler.withRetry(() => apiClient.getUsersPresence(token)),
 

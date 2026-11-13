@@ -19,14 +19,14 @@ const GRAIN =
 export default function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { verifyPassword, sendOTP, verifyOTP, getCaptcha, verifyCaptcha, login, loading, error, clearError } = useAuthStore();
+  const { verifyPassword, sendOTP, verifyOTP, getCaptcha, verifyCaptcha, totpSetup, verifyTotp, login, loading, error, clearError } = useAuthStore();
 
   const continueAfterAuth = () => {
     const from = safeRedirectPath(searchParams.get('from'));
     router.push(from ?? '/dashboard');
   };
 
-  const [step, setStep] = useState<'password' | 'otp' | 'captcha'>('password');
+  const [step, setStep] = useState<'password' | 'otp' | 'captcha' | 'totp'>('password');
   const [otpSent, setOtpSent] = useState(false);
   const [otpIssuedForKey, setOtpIssuedForKey] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string>('');
@@ -38,6 +38,14 @@ export default function LoginForm() {
   const [captchaAnswer, setCaptchaAnswer] = useState<string>('');
   const [loadingCaptcha, setLoadingCaptcha] = useState(false);
   const [submittingCaptcha, setSubmittingCaptcha] = useState(false);
+
+  // Authenticator app (Microsoft Authenticator ...): the QR code is shown only until the first code is accepted.
+  const [totpEnrolled, setTotpEnrolled] = useState(true);
+  const [totpQr, setTotpQr] = useState('');
+  const [totpSecret, setTotpSecret] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  const [loadingTotp, setLoadingTotp] = useState(false);
+  const [submittingTotp, setSubmittingTotp] = useState(false);
 
   const [formData, setFormData] = useState({ email: '', password: '', otp: '' });
   const [formError, setFormError] = useState<string | null>(null);
@@ -88,6 +96,12 @@ export default function LoginForm() {
           setFormError(null);
           await loadCaptcha();
           setStep('captcha');
+        } else if (result.auth_mode === 'totp') {
+          setFormError(null);
+          setTotpCode('');
+          const enrolled = result.totp_enrolled !== false;
+          setTotpEnrolled(enrolled);
+          if (enrolled || (await loadTotpSetup())) setStep('totp');
         } else {
           setFormError(null);
           const key = `${formData.email}::${formData.password}`;
@@ -124,6 +138,43 @@ export default function LoginForm() {
       }
     } finally {
       setLoadingCaptcha(false);
+    }
+  };
+
+  /** The QR code for a first-time setup. True when it is on screen. */
+  const loadTotpSetup = async (): Promise<boolean> => {
+    setLoadingTotp(true);
+    try {
+      const res = await totpSetup(formData.email, formData.password);
+      if (res && res.success && res.qr) {
+        setTotpQr(res.qr);
+        setTotpSecret(res.secret || '');
+        return true;
+      }
+      setFormError(res?.error || 'Failed to start the authenticator setup');
+      return false;
+    } finally {
+      setLoadingTotp(false);
+    }
+  };
+
+  const handleVerifyTotp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submittingTotp) return;
+    if (totpCode.length !== 6) {
+      setFormError('Enter the 6-digit code from your authenticator app');
+      return;
+    }
+    try {
+      setSubmittingTotp(true);
+      const res = await verifyTotp(formData.email, formData.password, totpCode);
+      if (res && res.success) {
+        continueAfterAuth();
+      } else {
+        setTotpCode('');
+      }
+    } finally {
+      setSubmittingTotp(false);
     }
   };
 
@@ -181,13 +232,23 @@ export default function LoginForm() {
 
   const displayError = formError || error;
   const title =
-    step === 'otp' ? 'Check your email' : step === 'captcha' ? 'Security check' : 'Welcome back';
+    step === 'otp'
+      ? 'Check your email'
+      : step === 'captcha'
+        ? 'Security check'
+        : step === 'totp'
+          ? totpEnrolled ? 'Authenticator code' : 'Set up your authenticator'
+          : 'Welcome back';
   const subtitle =
     step === 'otp'
       ? `We sent a 6-digit code to ${userEmail || 'your email'}.`
       : step === 'captcha'
         ? 'Enter the characters shown to confirm it is you.'
-        : 'Sign in to your recruitment workspace.';
+        : step === 'totp'
+          ? totpEnrolled
+            ? 'Open Microsoft Authenticator and enter the 6-digit code shown for AlphaCV.'
+            : 'Scan the QR code with Microsoft Authenticator, then enter the 6-digit code it shows.'
+          : 'Sign in to your recruitment workspace.';
 
   return (
     <div className="grid min-h-screen bg-canvas lg:grid-cols-[1.05fr_minmax(0,1fr)]">
@@ -414,6 +475,78 @@ export default function LoginForm() {
                       Resend code
                     </button>
                   </div>
+                </form>
+              )}
+
+              {step === 'totp' && (
+                <form onSubmit={handleVerifyTotp} className="space-y-5">
+                  {!totpEnrolled && (
+                    <div className="space-y-3">
+                      <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-600">
+                        <li>Open <span className="font-medium text-slate-800">Microsoft Authenticator</span> and tap <span className="font-medium text-slate-800">+</span>.</li>
+                        <li>Choose <span className="font-medium text-slate-800">Other account</span> and scan this code.</li>
+                      </ol>
+                      <div className="flex h-52 items-center justify-center rounded-xl border border-slate-200 bg-white p-3">
+                        {loadingTotp || !totpQr ? (
+                          <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-navy-600" />
+                        ) : (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={totpQr} alt="QR code for your authenticator app" className="h-44 w-44" />
+                        )}
+                      </div>
+                      {totpSecret && (
+                        <p className="text-center text-xs leading-relaxed text-slate-500">
+                          Cannot scan? Choose &ldquo;Enter code manually&rdquo; and type this key:
+                          <span className="mt-1 block select-all break-all font-mono text-[0.8rem] font-semibold tracking-wider text-slate-800">{totpSecret}</span>
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <label htmlFor="totp" className="block text-sm font-medium text-slate-700">
+                      6-digit code
+                    </label>
+                    <input
+                      id="totp"
+                      name="totp"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      value={totpCode}
+                      onChange={(e) => {
+                        setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                        if (error) clearError();
+                        if (formError) setFormError(null);
+                      }}
+                      placeholder="000000"
+                      disabled={loading}
+                      required
+                      maxLength={6}
+                      pattern="[0-9]{6}"
+                      className={`${fieldClass} text-center text-xl font-semibold tracking-[0.5em]`}
+                    />
+                  </div>
+
+                  <p className="text-xs leading-relaxed text-slate-400">
+                    Each code works once. If you just used it, wait for the next one (it changes every 30 seconds).
+                  </p>
+
+                  <Button type="submit" variant="primary" size="lg" className="w-full" loading={loading || submittingTotp}>
+                    {totpEnrolled ? 'Verify & sign in' : 'Finish setup & sign in'}
+                  </Button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep('password');
+                      setTotpCode('');
+                      setFormError(null);
+                    }}
+                    className="flex w-full items-center justify-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-slate-800"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" /> Back
+                  </button>
                 </form>
               )}
 
