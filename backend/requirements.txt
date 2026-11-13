@@ -42,7 +42,7 @@ pyotp==2.10.0  # authenticator-app (TOTP) second factor
 qrcode==8.2  # the QR code shown when an authenticator app is set up (SVG, no image library needed)
 psutil==5.9.5
 redis==5.0.1
-boto3==1.43.120  # only used when STORAGE_BACKEND=s3
+boto3==1.43.127  # only used when STORAGE_BACKEND=s3
 aiohttp==3.14.5  # numerous CVE fixes
 httpx==0.27.2
 
