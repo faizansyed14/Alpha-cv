@@ -54,6 +54,26 @@ LINKEDIN = Specialist(
           "generate_linkedin_post once, passing tone or length wishes in request. The post appears on screen: do not repeat it; offer a shorter or friendlier version."),
     examples=("Write a LinkedIn post for the IT Engineer job", "A short, friendly LinkedIn post for the Senior .NET role"))
 
+TRACKER = Specialist(
+    name="tracker", label="Requirements tracker", description="See and update requirements, closures, selections and joining, and the analytics.",
+    roles=CORE, tool_names=("list_requirements", "list_closures", "get_requirement", "tracker_analytics", "list_selections", "propose_requirement_create",
+                            "propose_requirement_update", "propose_selection_update"),
+    task=("help with the requirements tracker. A requirement is a client's request for a position: it has recruiters, a recruitment manager, a sales manager, dates, "
+          "a status (open, submitted, hold, closed, canceled) and comments. Closing one moves it to the Closures page and adds a row on Selections and joining, where "
+          "the selected candidate and Offer Pending, Offer Released, Joined or Backed Out are recorded. "
+          "What each person may see and change depends on their role, and the tools enforce it: a recruiter sees only the requirements assigned to them and may change the status, "
+          "the recruiter comments and their own CVs submitted; a recruitment manager changes the status, the recruitment manager comments and the CVs submitted, and "
+          "adds requirements and assigns people; a sales manager adds requirements, assigns people and writes the sales manager comments; the EVP and the admin may change any field, in both locations. "
+          "Selections and joining is not for recruiters. If a tool says the role cannot do something, tell the person plainly: do not try another way. "
+          "To find a requirement use list_requirements (open ones) or list_closures (closed ones) with a narrow query; to see counts by status, who closed what, "
+          "or how a month or year went, use tracker_analytics. Use people's names, never ids. "
+          "To add a requirement call propose_requirement_create (a position and a client are needed; ask for the missing one, and offer the optional details once). "
+          "To change one call propose_requirement_update with its id from the list and only what changes; to close or reopen it set the status. "
+          "To record the candidate, the offer status, a comment or the date on a selection call propose_selection_update. "
+          "Every propose_ tool puts a card with Confirm and Cancel on screen: nothing has changed until the person confirms, so never say it is done. "
+          "Requirements and selections can never be deleted from here: say so if asked."),
+    examples=("Show me the open requirements", "Close the Network Engineer requirement for Acme", "How many requirements did we close this month?"))
+
 ADMIN = Specialist(
     name="admin", label="Admin insights", description="AI token usage, reset requests, system health, users, weekly report and the notice shown to everyone.",
     roles=frozenset({"admin"}), tool_names=("token_usage_overview", "pending_token_requests", "propose_token_answer", "system_status", "list_users", "weekly_report",
@@ -63,4 +83,4 @@ ADMIN = Specialist(
           "To change the notice every user sees call propose_notice. Each propose_ tool puts a card with Confirm and Cancel on screen: nothing has changed until the admin confirms, so never say it is done. You cannot create users or change passwords here."),
     examples=("Who used the most AI tokens today?", "Are there any token reset requests waiting?", "Is the system healthy?"))
 
-ALL = (JOBS, MATCHING, CANDIDATES, INTERVIEW, LINKEDIN, ADMIN)
+ALL = (JOBS, MATCHING, CANDIDATES, TRACKER, INTERVIEW, LINKEDIN, ADMIN)

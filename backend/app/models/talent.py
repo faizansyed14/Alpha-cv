@@ -133,7 +133,8 @@ class CandidateSearch(SQLModel, table=True):
     literal: str = Field(default="", sa_column=Column(Text, nullable=False, server_default=""))
     location: str = Field(default="", sa_column=Column(Text, nullable=False, server_default=""))
     nationality: str = Field(default="", sa_column=Column(Text, nullable=False, server_default=""))
-    # PostgreSQL searches these tsvectors ('simple' configuration: no stemming, no stop words), written with the row, and does not keep
+    # PostgreSQL searches these tsvectors (literal_tsv and extra_tsv in the cv_english configuration: word forms are one word, no stop words;
+    # location_tsv and nationality_tsv 'simple'), written with the row, and does not keep
     # ``text`` and ``literal`` at all (empty there, they are what SQLite searches):
     #   literal_tsv = the CV's own words,  extra_tsv = what the AI added (title, skills, keywords ...).  A plain word is found in either.
     extra_tsv: Optional[str] = Field(default=None, sa_column=Column(TSVECTOR().with_variant(Text(), "sqlite")))
@@ -151,17 +152,6 @@ class CandidateNote(SQLModel, table=True):
     note: str = Field(sa_column=Column(Text, nullable=False))
     created_at: datetime = Field(default_factory=_now, sa_column=_ts(nullable=False, server_default=func.now()))
     updated_at: datetime = Field(default_factory=_now, sa_column=_ts(nullable=False, server_default=func.now()))
-
-
-class SavedCandidate(SQLModel, table=True):
-    """A CV a recruiter saved to their own list ("Saved CVs"): who saved it and when, nothing else. The CV itself is never copied, and the
-    row goes with the candidate when that is deleted."""
-
-    __tablename__ = "saved_candidate"
-    __table_args__ = (Index("ix_saved_candidate_user_saved", "username", "saved_at"),)
-    username: str = Field(sa_column=Column(String(128), primary_key=True))
-    candidate_id: str = Field(sa_column=_fk("candidate", primary_key=True))
-    saved_at: datetime = Field(default_factory=_now, sa_column=_ts(nullable=False, server_default=func.now()))
 
 
 # --------------------------------------------------------------------------------------------------------------------

@@ -73,7 +73,7 @@ export function MultiSelect({ options, value, onChange, allLabel, noun, classNam
             <span className="truncate text-slate-700">{allLabel}</span>
           ) : value.length <= 2 ? (
             value.map((v) => (
-              <span key={v} className="inline-flex max-w-[160px] items-center truncate rounded-md bg-navy-50 px-1.5 py-0.5 text-[12px] font-medium text-navy-700">
+              <span key={v} className="inline-flex max-w-[160px] items-center truncate rounded-md bg-navy-50 px-1.5 py-0.5 text-xs font-medium text-navy-700">
                 <span className="truncate">{labelOf(v)}</span>
               </span>
             ))
@@ -87,7 +87,7 @@ export function MultiSelect({ options, value, onChange, allLabel, noun, classNam
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 z-50 mt-1.5 overflow-hidden rounded-xl border border-surface-border bg-white shadow-[0_16px_40px_-12px_rgba(16,24,40,0.22)]">
+        <div className="absolute left-0 right-0 z-50 mt-1.5 overflow-hidden rounded-xl border border-surface-border bg-paper shadow-[0_16px_40px_-12px_rgba(16,24,40,0.22)]">
           {options.length > 7 && (
             <div className="relative border-b border-surface-border p-2">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -96,7 +96,7 @@ export function MultiSelect({ options, value, onChange, allLabel, noun, classNam
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={`Search ${noun}…`}
-                className="h-9 w-full rounded-lg bg-slate-50 pl-8 pr-8 text-[13px] text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-navy-500/20"
+                className="h-9 w-full rounded-lg bg-slate-50 pl-8 pr-8 text-sm text-slate-900 placeholder:text-slate-400 focus:bg-paper focus:outline-none focus:ring-2 focus:ring-navy-500/20"
               />
               {query && (
                 <button type="button" onClick={() => setQuery('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" aria-label="Clear search">
@@ -106,7 +106,7 @@ export function MultiSelect({ options, value, onChange, allLabel, noun, classNam
             </div>
           )}
 
-          <div className="flex items-center justify-between border-b border-surface-border px-3 py-2 text-[12px]">
+          <div className="flex items-center justify-between border-b border-surface-border px-3 py-2 text-xs">
             <span className="text-slate-500">{value.length === 0 ? `All ${noun}` : `${value.length} selected`}</span>
             <span className="flex items-center gap-3 font-semibold">
               <button type="button" onClick={() => onChange(options.map((o) => o.value))} className="text-navy-600 hover:underline">
@@ -120,7 +120,7 @@ export function MultiSelect({ options, value, onChange, allLabel, noun, classNam
 
           <ul role="listbox" aria-multiselectable className="max-h-64 overflow-y-auto p-1.5">
             {filtered.length === 0 ? (
-              <li className="px-3 py-6 text-center text-[13px] text-slate-400">No {noun} match</li>
+              <li className="px-3 py-6 text-center text-sm text-slate-400">No {noun} match</li>
             ) : (
               filtered.map((o) => {
                 const on = selected.has(o.value);
@@ -130,20 +130,20 @@ export function MultiSelect({ options, value, onChange, allLabel, noun, classNam
                       type="button"
                       onClick={() => toggle(o.value)}
                       className={cn(
-                        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors',
+                        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors',
                         on ? 'bg-navy-50/70 text-navy-800' : 'text-slate-700 hover:bg-slate-50',
                       )}
                     >
                       <span
                         className={cn(
                           'flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors',
-                          on ? 'border-navy-600 bg-navy-600 text-white' : 'border-slate-300 bg-white',
+                          on ? 'border-navy-600 bg-solid-soft text-white' : 'border-slate-300 bg-paper',
                         )}
                       >
                         {on && <Check className="h-3 w-3" />}
                       </span>
                       <span className="min-w-0 flex-1 truncate">{o.label}</span>
-                      {typeof o.count === 'number' && <span className="shrink-0 text-[12px] tabular-nums text-slate-400">{o.count.toLocaleString()}</span>}
+                      {typeof o.count === 'number' && <span className="shrink-0 text-xs tabular-nums text-slate-400">{o.count.toLocaleString()}</span>}
                     </button>
                   </li>
                 );

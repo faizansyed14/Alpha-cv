@@ -121,7 +121,7 @@ def verify_password_endpoint(data: VerifyPasswordRequest, request: Request, sess
     """
     Verify email and password.
     Returns success and whether OTP is required based on user role.
-    Every account needs a second factor: CAPTCHA for admins and for users set to captcha mode, email OTP otherwise.
+    Every account needs a second factor: the CAPTCHA or an emailed code, whichever is set for the account (its MFA).
     """
     import logging
     logger = logging.getLogger(__name__)
@@ -169,7 +169,7 @@ def verify_password_endpoint(data: VerifyPasswordRequest, request: Request, sess
         # Success, clear the failure counter
         reset(data.email, rate_limiter.get_client_ip(request))
         
-        # Every account needs a second factor; auth_mode_for_user() gives admins the CAPTCHA.
+        # Every account needs a second factor; auth_mode_for_user() says which one this account uses.
 
         mode = auth_mode_for_user(user)  # "otp" or "captcha"
         if mode == "captcha":
@@ -256,15 +256,7 @@ async def send_otp(data: SendOTPRequest, request: Request, session: Session = De
                 detail="Email not configured for user. Please contact administrator."
             )
         
-        # Admin users should not need OTP (this should not be called for admin, but check anyway)
-        if user.role == "admin":
-            logger.warning(f"OTP requested for admin user {mask_email(data.email)} - this should not happen")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Admin users do not require OTP"
-            )
-        
-        # CAPTCHA-mode users must use the CAPTCHA flow, not email OTP.
+        # CAPTCHA-mode users (the admin too, unless its MFA was set to email) must use the CAPTCHA flow, not email OTP.
         if auth_mode_for_user(user) == "captcha":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -500,7 +492,7 @@ def verify_captcha(data: VerifyCaptchaRequest, request: Request, session: Sessio
 
 @router.get("/me", response_model=MeRead)
 def get_me(user: User = Depends(require_user)) -> MeRead:
-    return MeRead(id=user.id, username=user.username, role=user.role, is_active=user.is_active)
+    return MeRead(id=user.id, username=user.username, role=user.role, is_active=user.is_active, location=getattr(user, "location", None))
 
 
 @router.post("/logout")

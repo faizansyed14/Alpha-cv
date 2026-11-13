@@ -25,7 +25,7 @@ from app.ingestion.preview import render_page_png
 from app.providers.llm.service import get_llm_service
 from app.providers.embeddings.service import get_embedding_service
 from app.store import get_store
-from app.store.candidates import FACET_FIELDS
+from app.store.candidates import FACET_FIELDS, BadCursor, parse_page_cursor
 from app.providers.storage import get_storage_service
 from app.providers.cache.memory import get_cache_service
 from app.ingestion.skill_keywords import extract_skill_keywords
@@ -283,38 +283,50 @@ CV_LIST_MAX_IDS = 100_000   # ids_only (no personal data) may ask for more: the 
 @router.get("/cvs")
 async def list_cvs(
     limit: Optional[int] = Query(None, ge=1, description=f"Page size (default and max {CV_LIST_PAGE})"),
-    offset: int = Query(0, ge=0, description="Number of items to skip"),
+    offset: int = Query(0, ge=0, description="Number of items to skip (older clients; prefer cursor)"),
     category: Optional[str] = Query(None, description="Filter by CV category (folder)"),
     categories: Optional[List[str]] = Query(None, description="Several categories at once (repeat the parameter); newest first across all of them"),
     q: Optional[str] = Query(None, description="Search box: every word typed must be in the CV (its text, title, skills, name, contact)"),
     ids_only: bool = Query(False, description="Return only CV ids (no contact data); pages up to the whole database"),
+    cursor: Optional[str] = Query(None, max_length=120, description="The next_cursor of the previous page: the next page starts right after it"),
     _: User = Depends(require_core_app),
 ) -> JSONResponse:
     """
-    List CVs, newest first, one page per call (200). The database counts, sorts and pages, so the cost does not grow with
-    the number of CVs. The search box needs every word typed to be in the CV.
+    List CVs, newest first, one page per call (200). The search box needs every word typed to be in the CV.
+
+    Paging is by cursor: the answer carries ``next_cursor`` (null on the last page) and the next call sends it back. A page then starts
+    at its first row through the index, so page 5,000 costs what page 1 costs. ``total`` is the exact number of candidates (in the chosen
+    categories), read from the shared per-category counts and never counted per call. ``offset`` still works for older clients.
 
     One call never returns the whole database: it used to hand every candidate's name, email and phone to any
     account. The match launcher, which only needs ids, asks for ids_only.
     """
-    cats = [c for c in (categories or []) if c] or ([category] if category else [])
+    cats = list(dict.fromkeys([c for c in (categories or []) if c] or ([category] if category else [])))
     max_limit = CV_LIST_MAX_IDS if ids_only else CV_LIST_PAGE
     limit = min(limit or max_limit, max_limit)
+    try:
+        after = parse_page_cursor(cursor)
+    except BadCursor:
+        raise HTTPException(status_code=400, detail="This page of the list is no longer valid. Please reload the list.")
+    by_cursor = after is not None or offset == 0
     store = get_store()
     try:
-        estimate = False
+        estimate, next_cursor = False, None
         if q and q.strip():
             words = [w for w in re.split(r"\s+", q.strip()) if w][:8]
-            ids, total, estimate = await asyncio.to_thread(store.search_candidate_ids, words, offset, limit, cats)
+            if by_cursor:      # the matches are counted on the first page only
+                ids, total, estimate, next_cursor = await asyncio.to_thread(store.search_candidate_page, words, limit, cats, after, after is None)
+            else:
+                ids, total, estimate = await asyncio.to_thread(store.search_candidate_ids, words, offset, limit, cats)
         else:
-            cache, key = get_cache_service(), "cv_total:" + "|".join(sorted(cats))
-            total = cache.get(key, namespace="cv_data")
-            if total is None:                      # counting millions of rows on every page click would be wasted work
-                total = await asyncio.to_thread(store.count_candidates, cats)
-                cache.set(key, total, ttl_seconds=30, namespace="cv_data")
-            ids = await asyncio.to_thread(store.list_candidate_ids, offset, limit, cats)
+            counts = await asyncio.to_thread(store.cached_category_counts)
+            total = sum(counts.get(c, 0) for c in cats) if cats else sum(counts.values())
+            if by_cursor:
+                ids, next_cursor = await asyncio.to_thread(store.list_candidate_page, limit, cats, after)
+            else:
+                ids = await asyncio.to_thread(store.list_candidate_ids, offset, limit, cats)
         body: Dict[str, Any] = {"status": "success", "count": len(ids), "total": total, "total_is_estimate": estimate, "limit": limit,
-                                "offset": offset, "category": cats[0] if len(cats) == 1 else category, "q": q}
+                                "offset": offset, "next_cursor": next_cursor, "category": cats[0] if len(cats) == 1 else category, "q": q}
         if ids_only:
             body["ids"] = ids
         else:
@@ -326,65 +338,14 @@ async def list_cvs(
         raise HTTPException(status_code=500, detail="Failed to list CVs. Please try again or contact support.")
 
 
-class SavedCvsBody(BaseModel):
-    cv_ids: List[str] = Field(..., min_length=1, max_length=500)
-
-
-@router.get("/saved")
-async def list_saved_cvs(
-    limit: int = Query(50, ge=1, le=CV_LIST_PAGE, description="Page size"),
-    offset: int = Query(0, ge=0),
-    q: Optional[str] = Query(None, max_length=200, description="Search the saved CVs: every word typed must be in the CV"),
-    user: User = Depends(require_core_app),
-) -> JSONResponse:
-    """The CVs the signed-in person saved, the one saved last first, in the same shape as the Candidates list. The database counts,
-    searches and pages them."""
-    store = get_store()
-    try:
-        if q and q.strip():
-            words = [w for w in re.split(r"\s+", q.strip()) if w][:8]
-            ids, total = await asyncio.to_thread(store.search_saved_ids, user.username, words, offset, limit)
-        else:
-            ids, total = await asyncio.to_thread(store.list_saved_ids, user.username, offset, limit)
-        cvs = await asyncio.to_thread(store.candidate_rows, ids)
-        return JSONResponse({"status": "success", "cvs": cvs, "count": len(cvs), "total": total, "limit": limit, "offset": offset, "q": q})
-    except Exception as e:
-        logger.error(f"Failed to list saved CVs: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list saved CVs")
-
-
-@router.get("/saved/ids")
-async def saved_cv_ids(user: User = Depends(require_core_app)) -> JSONResponse:
-    """Which CVs the signed-in person has saved (ids only), so every CV card can show its bookmark."""
-    ids = await asyncio.to_thread(get_store().saved_candidate_ids, user.username)
-    return JSONResponse({"ids": ids})
-
-
-@router.post("/saved")
-async def save_cvs(body: SavedCvsBody, user: User = Depends(require_core_app)) -> JSONResponse:
-    """Add CVs to the signed-in person's saved list."""
-    added = await asyncio.to_thread(get_store().save_candidates, user.username, body.cv_ids)
-    return JSONResponse({"status": "success", "saved": added})
-
-
-@router.post("/saved/remove")
-async def unsave_cvs(body: SavedCvsBody, user: User = Depends(require_core_app)) -> JSONResponse:
-    """Take CVs off the signed-in person's saved list (the CVs are not deleted)."""
-    removed = await asyncio.to_thread(get_store().unsave_candidates, user.username, body.cv_ids)
-    return JSONResponse({"status": "success", "removed": removed})
-
-
 @router.get("/categories")
 async def get_categories(_: User = Depends(require_core_app)):
     """
     Get all CV categories with their counts.
     """
     try:
-        cache = get_cache_service()
-        counts = cache.get("categories", namespace="cv_data")
-        if counts is None:
-            counts = await asyncio.to_thread(get_store().category_counts)
-            cache.set("categories", counts, ttl_seconds=20, namespace="cv_data")
+        # exact, and the same numbers the list's total is read from (see cached_category_counts)
+        counts = await asyncio.to_thread(get_store().cached_category_counts)
         return JSONResponse(content={"categories": counts})
     except Exception as e:
         logger.error(f"Failed to get categories: {e}")

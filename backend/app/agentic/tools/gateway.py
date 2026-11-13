@@ -42,6 +42,9 @@ GET_PATHS = tuple(re.compile(p) for p in (
     r"^/api/careers/admin/(?:jobs-trends|reports/weekly)$",
     r"^/api/(?:health|system-stats|database/status|notice)$",
     r"^/api/admin/users$",
+    # the requirements tracker (read only; never the Excel exports)
+    r"^/api/tracker/(?:options|requirements|closures|analytics|selections|selections/options)$",
+    rf"^/api/tracker/(?:requirements|selections)/{_ID}$",
 ))
 POST_PATHS = tuple(re.compile(p) for p in (
     r"^/api/match$",
@@ -60,6 +63,9 @@ ACTION_PATHS = tuple((m, re.compile(p)) for m, p in (
     ("POST", r"^/api/careers/admin/jobs/unified-update$"),                  # edit a job posting (job_id given)
     ("PUT", r"^/api/admin/notice$"),                                        # the notice every user sees
     ("POST", rf"^/api/agents/admin/reset-requests/{_ID}/(?:approve|reject)$"),
+    ("POST", r"^/api/tracker/requirements$"),                                 # add a requirement
+    ("PATCH", rf"^/api/tracker/requirements/{_ID}$"),                         # change one (details, people, comments, CVs submitted, status)
+    ("PATCH", rf"^/api/tracker/selections/{_ID}$"),                           # candidate, status, comments of a selection
 ))
 _FORBIDDEN_WORDS = ("delete", "remove", "purge", "erase")
 _STATUS_TEXT = {

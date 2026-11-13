@@ -43,7 +43,7 @@ function Spinner({ label = 'Loading document…' }: { label?: string }) {
     return (
         <div className="flex h-full flex-col items-center justify-center">
             <div className="mb-3 h-10 w-10 animate-spin rounded-full border-2 border-navy-500 border-t-transparent" />
-            <p className="text-[13px] text-slate-600">{label}</p>
+            <p className="text-sm text-slate-600">{label}</p>
         </div>
     );
 }
@@ -108,7 +108,7 @@ function WordPreview({ blob, zoom, onFail }: { blob: Blob; zoom: number; onFail:
             {stage === 'viewer' ? (
                 buffer && lib ? (
                     <div className="flex p-6" style={{ justifyContent: 'safe center' }}>
-                        <div style={{ zoom }} className="bg-white shadow-[0_2px_16px_rgba(15,23,42,0.18)]">
+                        <div style={{ zoom }} className="bg-paper shadow-[0_2px_16px_rgba(15,23,42,0.18)]">
                             <lib.ReactDocxViewer file={buffer} emptyState={<Spinner label="Opening document…" />} />
                         </div>
                     </div>
@@ -117,7 +117,7 @@ function WordPreview({ blob, zoom, onFail }: { blob: Blob; zoom: number; onFail:
                 )
             ) : (
                 <div className="flex p-6" style={{ justifyContent: 'safe center' }}>
-                    <div ref={fallback} style={{ zoom }} className="docx-container bg-white shadow-[0_2px_16px_rgba(15,23,42,0.18)]" />
+                    <div ref={fallback} style={{ zoom }} className="docx-container bg-paper shadow-[0_2px_16px_rgba(15,23,42,0.18)]" />
                 </div>
             )}
         </div>
@@ -204,12 +204,12 @@ export function FilePreviewModal({ isOpen, onClose, fileUrl, fileName, fileId, e
 
     const unavailable = (
         <div className="flex h-full flex-col items-center justify-center p-8">
-            <div className="flex max-w-md flex-col items-center rounded-2xl border border-surface-border bg-white p-10 text-center shadow-card">
+            <div className="flex max-w-md flex-col items-center rounded-2xl border border-surface-border bg-paper p-10 text-center shadow-card">
                 <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 ring-1 ring-inset ring-amber-100">
                     <FileWarning className="h-6 w-6" />
                 </div>
                 <h3 className="text-sm font-semibold text-slate-900">Preview not available</h3>
-                <p className="mb-6 mt-1 text-[13px] text-slate-500">This document could not be displayed here. You can download the original file.</p>
+                <p className="mb-6 mt-1 text-sm text-slate-500">This document could not be displayed here. You can download the original file.</p>
                 <Button variant="primary" onClick={handleDownload} icon={<Download />}>Download original</Button>
             </div>
         </div>
@@ -234,12 +234,12 @@ export function FilePreviewModal({ isOpen, onClose, fileUrl, fileName, fileId, e
     } else if (text && text.trim().length > 0) {
         body = (
             <div className="h-full overflow-auto p-6">
-                <div className="mx-auto max-w-3xl rounded-xl border border-surface-border bg-white p-6 shadow-card">
+                <div className="mx-auto max-w-3xl rounded-xl border border-surface-border bg-paper p-6 shadow-card">
                     <div className="mb-4 flex items-center justify-between">
                         <h3 className="section-label flex items-center gap-2"><FileText className="h-4 w-4" /> Document text</h3>
                         <Badge variant="secondary">{text.length.toLocaleString()} characters</Badge>
                     </div>
-                    <pre className="whitespace-pre-wrap font-mono text-[13px] leading-relaxed text-slate-700">{text}</pre>
+                    <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-slate-700">{text}</pre>
                 </div>
             </div>
         );
@@ -249,25 +249,25 @@ export function FilePreviewModal({ isOpen, onClose, fileUrl, fileName, fileId, e
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent hideClose className="flex h-[90vh] w-[90vw] max-w-5xl flex-col overflow-hidden border-surface-border bg-white p-0">
+            <DialogContent hideClose className="flex h-[90vh] w-[90vw] max-w-5xl flex-col overflow-hidden border-surface-border bg-paper p-0">
                 <DialogTitle className="sr-only">Preview: {displayName}</DialogTitle>
-                <div className="flex items-center justify-between gap-3 border-b border-surface-border bg-white px-4 py-3">
+                <div className="flex items-center justify-between gap-3 border-b border-surface-border bg-paper px-4 py-3">
                     <div className="flex min-w-0 items-center gap-2.5">
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-50 text-navy-600">
                             <FileText className="h-4 w-4" />
                         </span>
-                        <span className="truncate text-[13px] font-semibold text-slate-900">{displayName}</span>
+                        <span className="truncate text-sm font-semibold text-slate-900">{displayName}</span>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                         {canZoom && (
                             <div className="mr-1 flex items-center gap-0.5 rounded-lg border border-surface-border bg-slate-50 p-0.5">
-                                <button type="button" onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(2)))} className="rounded-md p-1.5 text-slate-500 hover:bg-white hover:text-slate-900" aria-label="Zoom out">
+                                <button type="button" onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(2)))} className="rounded-md p-1.5 text-slate-500 hover:bg-paper hover:text-slate-900" aria-label="Zoom out">
                                     <ZoomOut className="h-4 w-4" />
                                 </button>
-                                <button type="button" onClick={() => setZoom(1)} className="min-w-[3rem] rounded-md px-1 text-xs font-semibold tabular-nums text-slate-600 hover:bg-white" title="Reset zoom">
+                                <button type="button" onClick={() => setZoom(1)} className="min-w-[3rem] rounded-md px-1 text-xs font-semibold tabular-nums text-slate-600 hover:bg-paper" title="Reset zoom">
                                     {Math.round(zoom * 100)}%
                                 </button>
-                                <button type="button" onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(2)))} className="rounded-md p-1.5 text-slate-500 hover:bg-white hover:text-slate-900" aria-label="Zoom in">
+                                <button type="button" onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(2)))} className="rounded-md p-1.5 text-slate-500 hover:bg-paper hover:text-slate-900" aria-label="Zoom in">
                                     <ZoomIn className="h-4 w-4" />
                                 </button>
                             </div>

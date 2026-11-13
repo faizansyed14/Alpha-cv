@@ -1,7 +1,7 @@
 import { RequestRetryHandler } from '../error-handler';
 import { CVAdvancedSearchParams, MatchRequest } from '../types';
 import { ApiClient } from './ApiClient';
-import type { CreateUserRequest, UpdateUserRequest } from '../types';
+import type { CreateUserRequest, UpdateUserRequest, RequirementFilters, RequirementInput, AnalyticsView, SelectionFilters, SelectionInput } from '../types';
 
 // Create singleton instance
 export const apiClient = new ApiClient();
@@ -14,7 +14,7 @@ export const api = {
   // CV operations
   uploadCV: (file: File, cvText?: string) => RequestRetryHandler.withRetry(() => apiClient.uploadCV(file, cvText)),
   getCVUploadProgress: (cvId: string) => apiClient.getCVUploadProgress(cvId),
-  listCVs: (params?: { limit?: number; offset?: number; category?: string; q?: string }) =>
+  listCVs: (params?: { limit?: number; offset?: number; cursor?: string; category?: string; q?: string }) =>
     RequestRetryHandler.withRetry(() => apiClient.listCVs(params)),
   listCVIds: (params?: { limit?: number; category?: string; categories?: string[] }) =>
     RequestRetryHandler.withRetry(() => apiClient.listCVIds(params)),
@@ -43,6 +43,23 @@ export const api = {
   deleteJD: (jdId: string) => RequestRetryHandler.withRetry(() => apiClient.deleteJD(jdId)),
   extractJDForUI: (jdId: string) => RequestRetryHandler.withRetry(() => apiClient.extractJDForUI(jdId)),
   unifiedJobUpdate: (jdId: string | null, jobId: string | null, formData: any) => RequestRetryHandler.withRetry(() => apiClient.unifiedJobUpdate(jdId, jobId, formData)),
+
+  // Requirements tracker
+  getTrackerOptions: () => RequestRetryHandler.withRetry(() => apiClient.getTrackerOptions()),
+  listRequirements: (filters: RequirementFilters, limit = 50, offset = 0) => apiClient.listRequirements(filters, limit, offset),
+  getRequirement: (id: string) => apiClient.getRequirement(id),
+  createRequirement: (body: RequirementInput) => apiClient.createRequirement(body),
+  updateRequirement: (id: string, body: RequirementInput) => apiClient.updateRequirement(id, body),
+  deleteRequirement: (id: string) => apiClient.deleteRequirement(id),
+  getSelectionOptions: () => apiClient.getSelectionOptions(),
+  listSelections: (filters: SelectionFilters, limit = 50, offset = 0) => apiClient.listSelections(filters, limit, offset),
+  updateSelection: (id: string, body: SelectionInput) => apiClient.updateSelection(id, body),
+  deleteSelection: (id: string) => apiClient.deleteSelection(id),
+  markRequirementPosted: (id: string, jobId: string) => apiClient.markRequirementPosted(id, jobId),
+  exportRequirements: (filters: RequirementFilters) => apiClient.exportRequirements(filters),
+  listClosures: (filters: RequirementFilters, limit = 50, offset = 0) => apiClient.listClosures(filters, limit, offset),
+  exportClosures: (filters: RequirementFilters) => apiClient.exportClosures(filters),
+  getTrackerAnalytics: (params: { view: AnalyticsView; year: number; month?: number; location?: string }) => apiClient.getTrackerAnalytics(params),
 
   // Matching
   matchCandidates: (request: MatchRequest) => RequestRetryHandler.withRetry(() => apiClient.matchCandidates(request)),
@@ -97,6 +114,8 @@ export const api = {
   getAgentUsage: () => RequestRetryHandler.withRetry(() => apiClient.getAgentUsage()),
   getAgentUsageAdmin: () => RequestRetryHandler.withRetry(() => apiClient.getAgentUsageAdmin()),
   resetAgentUsage: (username: string) => apiClient.resetAgentUsage(username),
+  getHiringImage: (title: string, location: string) => apiClient.getHiringImage(title, location),
+  getJobHiringImage: (jobId: string) => apiClient.getJobHiringImage(jobId),
   getJobDatabaseCandidates: (jobId: string, params?: { limit?: number; cursor?: string | null; q?: string | null }) => apiClient.getJobDatabaseCandidates(jobId, params),
   getJobDatabaseCandidateIds: (jobId: string, q?: string | null) => apiClient.getJobDatabaseCandidateIds(jobId, q),
   getAgentInfo: (agent: string) => RequestRetryHandler.withRetry(() => apiClient.getAgentInfo(agent)),
@@ -115,11 +134,6 @@ export const api = {
   updateJobStatus: (jobId: string, status: { is_active: boolean }) =>
     RequestRetryHandler.withRetry(() => apiClient.updateJobStatus(jobId, status)),
   deleteJobPosting: (jobId: string) => RequestRetryHandler.withRetry(() => apiClient.deleteJobPosting(jobId)),
-  // Saved CVs
-  getSavedCVs: (params?: { limit?: number; offset?: number; q?: string }) => RequestRetryHandler.withRetry(() => apiClient.getSavedCVs(params)),
-  getSavedCVIds: () => RequestRetryHandler.withRetry(() => apiClient.getSavedCVIds()),
-  saveCVs: (cvIds: string[]) => apiClient.saveCVs(cvIds),
-  unsaveCVs: (cvIds: string[]) => apiClient.unsaveCVs(cvIds),
   // Bug reports (a submit is never retried automatically: it would send the report twice)
   submitBugReport: (body: import('@/lib/types').BugCreateRequest) => apiClient.submitBugReport(body),
   listMyBugReports: (params?: { limit?: number; offset?: number }) => RequestRetryHandler.withRetry(() => apiClient.listMyBugReports(params)),

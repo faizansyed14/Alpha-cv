@@ -69,10 +69,10 @@ function FacetCheckboxList({
   return (
     <div>
       <button type="button" onClick={() => setCollapsed((c) => !c)} className="flex w-full items-center justify-between text-left">
-        <span className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-800">
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
           {label}
           {selected.length > 0 && (
-            <span className="rounded-full bg-brand-50 px-1.5 py-0.5 text-[11px] font-semibold text-brand-700">{selected.length}</span>
+            <span className="rounded-full bg-brand-50 px-1.5 py-0.5 text-2xs font-semibold text-brand-700">{selected.length}</span>
           )}
         </span>
         {collapsed ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronUp className="h-4 w-4 text-slate-400" />}
@@ -88,16 +88,16 @@ function FacetCheckboxList({
           />
           <div className="max-h-40 space-y-1 overflow-y-auto pr-1">
             {loading ? (
-              <div className="flex items-center gap-2 py-2 text-[12px] text-slate-400">
+              <div className="flex items-center gap-2 py-2 text-xs text-slate-400">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
               </div>
             ) : filtered.length === 0 ? (
-              <p className="py-1 text-[12px] text-slate-400">No values yet</p>
+              <p className="py-1 text-xs text-slate-400">No values yet</p>
             ) : (
               filtered.map((v) => (
                 <label
                   key={v.value}
-                  className="flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-1 text-[13px] text-slate-700 hover:bg-slate-50"
+                  className="flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-1 text-sm text-slate-700 hover:bg-slate-50"
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     <input
@@ -108,7 +108,7 @@ function FacetCheckboxList({
                     />
                     <span className="truncate">{v.value}</span>
                   </span>
-                  <span className="shrink-0 text-[12px] text-slate-400">{v.count}</span>
+                  <span className="shrink-0 text-xs text-slate-400">{v.count}</span>
                 </label>
               ))
             )}
@@ -185,19 +185,19 @@ export default function AdvancedSearchModal({ onClose, onSubmit, initialMode = '
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-scrim/40 p-4">
       <div
-        className="flex max-h-[min(92vh,880px)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-surface-border bg-white shadow-xl"
+        className="flex max-h-[min(92vh,880px)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-surface-border bg-paper shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-label={mode === 'boolean' ? 'Boolean search' : 'Advanced search'}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-surface-border px-5 py-3.5">
           <div>
-            <h2 className="text-[17px] font-semibold text-slate-900">
+            <h2 className="text-lg font-semibold text-slate-900">
               {mode === 'boolean' ? 'Boolean search' : 'Advanced search'}
             </h2>
-            <p className="mt-0.5 text-[12px] text-slate-500">
+            <p className="mt-0.5 text-xs text-slate-500">
               Results replace the candidate list on this page
             </p>
           </div>
@@ -237,9 +237,9 @@ export default function AdvancedSearchModal({ onClose, onSubmit, initialMode = '
                 rows={5}
                 spellCheck={false}
                 placeholder={'("Cloud Engineer") AND ("Azure" OR "Terraform") NOT intern'}
-                className="field-input w-full resize-y font-mono text-[12px] leading-relaxed"
+                className="field-input w-full resize-y font-mono text-xs leading-relaxed"
               />
-              <p className="mt-1 text-[11px] text-slate-400">
+              <p className="mt-1 text-2xs text-slate-400">
                 Use AND, OR, NOT and brackets. Phrases in quotes. Ctrl+Enter to search.
               </p>
             </div>
@@ -269,7 +269,7 @@ export default function AdvancedSearchModal({ onClose, onSubmit, initialMode = '
                   {keywords.map((k) => (
                     <span
                       key={k}
-                      className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-1 text-[12px] font-medium text-brand-700"
+                      className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700"
                     >
                       <Tag className="h-3 w-3" />
                       {k}

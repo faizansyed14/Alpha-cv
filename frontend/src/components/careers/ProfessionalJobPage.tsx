@@ -60,7 +60,7 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
           <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-danger-50">
             <AlertCircle className="h-5 w-5 text-danger-600" />
           </div>
-          <p className="text-[13px] font-medium text-slate-900">
+          <p className="text-sm font-medium text-slate-900">
             {!token
               ? 'Invalid job link.'
               : error || 'Job posting not found or may have expired.'}
@@ -99,27 +99,27 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
               Apply now
             </Button>
           ) : (
-            <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-xs font-medium text-slate-500 shadow-sm backdrop-blur">Closed</span>
+            <span className="rounded-full border border-slate-200/70 bg-paper/70 px-3 py-1 text-xs font-medium text-slate-500 shadow-sm backdrop-blur">Closed</span>
           )
         }
       />
 
       <PublicBody>
         {/* Centered title hero */}
-        <section className="relative overflow-hidden border-b border-white/60">
+        <section className="relative overflow-hidden border-b border-slate-200/70">
           <div aria-hidden className="pointer-events-none absolute -left-20 top-4 h-56 w-56 rounded-full bg-sky-300/25 blur-3xl" />
           <div aria-hidden className="pointer-events-none absolute -right-16 bottom-0 h-64 w-64 rounded-full bg-navy-400/15 blur-3xl" />
           <div className="relative mx-auto max-w-7xl px-4 pb-12 pt-14 text-center sm:px-6 sm:pb-14 sm:pt-16 lg:px-8">
             <motion.div variants={stagger(0.07, 0.05)} initial="hidden" animate="show" className="mx-auto flex flex-col items-center">
               <motion.p
                 variants={rise}
-                className="mb-5 inline-flex rounded-full border border-white/80 bg-white/80 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-navy-700 shadow-[var(--shadow-card)] backdrop-blur"
+                className="mb-5 inline-flex rounded-full border border-slate-200/70 bg-paper/80 px-4 py-1.5 text-2xs font-semibold uppercase tracking-[0.14em] text-navy-700 shadow-[var(--shadow-card)] backdrop-blur"
               >
                 {isActive ? 'Now hiring' : 'Position closed'}
               </motion.p>
               <motion.h1
                 variants={rise}
-                className="max-w-5xl text-[30px] font-bold leading-[1.12] tracking-[-0.03em] text-slate-900 sm:text-[40px]"
+                className="max-w-5xl text-3xl font-semibold leading-[1.1] tracking-[-0.035em] text-slate-900 sm:text-[40px]"
               >
                 {publicJob.job_title || 'Open Position'}
               </motion.h1>
@@ -130,13 +130,13 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
                 {facts.map(({ icon: Icon, label, value }) => (
                   <div
                     key={label}
-                    className="min-w-0 rounded-2xl border border-white/80 bg-white/75 px-3 py-3.5 text-center shadow-[var(--shadow-card)] backdrop-blur-sm"
+                    className="min-w-0 rounded-xl border border-slate-200 bg-paper px-3 py-3 text-center shadow-card"
                   >
-                    <dt className="flex items-center justify-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                    <dt className="flex items-center justify-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.08em] text-slate-400">
                       <Icon className="h-3.5 w-3.5" />
                       {label}
                     </dt>
-                    <dd className="mt-1.5 truncate text-[14px] font-semibold text-ink" title={String(value)}>
+                    <dd className="mt-1.5 truncate text-base font-semibold text-ink" title={String(value)}>
                       {value}
                     </dd>
                   </div>
@@ -157,21 +157,21 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
           <motion.div variants={stagger(0.08, 0.1)} initial="hidden" animate="show" className="space-y-8">
             <motion.section
               variants={rise}
-              className="rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-[var(--shadow-card)] sm:p-8 lg:p-10"
+              className="rounded-3xl border border-slate-200 bg-paper p-6 text-center shadow-[var(--shadow-card)] sm:p-8 lg:p-10"
             >
-              <h2 className="mb-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">About the role</h2>
-              <div className="whitespace-pre-wrap text-left text-[15px] leading-7 text-slate-700">{publicJob.job_description}</div>
+              <h2 className="mb-4 text-2xs font-semibold uppercase tracking-[0.12em] text-slate-400">About the role</h2>
+              <div className="whitespace-pre-wrap text-left text-md leading-7 text-slate-700">{publicJob.job_description}</div>
             </motion.section>
 
             {responsibilities.length > 0 && (
               <motion.section
                 variants={rise}
-                className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[var(--shadow-card)] sm:p-8 lg:p-10"
+                className="rounded-3xl border border-slate-200 bg-paper p-6 shadow-[var(--shadow-card)] sm:p-8 lg:p-10"
               >
-                <h2 className="mb-5 text-center text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Key responsibilities</h2>
+                <h2 className="mb-5 text-center text-2xs font-semibold uppercase tracking-[0.12em] text-slate-400">Key responsibilities</h2>
                 <ul className="space-y-3 text-left">
                   {responsibilities.map((responsibility: string, idx: number) => (
-                    <li key={idx} className="flex items-start gap-3 text-[15px] leading-7 text-slate-700">
+                    <li key={idx} className="flex items-start gap-3 text-md leading-7 text-slate-700">
                       <span className="mt-[0.7rem] h-1.5 w-1.5 shrink-0 rounded-full bg-navy-500" />
                       <span>{responsibility}</span>
                     </li>
@@ -183,12 +183,12 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
             {requirements.length > 0 && (
               <motion.section
                 variants={rise}
-                className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[var(--shadow-card)] sm:p-8 lg:p-10"
+                className="rounded-3xl border border-slate-200 bg-paper p-6 shadow-[var(--shadow-card)] sm:p-8 lg:p-10"
               >
-                <h2 className="mb-5 text-center text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Qualifications and requirements</h2>
+                <h2 className="mb-5 text-center text-2xs font-semibold uppercase tracking-[0.12em] text-slate-400">Qualifications and requirements</h2>
                 <ul className="space-y-3 text-left">
                   {requirements.map((requirement: string, idx: number) => (
-                    <li key={idx} className="flex items-start gap-3 text-[15px] leading-7 text-slate-700">
+                    <li key={idx} className="flex items-start gap-3 text-md leading-7 text-slate-700">
                       <span className="mt-[0.7rem] h-1.5 w-1.5 shrink-0 rounded-full bg-navy-500" />
                       <span>{requirement}</span>
                     </li>
@@ -200,7 +200,7 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
           </motion.div>
 
           <section className="mt-16 text-center">
-            <h2 className="mb-5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Other openings</h2>
+            <h2 className="mb-5 text-2xs font-semibold uppercase tracking-[0.12em] text-slate-400">Other openings</h2>
             <MoreOpenings currentJobToken={token} />
           </section>
         </div>
@@ -213,7 +213,7 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
         {showApplicationForm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div
-              className="absolute inset-0 bg-slate-900/40"
+              className="absolute inset-0 bg-scrim/40"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -230,8 +230,8 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
               transition={spring.soft}
               className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-surface-border bg-paper shadow-panel"
             >
-              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-surface-border bg-paper/95 px-6 py-4 backdrop-blur">
-                <h2 className="text-lg font-semibold text-ink">Apply for this position</h2>
+              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-surface-border bg-paper/95 px-4 py-3 backdrop-blur sm:px-6 sm:py-4">
+                <h2 className="text-base font-semibold text-ink sm:text-lg">Apply for this position</h2>
                 <button
                   onClick={() => setShowApplicationForm(false)}
                   className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-ink"
@@ -240,7 +240,7 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <div className="p-6">
+              <div className="p-4 sm:p-6">
                 <JobApplicationForm
                   jobToken={token}
                   jobData={{

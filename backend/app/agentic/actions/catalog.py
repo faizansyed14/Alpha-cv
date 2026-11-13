@@ -9,10 +9,12 @@ from typing import Any, Callable, Dict, FrozenSet
 from app.agentic import uploads
 from app.agentic.tools.base import ToolError, text
 from app.agentic.tools.gateway import ApiGateway
-from app.security.rbac_rules import ALL_ROLES
+from app.security.rbac_rules import ALL_ROLES, SELECTION_ROLES, TRACKER_FULL_ROLES
 
 CORE = frozenset(ALL_ROLES)          # every role has the same access; only ADMIN actions are limited
 ADMIN = frozenset({"admin"})
+TRACKER_FULL = frozenset(TRACKER_FULL_ROLES)           # who may add a requirement
+SELECTIONS = frozenset(SELECTION_ROLES)                # who may use selections and joining (not recruiters)
 
 _ID = re.compile(r"^[\w-]{8,64}$")
 _CV_ID = re.compile(r"^[0-9a-fA-F-]{32,40}$")
@@ -77,6 +79,50 @@ def _token_decision(gw: ApiGateway, p: Dict[str, Any], _user: str) -> str:
     return f"{'Approved' if decision == 'approve' else 'Rejected'} the token reset request from {text(p.get('username'), 40)}."
 
 
+# what a requirement or selection change may carry: nothing else is ever sent (the application checks the person's role on each field again)
+REQUIREMENT_KEYS = frozenset({"position", "client", "requirement_date", "cv_submission_date", "job_location", "salary", "duration_type", "duration_value", "duration_unit",
+                              "duration_extendable", "recruiter_ids", "manager_id", "sales_manager_id", "status", "sales_comments", "rm_comments", "recruiter_comments",
+                              "cvs_submissions"})
+SELECTION_KEYS = frozenset({"selection_date", "candidate_name", "status", "comments"})
+
+
+def _clean(body: Any, allowed: FrozenSet[str]) -> Dict[str, Any]:
+    if not isinstance(body, dict) or not body:
+        raise ToolError("There is nothing to change.")
+    extra = set(body) - allowed
+    if extra:
+        raise ToolError("That change is not allowed.")
+    return dict(body)
+
+
+def _requirement_create(gw: ApiGateway, p: Dict[str, Any], _user: str) -> str:
+    body = _clean(p.get("body"), REQUIREMENT_KEYS)
+    gw.act("POST", "/api/tracker/requirements", json=body)
+    return f"Added the requirement {text(p.get('title'), 120)}."
+
+
+def _requirement_update(gw: ApiGateway, p: Dict[str, Any], _user: str) -> str:
+    rid = str(p.get("requirement_id") or "")
+    if not _ID.match(rid):
+        raise ToolError("That requirement could not be identified.")
+    body = _clean(p.get("body"), REQUIREMENT_KEYS)
+    gw.act("PATCH", f"/api/tracker/requirements/{rid}", json=body)
+    title = text(p.get("title"), 120) or "The requirement"
+    if body.get("status") == "closed":
+        return f"{title} is closed. It is on the Closures page and has a row on Selections and joining."
+    if body.get("status") == "open":
+        return f"{title} is open again."
+    return f"Updated {title}."
+
+
+def _selection_update(gw: ApiGateway, p: Dict[str, Any], _user: str) -> str:
+    sid = str(p.get("selection_id") or "")
+    if not _ID.match(sid):
+        raise ToolError("That selection could not be identified.")
+    gw.act("PATCH", f"/api/tracker/selections/{sid}", json=_clean(p.get("body"), SELECTION_KEYS))
+    return f"Updated the selection for {text(p.get('title'), 120)}."
+
+
 def _library_upload(kind: str) -> Callable[[ApiGateway, Dict[str, Any], str], str]:
     path = "/api/cv/upload-cv" if kind == "cv" else "/api/jd/upload-jd"
 
@@ -99,6 +145,9 @@ ACTIONS: Dict[str, Action] = {a.kind: a for a in (
     Action("job.edit", "Edit a job posting", CORE, _job_edit),
     Action("notice.set", "Change the notice shown to everyone", ADMIN, _notice, outward=True),
     Action("tokens.decide", "Answer a token reset request", ADMIN, _token_decision),
+    Action("requirement.create", "Add a requirement", TRACKER_FULL, _requirement_create),
+    Action("requirement.update", "Update a requirement", CORE, _requirement_update),
+    Action("selection.update", "Update a selection", SELECTIONS, _selection_update),
     Action("cv.upload", "Add a CV to the library", CORE, _library_upload("cv")),
     Action("jd.upload", "Add a job description to the library", CORE, _library_upload("jd")),
 )}

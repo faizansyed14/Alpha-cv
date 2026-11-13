@@ -4,7 +4,7 @@
                lower-case tokens joined by single spaces. A keyword is found as a whole word, and a phrase as an exact phrase.
   literal      only what the CV literally says (its text, name, contact, location, nationality): no AI-written skill or
                responsibility sentences or keywords. Boolean search is decided on this, so a term the CV does not contain
-               never matches.
+               never matches. On PostgreSQL a word also matches its other forms (manage / managing / management): see FTS_CONFIG.
   location     location tokens ("Dubai, UAE" -> "dubai uae")
   nationality  nationality tokens
 
@@ -16,6 +16,11 @@ from __future__ import annotations
 import re
 import unicodedata
 from typing import Any, Dict, Iterable, List, Optional
+
+# The PostgreSQL text-search configuration the CV words are indexed and searched with (made by migration 0028): English word forms are
+# one word (manage / managed / managing / management, engineer / engineers / engineering) and, unlike the stock "english", NO stop words
+# are dropped, so a term such as "IT" or "head of IT" is still searchable. Names and places keep the plain 'simple' configuration.
+FTS_CONFIG = "cv_english"
 
 # Technology names a word tokenizer would otherwise destroy ("C#" -> "c", ".NET" -> "net").
 _TECH = (

@@ -12,6 +12,8 @@ from sqlmodel import SQLModel, Session
 from app.config.settings import settings
 from app.ingestion.boolean_query import BooleanQueryError
 from app.models.talent import Candidate, CandidateSearch, JobApplication, JobPosting
+import app.models.requirement  # noqa: F401  (its tables are created with the others)
+import app.models.selection  # noqa: F401
 from app.store import TalentStore
 from app.store.vectors import VectorStore
 
@@ -74,8 +76,8 @@ def test_a_candidate_is_one_row_with_its_lists_as_array_columns(store):
         search = s.get(CandidateSearch, cid)
         if store._fts:      # PostgreSQL keeps only the tsvectors: the CV's own words in literal_tsv, what the AI added in extra_tsv
             assert search.text == "" and search.literal == ""
-            assert "'payment'" in search.literal_tsv and "'systems'" in search.literal_tsv
-            assert "'aws'" in search.extra_tsv and "'associate'" in search.extra_tsv
+            assert "'payment'" in search.literal_tsv and "'system'" in search.literal_tsv                # word forms: systems -> system
+            assert "'aw'" in search.extra_tsv and "'associ'" in search.extra_tsv       # stemmed: aws -> aw, associate -> associ
         else:
             assert "payment systems" in search.text and "aws certified developer associate" in search.text
         assert search.location == "dubai uae" and search.nationality == "indian"
@@ -121,6 +123,57 @@ def test_paging_counting_and_category_folders(store):
     assert store.count_candidates() == 7 and store.count_candidates(["Finance & Accounting"]) == 1
     assert store.category_counts() == {"Software & Application Development": 6, "Finance & Accounting": 1}
     assert store.list_candidate_ids(0, 10, ["Finance & Accounting"]) == [ids[0]]
+
+
+def test_cursor_paging_walks_the_whole_list_once_and_survives_a_delete(store):
+    from app.store.candidates import BadCursor, parse_page_cursor
+
+    same = datetime(2026, 1, 1)                                   # 1-3 share one upload time: the id decides their order
+    ids = [store.save_candidate(cv(i, uploaded_at=same if i <= 3 else same + timedelta(hours=i))) for i in range(1, 8)]
+    newest_first = store.list_candidate_ids(0, 10)
+    assert sorted(newest_first) == sorted(ids)
+
+    seen, cursor, pages = [], None, 0
+    while True:
+        page, cursor = store.list_candidate_page(2, after=parse_page_cursor(cursor))
+        seen += page
+        pages += 1
+        if cursor is None:
+            break
+    assert seen == newest_first and pages == 4                      # 2 + 2 + 2 + 1: nothing repeated, nothing skipped
+
+    first, cursor = store.list_candidate_page(3)
+    store.delete_candidate(first[0])                                # a row before the cursor goes away: the next page is unaffected
+    second, _ = store.list_candidate_page(3, after=parse_page_cursor(cursor))
+    assert second == newest_first[3:6]
+
+    store.save_candidate({"id": ids[5], "facts": {"category": "Finance & Accounting"}})
+    assert store.list_candidate_page(5, ["Finance & Accounting"]) == ([ids[5]], None)
+    with pytest.raises(BadCursor):
+        parse_page_cursor("not-a-date|x")
+
+
+def test_search_pages_by_cursor_and_counts_only_when_asked(store):
+    ids = [store.save_candidate(cv(i, uploaded_at=datetime(2026, 1, 1) + timedelta(hours=i))) for i in range(1, 8)]
+    from app.store.candidates import parse_page_cursor
+
+    first, total, estimate, cursor = store.search_candidate_page(["python"], 3)
+    assert first == list(reversed(ids))[:3] and total == 7 and not estimate and cursor
+    second, total, _, cursor = store.search_candidate_page(["python"], 3, after=parse_page_cursor(cursor), with_total=False)
+    third, _, _, end = store.search_candidate_page(["python"], 3, after=parse_page_cursor(cursor), with_total=False)
+    assert first + second + third == list(reversed(ids)) and total is None and end is None
+
+
+def test_category_counts_are_exact_and_follow_every_save_and_delete(store):
+    a = store.save_candidate(cv(1))
+    store.save_candidate(cv(2, facts={"category": "Finance & Accounting"}))
+    assert store.cached_category_counts() == {"Software & Application Development": 1, "Finance & Accounting": 1}
+    store.save_candidate(cv(3))
+    assert store.cached_category_counts()["Software & Application Development"] == 2      # not a stale cached answer
+    store.save_candidate({"id": a, "facts": {"category": "Finance & Accounting"}})        # moved to another category
+    assert store.cached_category_counts() == {"Software & Application Development": 1, "Finance & Accounting": 2}
+    store.delete_candidate(a)
+    assert store.cached_category_counts() == {"Software & Application Development": 1, "Finance & Accounting": 1}
 
 
 def test_facets_count_candidates(store):
@@ -459,7 +512,8 @@ def test_full_text_and_plain_search_agree_with_the_in_memory_rule(store):
         wanted = {cid for cid, t in ids.items() if bq.evaluate(node, normalize(t + " Person"))}
         got = set(store.search_candidates(boolean_query=query, limit=100)["ids"])
         assert got == wanted, query
-    for words, expect in ((["cloud", "engineer"], 2), (["java"], 1), (["project", "management"], 1), (["sap", "fico"], 1)):
+    # plain keywords (each anywhere in the CV): on PostgreSQL a word also matches its other forms, so "Managed a project" has both "project" and "management"
+    for words, expect in ((["cloud", "engineer"], 2), (["java"], 1), (["project", "management"], 2 if store._fts else 1), (["sap", "fico"], 1)):
         assert len(store.search_candidate_ids(words, 0, 50)[0]) == expect, words
 
 
@@ -496,16 +550,16 @@ def test_creating_the_collections_twice_at_once_is_not_an_error():
 
 
 def test_a_saved_or_deleted_candidate_clears_the_cached_counts(store):
-    from app.providers.cache.memory import get_cache_service
+    from app.providers.cache.redis import get_redis_cache
+    from app.store.candidates import COUNTS_KEY, COUNTS_NS
 
-    cache = get_cache_service()
-    cache.set("categories", {"stale": 1}, ttl_seconds=60, namespace="cv_data")
-    cache.set("cv_total:", 99, ttl_seconds=60, namespace="cv_data")
+    cache = get_redis_cache()                  # the counts are shared by every process (in tests: its in-process stand-in)
+    cache.set(COUNTS_KEY, {"stale": 1}, ttl_seconds=60, namespace=COUNTS_NS)
     cid = store.save_candidate(cv(1))
-    assert cache.get("categories", namespace="cv_data") is None and cache.get("cv_total:", namespace="cv_data") is None
-    cache.set("categories", {"stale": 1}, ttl_seconds=60, namespace="cv_data")
+    assert cache.get(COUNTS_KEY, namespace=COUNTS_NS) is None
+    cache.set(COUNTS_KEY, {"stale": 1}, ttl_seconds=60, namespace=COUNTS_NS)
     store.delete_candidate(cid)
-    assert cache.get("categories", namespace="cv_data") is None
+    assert cache.get(COUNTS_KEY, namespace=COUNTS_NS) is None
 
 
 def test_a_runaway_search_is_cancelled_by_postgresql(store, monkeypatch):
@@ -553,51 +607,96 @@ def test_the_dashboard_overview_counts_every_posting_in_the_database(store):
     assert {j["job_title"] for j in o["recent_jobs"]} == {"Backend Engineer", "Designer", "Old role"}
 
 
-def test_saved_cvs_are_each_persons_own_list_and_hold_no_cv_data(store):
-    from app.models.talent import SavedCandidate
+def test_a_search_word_matches_its_other_forms_on_postgresql(store):
+    """On PostgreSQL the CV words are indexed with their English word forms and no stop words: manage finds managed, engineer finds engineering,
+    "IT" is still a word, and Java is still not JavaScript. (SQLite, used by the other tests, matches exact words.)"""
+    if not store._fts:
+        pytest.skip("word forms are a PostgreSQL text-search feature")
+    one = store.save_candidate(cv(1, raw_text="She managed the network engineering team. Management of IT support and Python scripts."))
+    two = store.save_candidate(cv(2, raw_text="JavaScript developer for the head of IT"))
+    ids = lambda q: set(store.search_candidates(boolean_query=q, limit=10)["ids"])
+    assert ids('manage AND "network engineer"') == {one}                  # managed + engineering
+    assert ids("management") == {one} and ids("manages") == {one}
+    assert ids("IT") == {one, two} and ids('"head of IT"') == {two}      # a stop word like "it" is still searchable
+    assert ids("Java") == set() and ids("javascript") == {two}           # a different word stays different
+    assert ids("manage NOT javascript") == {one}
+    assert ids("Backend") == set()                                       # the AI-written job title is not the CV's own words
 
-    a, b, c = (store.save_candidate(cv(i)) for i in (1, 2, 3))
-    assert store.save_candidates("rita", [a, b, "no-such-cv", a]) == 2                  # unknown ids and repeats are skipped
-    assert store.save_candidates("rita", [a, b]) == 0                                   # saving again adds nothing
-    assert store.save_candidates("sam", [c]) == 1
-    assert store.save_candidates("rita", []) == 0
-    assert set(store.saved_candidate_ids("rita")) == {a, b} and store.saved_candidate_ids("sam") == [c]
-    assert store.saved_candidate_ids("nobody") == []
+
+def test_a_persons_live_jobs_can_all_be_switched_off_and_nothing_else_changes(store):
+    jid = store.save_job_description(jd(1))
+    mine = [store.create_job_posting({"job_description_id": jid, "public_token": f"m{i}", "posted_by_user": "sam"}) for i in range(2)]
+    other = store.create_job_posting({"job_description_id": jid, "public_token": "o1", "posted_by_user": "lee"})
+    off = store.create_job_posting({"job_description_id": jid, "public_token": "m9", "posted_by_user": "sam"})
+    store.update_job_posting(off, {"is_active": False})
+    assert store.deactivate_jobs_posted_by("sam") == 2 and store.deactivate_jobs_posted_by("sam") == 0          # only live ones; then nothing left
+    active = lambda pid: store.get_job_posting_by_id(pid)["is_active"]
+    assert not any(active(p) for p in mine) and active(other)                                                     # someone else's job is untouched
+    assert store.get_job_posting_by_id(mine[0]) is not None                                                       # nothing was deleted
+    assert store.deactivate_jobs_posted_by("") == 0 and store.deactivate_jobs_posted_by("nobody") == 0
+
+
+def test_simultaneous_closes_make_one_selection_row_on_postgresql(store):
+    """Eight workers close the same requirement at the same instant: exactly one makes the row, the rest get nothing back, nobody gets an error."""
+    if not store._fts:
+        pytest.skip("the race is a PostgreSQL matter (SQLite serialises its writers)")
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import date
+
+    from sqlalchemy import func, select
+
+    from app.models.requirement import Requirement
+    from app.models.selection import Selection, SelectionRecruiter
+    from app.services.selections import create_for_closed
+
     with Session(store.engine) as s:
-        row = s.get(SavedCandidate, ("rita", a))
-        assert {col.name for col in SavedCandidate.__table__.columns} == {"username", "candidate_id", "saved_at"} and row.saved_at
+        req = Requirement(requirement_date=date(2026, 11, 2), position="P", client="C", created_by="sam", location="Dubai", status="closed",
+                          closed_at=datetime.utcnow(), closed_by="sam")
+        s.add(req)
+        s.commit()
+        rid = req.id
+
+    def close_it(_):
+        with Session(store.engine) as s:
+            made = create_for_closed(s, s.get(Requirement, rid), ["u1", "u2"])
+            s.commit()
+            return made is not None
+
+    with ThreadPoolExecutor(8) as pool:
+        made = list(pool.map(close_it, range(8)))
+    assert sum(made) == 1
+    with Session(store.engine) as s:
+        assert s.execute(select(func.count()).select_from(Selection)).scalar() == 1
+        assert s.execute(select(func.count()).select_from(SelectionRecruiter)).scalar() == 2
 
 
-def test_the_saved_list_is_newest_saved_first_and_paged_by_the_database(store):
-    ids = [store.save_candidate(cv(i)) for i in range(1, 6)]
-    for i in ids:                                                                      # saved one after the other
-        store.save_candidates("rita", [i])
-    got, total = store.list_saved_ids("rita", 0, 2)
-    assert total == 5 and got == [ids[4], ids[3]]
-    got, total = store.list_saved_ids("rita", 2, 10)
-    assert got == [ids[2], ids[1], ids[0]] and total == 5
-    assert store.list_saved_ids("sam", 0, 10) == ([], 0)
+def test_every_postgresql_connection_runs_in_utc_whatever_the_server_says(store):
+    if not store._fts:
+        pytest.skip("time zones are a PostgreSQL matter")
+    from sqlalchemy import text
+
+    from app.db.database import pin_utc
+
+    shows = lambda e: e.connect().execute(text("SHOW TimeZone")).scalar()
+    skewed = create_engine(store.engine.url, connect_args={"options": "-c timezone=Asia/Dubai"})
+    assert shows(skewed) == "Asia/Dubai"                       # what a server or a pooler set to local time would give
+    event.listen(skewed, "connect", pin_utc)
+    skewed.dispose()
+    assert shows(skewed) == "UTC"
 
 
-def test_unsaving_removes_only_the_save_and_deleting_a_cv_removes_its_saves(store):
-    a, b = store.save_candidate(cv(1)), store.save_candidate(cv(2))
-    store.save_candidates("rita", [a, b])
-    store.save_candidates("sam", [a])
-    assert store.unsave_candidates("rita", [a, "no-such-cv"]) == 1
-    assert store.saved_candidate_ids("rita") == [b] and store.saved_candidate_ids("sam") == [a]      # sam still has it; the CV still exists
-    assert store.candidate_detail(a) is not None
-    store.delete_candidate(b)
-    assert store.saved_candidate_ids("rita") == []                                     # the CV is gone, so is the save
+def test_the_storage_report(store):
+    from app.services.db_health import storage_report
 
-
-def test_searching_the_saved_cvs_looks_only_at_that_persons_saves(store):
-    python = store.save_candidate(cv(1, raw_text="Alpha developer who writes Python", skills=["Alpha work"], keywords=["Alpha"]))
-    java = store.save_candidate(cv(2, raw_text="Beta developer who writes Java", skills=["Beta work"], keywords=["Beta"]))
-    other = store.save_candidate(cv(3, raw_text="Gamma developer who writes Python", skills=["Gamma work"], keywords=["Gamma"]))
-    store.save_candidates("rita", [python, java])
-    store.save_candidates("sam", [other])
-    ids, total = store.search_saved_ids("rita", ["python"], 0, 10)
-    assert ids == [python] and total == 1                                              # sam's Python CV is not in rita's list
-    ids, total = store.search_saved_ids("rita", ["developer"], 0, 10)
-    assert set(ids) == {python, java} and total == 2
-    assert store.search_saved_ids("rita", ["rust"], 0, 10) == ([], 0)
+    store.save_candidate(cv(1))
+    report = storage_report(store.engine)
+    if not store._fts:
+        assert report == {"supported": False, "warnings": []}
+        return
+    names = {t["name"] for t in report["tables"]}
+    assert report["supported"] and {"candidate", "candidate_search"} <= names
+    # row counts come from PostgreSQL's statistics (cheap at any size, an estimate until autovacuum or ANALYZE has run), so a fresh table may read 0
+    assert report["candidates"] >= 0 and report["search_bytes_per_cv"] in (None,) or report["search_bytes_per_cv"] > 0
+    assert report["database_bytes"] > 0 and isinstance(report["warnings"], list) and report["largest_indexes"]
+    search = next(t for t in report["tables"] if t["name"] == "candidate_search")
+    assert search["total_bytes"] >= search["table_bytes"] + search["index_bytes"] - 1 and 0 <= search["dead_ratio"] <= 1

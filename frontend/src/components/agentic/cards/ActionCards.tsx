@@ -20,17 +20,17 @@ export function ActionCard({ card, active }: { card: AgenticCard; active: boolea
             <Action tone="primary" label="Confirm" onClick={() => decide('confirm', card.id, 'Yes, do it')} />
             <Action label="Cancel" onClick={() => decide('cancel_action', card.id, 'Cancel')} />
           </div>
-        ) : <span className="text-[11.5px] text-slate-400">This change is no longer waiting. Ask again if you still want it.</span>
+        ) : <span className="text-2xs text-slate-400">This change is no longer waiting. Ask again if you still want it.</span>
       )}>
       <dl className="space-y-2.5 px-4 py-3.5">
         {rows.map((r, i) => (
           <div key={i} className="grid gap-x-4 sm:grid-cols-[130px_1fr]">
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{r.label}</dt>
-            <dd className="whitespace-pre-wrap break-words text-[13px] text-slate-800">{r.value}</dd>
+            <dt className="text-2xs font-semibold uppercase tracking-wide text-slate-400">{r.label}</dt>
+            <dd className="whitespace-pre-wrap break-words text-sm text-slate-800">{r.value}</dd>
           </div>
         ))}
       </dl>
-      {card.warning ? <p className="mx-4 mb-3.5 rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-800">{card.warning}</p> : null}
+      {card.warning ? <p className="mx-4 mb-3.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{card.warning}</p> : null}
     </CardShell>
   );
 }
@@ -39,7 +39,7 @@ export function ActionCard({ card, active }: { card: AgenticCard; active: boolea
 export function ActionDoneCard({ card }: { card: AgenticCard }) {
   const ok = card.ok !== false;
   return (
-    <div className={`flex items-center gap-2.5 rounded-2xl border px-4 py-2.5 text-[13px] ${ok ? 'border-emerald-200 bg-emerald-50/80 text-emerald-800' : 'border-rose-200 bg-rose-50/80 text-rose-800'}`}>
+    <div className={`flex items-center gap-2.5 rounded-2xl border px-4 py-2.5 text-sm ${ok ? 'border-emerald-200 bg-emerald-50/80 text-emerald-800' : 'border-rose-200 bg-rose-50/80 text-rose-800'}`}>
       {ok ? <Check className="h-4 w-4 shrink-0" /> : <X className="h-4 w-4 shrink-0" />}
       <span><b className="font-semibold">{card.title}</b>{card.text ? `: ${card.text}` : ''}</span>
     </div>

@@ -1,7 +1,7 @@
 """Password rules for accounts created or changed through the API.
 
 Length is what matters (NIST 800-63B): at least MIN_LENGTH characters, no composition tricks, but never a password that
-is on the short list below or that contains the person's own name / email. The check runs on the server; the form only
+is on the short list below. A password may contain the person's own name or email. The check runs on the server; the form only
 repeats the same text.
 """
 from __future__ import annotations
@@ -19,7 +19,8 @@ _COMMON = {
 
 
 def password_problem(password: str, *, username: str = "", email: str = "") -> str | None:
-    """Why the password is not acceptable, or None when it is."""
+    """Why the password is not acceptable, or None when it is. (``username`` and ``email`` are accepted for the callers that pass them
+    but no longer matter: a password may contain them.)"""
     if not isinstance(password, str) or len(password) < MIN_LENGTH:
         return f"Password must be at least {MIN_LENGTH} characters"
     if len(password) > MAX_LENGTH:
@@ -29,8 +30,4 @@ def password_problem(password: str, *, username: str = "", email: str = "") -> s
         return "That password is too common or too repetitive"
     if low.isdigit():
         return "Password cannot be only digits"
-    for ident in (username, (email or "").split("@")[0]):
-        ident = (ident or "").strip().lower()
-        if len(ident) >= 4 and ident in low:
-            return "Password must not contain the username or email"
     return None

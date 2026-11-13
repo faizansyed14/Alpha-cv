@@ -286,10 +286,10 @@ export default function JobApplicationForm({
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
+    if (file.size > 5 * 1024 * 1024) {
       setFormErrors(prev => ({
         ...prev,
-        file: 'File size must be less than 10MB'
+        file: 'File size must be less than 5MB'
       }));
       return;
     }
@@ -401,7 +401,7 @@ export default function JobApplicationForm({
 
   // Shared field classes
   const inputClass = (hasError?: boolean) =>
-    `field-input h-10 w-full text-[14px] ${
+    `field-input h-10 w-full text-base ${
       hasError
         ? 'border-red-300 focus:border-red-400 focus:ring-red-500/20'
         : ''
@@ -413,7 +413,7 @@ export default function JobApplicationForm({
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-        className="relative overflow-hidden rounded-2xl border border-emerald-100 bg-white px-6 py-10 text-center shadow-card"
+        className="relative overflow-hidden rounded-2xl border border-emerald-100 bg-paper px-6 py-10 text-center shadow-card"
       >
         <div aria-hidden className="pointer-events-none absolute -right-10 -top-12 h-40 w-40 rounded-full bg-emerald-400/15 blur-3xl" />
         <div aria-hidden className="pointer-events-none absolute -bottom-14 left-1/4 h-36 w-36 rounded-full bg-navy-400/10 blur-3xl" />
@@ -452,7 +452,7 @@ export default function JobApplicationForm({
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.35, duration: 0.3 }}
-          className="text-[18px] font-bold tracking-[-0.02em] text-slate-900"
+          className="text-xl font-bold tracking-[-0.02em] text-slate-900"
         >
           CV submitted
         </motion.h3>
@@ -460,7 +460,7 @@ export default function JobApplicationForm({
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.45, duration: 0.3 }}
-          className="mx-auto mt-2 max-w-sm text-[13px] leading-relaxed text-slate-500"
+          className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-slate-500"
         >
           Thank you for applying. Our team will review your CV and email you if your profile matches the role.
         </motion.p>
@@ -491,7 +491,7 @@ export default function JobApplicationForm({
       {/* Error / already-applied notice */}
       {error && (
         <div
-          className={`flex items-start gap-2.5 rounded-lg border p-3 text-[13px] ${
+          className={`flex items-start gap-2.5 rounded-lg border p-3 text-sm ${
             /already applied|already being processed|already received/i.test(error)
               ? 'border-navy-200 bg-navy-50 text-navy-900'
               : 'border-red-200 bg-red-50 text-red-700'
@@ -511,8 +511,8 @@ export default function JobApplicationForm({
         <div className="flex items-start gap-3">
           <img src="/video/ai-robot.gif" alt="" aria-hidden className="h-9 w-9 shrink-0 object-contain" />
           <div className="min-w-0 flex-1">
-            <h3 className="text-[14px] font-semibold text-slate-900">Upload CV to fill info</h3>
-            <p className="mt-0.5 text-[12.5px] leading-relaxed text-slate-600">
+            <h3 className="text-base font-semibold text-slate-900">Upload CV to fill info</h3>
+            <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
               We read your CV and fill the form below. You can still edit every field.
             </p>
           </div>
@@ -531,13 +531,13 @@ export default function JobApplicationForm({
         />
 
         {selectedFile ? (
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-surface-border bg-white p-3">
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-surface-border bg-paper p-3">
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-brand-50">
                 <FileText className="h-4 w-4 text-brand-600" />
               </div>
               <div className="min-w-0">
-                <p className="truncate text-[13px] font-medium text-slate-900">{selectedFile.name}</p>
+                <p className="truncate text-sm font-medium text-slate-900">{selectedFile.name}</p>
                 <p className="text-xs text-slate-500">
                   {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
                   {autofillState === 'reading' ? ' · Reading…' : autofillState === 'done' ? ' · Attached' : ''}
@@ -564,7 +564,7 @@ export default function JobApplicationForm({
           </div>
         ) : (
           <div
-            className={`mt-4 rounded-lg border-2 border-dashed bg-white p-5 text-center transition-colors ${
+            className={`mt-4 rounded-lg border-2 border-dashed bg-paper p-5 text-center transition-colors ${
               dragActive
                 ? 'border-brand-400 bg-brand-50/40'
                 : formErrors.file
@@ -584,7 +584,7 @@ export default function JobApplicationForm({
             >
               Upload CV to fill info
             </Button>
-            <p className="mt-2 text-xs text-slate-500">PDF, DOC, DOCX or TXT · max 10MB · or drop a file here</p>
+            <p className="mt-2 text-xs text-slate-500">PDF, DOC, DOCX or TXT · max 5MB · or drop a file here</p>
           </div>
         )}
 
@@ -593,17 +593,17 @@ export default function JobApplicationForm({
         )}
 
         {autofillState === 'reading' && (
-          <p className="mt-3 flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-[12.5px] text-slate-600 ring-1 ring-slate-200">
+          <p className="mt-3 flex items-center gap-2 rounded-lg bg-paper px-3 py-2 text-xs text-slate-600 ring-1 ring-slate-200">
             <Loader2 className="h-4 w-4 animate-spin text-navy-600" /> Reading your CV and filling the form…
           </p>
         )}
         {autofillState === 'unreadable' && (
-          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800 ring-1 ring-amber-100">
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-100">
             We couldn&apos;t read this CV. Enter your details manually below.
           </p>
         )}
         {autofillState === 'done' && (
-          <div className="mt-3 rounded-lg bg-white px-3 py-2.5 text-[12.5px] leading-relaxed text-slate-700 ring-1 ring-brand-100">
+          <div className="mt-3 rounded-lg bg-paper px-3 py-2.5 text-xs leading-relaxed text-slate-700 ring-1 ring-brand-100">
             {Object.keys(autofilled).length > 0 ? (
               <p>
                 <span className="font-semibold text-brand-700">Filled from your CV:</span>{' '}
@@ -625,7 +625,7 @@ export default function JobApplicationForm({
       <div>
         <div className="mb-3 flex items-center gap-3">
           <div className="h-px flex-1 bg-slate-200" />
-          <p className="shrink-0 text-[12px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+          <p className="shrink-0 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
             {autofillState === 'done' && Object.keys(autofilled).length > 0
               ? 'Review extracted info'
               : 'Or enter details manually'}
@@ -785,13 +785,13 @@ export default function JobApplicationForm({
 
       {/* Experience warning modal */}
       {experienceWarning && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4">
-          <div className="animate-page-enter w-full max-w-md rounded-xl border border-surface-border bg-white p-6 shadow-[var(--shadow-md)]">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-scrim/40 p-4">
+          <div className="animate-page-enter w-full max-w-md rounded-xl border border-surface-border bg-paper p-6 shadow-[var(--shadow-md)]">
             <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-amber-50">
               <AlertCircle className="h-5 w-5 text-amber-600" />
             </div>
-            <h3 className="text-[15px] font-semibold text-slate-900">Experience check</h3>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-slate-600">
+            <h3 className="text-md font-semibold text-slate-900">Experience check</h3>
+            <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
               This role typically requires{' '}
               <span className="font-medium text-slate-900">{experienceWarning.required} years</span>.
               You listed{' '}

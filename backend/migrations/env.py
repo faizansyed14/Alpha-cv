@@ -6,12 +6,14 @@ The URL comes from DATABASE_URL (app settings), so it works against local Postgr
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, event, pool
 from sqlmodel import SQLModel
 
 from app.config.settings import settings
 import app.models.agent  # noqa: F401  (registers tables)
 import app.models.bug_report  # noqa: F401
+import app.models.requirement  # noqa: F401  (the tracker: without these, autogenerate would propose dropping its tables)
+import app.models.selection  # noqa: F401
 import app.models.talent  # noqa: F401
 import app.models.user  # noqa: F401
 
@@ -24,11 +26,17 @@ config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"
 target_metadata = SQLModel.metadata
 
 
+def include_object(obj, name, type_, reflected, compare_to):
+    """The trigram indexes on the JD library (created by hand in a migration, they are expressions the models do not declare) are not drift."""
+    return not (type_ == "index" and reflected and (name or "").endswith("_trgm"))
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=settings.DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
+        include_object=include_object,
         dialect_opts={"paramstyle": "named"},
     )
     with context.begin_transaction():
@@ -41,8 +49,12 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
+    if connectable.dialect.name == "postgresql":
+        from app.db.database import pin_utc
+
+        event.listen(connectable, "connect", pin_utc)          # migrations run in UTC too
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(connection=connection, target_metadata=target_metadata, include_object=include_object)
         with context.begin_transaction():
             context.run_migrations()
 

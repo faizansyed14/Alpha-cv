@@ -5,10 +5,10 @@
 
 export type WorkspaceId =
   | 'dashboard'
+  | 'tracker'
   | 'upload'
   | 'database'
   | 'candidates'
-  | 'saved'
   | 'jobs'
   | 'match'
   | 'careers'
@@ -18,6 +18,7 @@ export type WorkspaceId =
   | 'monitor'
   | 'agent-interview'
   | 'agent-linkedin'
+  | 'agent-hiring-image'
   | 'agent-usage'
   | 'report-bug'
   | 'admin-bugs'
@@ -26,10 +27,10 @@ export type WorkspaceId =
 /** Canonical URL for each workspace. */
 export const WORKSPACE_PATHS: Record<WorkspaceId, string> = {
   dashboard: '/dashboard',
+  tracker: '/tracker',
   upload: '/upload',
   database: '/candidates', // default database view
   candidates: '/candidates',
-  saved: '/saved-cvs',
   jobs: '/jobs',
   match: '/match',
   careers: '/careers-manage',
@@ -39,6 +40,7 @@ export const WORKSPACE_PATHS: Record<WorkspaceId, string> = {
   monitor: '/monitor',
   'agent-interview': '/agents/interview',
   'agent-linkedin': '/agents/linkedin',
+  'agent-hiring-image': '/agents/hiring-image',
   'agent-usage': '/agents/usage',
   'report-bug': '/report-bug',
   'admin-bugs': '/admin/bugs',
@@ -47,9 +49,9 @@ export const WORKSPACE_PATHS: Record<WorkspaceId, string> = {
 
 const PATH_TO_WORKSPACE: Record<string, WorkspaceId> = {
   '/dashboard': 'dashboard',
+  '/tracker': 'tracker',
   '/upload': 'upload',
   '/candidates': 'candidates',
-  '/saved-cvs': 'saved',
   '/jobs': 'jobs',
   '/match': 'match',
   '/careers-manage': 'careers',
@@ -58,6 +60,7 @@ const PATH_TO_WORKSPACE: Record<string, WorkspaceId> = {
   '/monitor': 'monitor',
   '/agents/interview': 'agent-interview',
   '/agents/linkedin': 'agent-linkedin',
+  '/agents/hiring-image': 'agent-hiring-image',
   '/agents/usage': 'agent-usage',
   '/report-bug': 'report-bug',
   '/admin/bugs': 'admin-bugs',
@@ -71,6 +74,8 @@ export function workspacePath(id: WorkspaceId | string): string {
 export function workspaceFromPath(pathname: string): WorkspaceId | null {
   const clean = pathname.replace(/\/$/, '') || '/';
   if (clean.startsWith('/candidates/')) return 'candidates';
+  if (clean.startsWith('/careers-manage')) return 'careers';
+  if (clean.startsWith('/tracker')) return 'tracker';
   return PATH_TO_WORKSPACE[clean] ?? null;
 }
 

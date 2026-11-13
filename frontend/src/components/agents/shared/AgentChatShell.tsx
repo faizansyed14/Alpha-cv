@@ -40,8 +40,8 @@ function errorText(e: any, fallback: string): string {
 function Note({ m }: { m: AgentMessage }) {
   const isError = m.status === 'error';
   return (
-    <div className={cn('inline-flex max-w-[640px] items-start gap-2.5 rounded-2xl border px-4 py-3 text-[14px] leading-relaxed',
-      isError ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-slate-200 bg-white/90 text-slate-800')}>
+    <div className={cn('inline-flex max-w-[640px] items-start gap-2.5 rounded-2xl border px-4 py-3 text-base leading-relaxed',
+      isError ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-slate-200 bg-paper/90 text-slate-800')}>
       {isError && <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />}
       <span>{m.content}</span>
     </div>
@@ -273,7 +273,7 @@ export function AgentChatShell({ agentId, title, headline, blurb, heroMarkSrc, w
     <div className="flex h-full flex-col" style={{ width: SIDE_W }}>
       <div className="p-2.5">
         <button type="button" onClick={newChat}
-          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-slate-800 transition-colors hover:bg-slate-200/60">
+          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-800 transition-colors hover:bg-slate-200/60">
           <Plus className="h-4 w-4" /> New chat
         </button>
       </div>
@@ -282,7 +282,7 @@ export function AgentChatShell({ agentId, title, headline, blurb, heroMarkSrc, w
   );
 
   return (
-    <div className="flex h-[calc(100dvh-3.5rem)] overflow-hidden bg-white lg:h-dvh">
+    <div className="flex h-[calc(100dvh-3rem)] overflow-hidden bg-paper lg:h-dvh">
       <motion.aside
         className="hidden shrink-0 overflow-hidden border-r border-slate-200 bg-slate-50 lg:block"
         initial={false} animate={{ width: sideOpen ? SIDE_W : 0 }} transition={{ duration: 0.24, ease }}
@@ -293,7 +293,7 @@ export function AgentChatShell({ agentId, title, headline, blurb, heroMarkSrc, w
       <AnimatePresence>
         {drawer && (
           <div className="fixed inset-0 z-50 lg:hidden">
-            <motion.div className="absolute inset-0 bg-slate-900/40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDrawer(false)} />
+            <motion.div className="absolute inset-0 bg-scrim/40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDrawer(false)} />
             <motion.aside className="absolute inset-y-0 left-0 bg-slate-50 shadow-2xl" initial={{ x: -SIDE_W }} animate={{ x: 0 }} exit={{ x: -SIDE_W }} transition={{ duration: 0.26, ease }}>
               <button type="button" onClick={() => setDrawer(false)} aria-label="Close" className="absolute right-1 top-2.5 rounded-lg p-2 text-slate-400 hover:bg-slate-200/60"><X className="h-4 w-4" /></button>
               {sidebar}
@@ -302,7 +302,7 @@ export function AgentChatShell({ agentId, title, headline, blurb, heroMarkSrc, w
         )}
       </AnimatePresence>
 
-      <section className="relative flex min-w-0 flex-1 flex-col bg-white">
+      <section className="relative flex min-w-0 flex-1 flex-col bg-paper">
         <header className="flex h-14 shrink-0 items-center gap-1 px-2 sm:px-3">
           <button type="button" onClick={() => setDrawer(true)} aria-label="Chats" className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 lg:hidden"><PanelLeft className="h-5 w-5" /></button>
           <button type="button" onClick={() => setSideOpen((o) => !o)} aria-label={sideOpen ? 'Hide chats' : 'Show chats'} className="hidden rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 lg:block"><PanelLeft className="h-5 w-5" /></button>
@@ -310,7 +310,7 @@ export function AgentChatShell({ agentId, title, headline, blurb, heroMarkSrc, w
             {heroMarkSrc ? (
               <img src={heroMarkSrc} alt="" draggable={false} className="h-6 w-6 shrink-0 rounded-md object-cover" />
             ) : null}
-            <p className="truncate text-[15px] font-semibold text-slate-900">{title}</p>
+            <p className="truncate text-md font-semibold text-slate-900">{title}</p>
           </div>
           <ModeToggle className="mr-1" />
           <UsageMenu usage={usage} onOpen={() => void api.getAgentUsage().then(setUsage).catch(() => undefined)}
@@ -329,15 +329,15 @@ export function AgentChatShell({ agentId, title, headline, blurb, heroMarkSrc, w
                     className="mx-auto mb-4 h-16 w-16 rounded-2xl object-cover shadow-md ring-1 ring-black/5 sm:h-[72px] sm:w-[72px]"
                   />
                 ) : null}
-                <h1 className="text-[28px] font-semibold leading-tight tracking-tight text-slate-900 sm:text-[32px]">{headline}</h1>
-                <p className="mx-auto mt-2 max-w-md text-[14.5px] leading-relaxed text-slate-500">{blurb}</p>
+                <h1 className="text-3xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-[32px]">{headline}</h1>
+                <p className="mx-auto mt-2 max-w-md text-base leading-relaxed text-slate-500">{blurb}</p>
               </motion.div>
               <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease, delay: 0.08 }}>
                 {composer}
               </motion.div>
               <AnimatePresence>
                 {error && (
-                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-3 flex items-center gap-2 text-[13px] font-medium text-rose-700">
+                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-3 flex items-center gap-2 text-sm font-medium text-rose-700">
                     <AlertCircle className="h-4 w-4 shrink-0" />{error}
                   </motion.p>
                 )}
@@ -345,12 +345,12 @@ export function AgentChatShell({ agentId, title, headline, blurb, heroMarkSrc, w
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.25 }} className="mt-4 flex flex-wrap justify-center gap-2">
                 {examples.map((ex) => (
                   <button key={ex} type="button" disabled={!attached || sending || outOfTokens} onClick={() => void send(ex)}
-                    className="rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-[12.5px] text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white">
+                    className="rounded-full border border-slate-200 bg-paper px-3.5 py-1.5 text-xs text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-paper">
                     {ex}
                   </button>
                 ))}
               </motion.div>
-              {!attached && <p className="mt-4 text-center text-[12.5px] text-slate-400">Use the + button to attach a job description first.</p>}
+              {!attached && <p className="mt-4 text-center text-xs text-slate-400">Use the + button to attach a job description first.</p>}
             </div>
           ) : (
             <div className="mx-auto w-full max-w-3xl space-y-7 px-4 py-6 sm:px-6">
@@ -358,15 +358,15 @@ export function AgentChatShell({ agentId, title, headline, blurb, heroMarkSrc, w
                 <motion.div key={m.id ?? `t${i}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.26, ease }}>
                   {m.role === 'user' ? (
                     <div className="flex justify-end">
-                      <div className="max-w-[85%] whitespace-pre-wrap rounded-3xl bg-navy-900 px-4 py-2.5 text-[14.5px] leading-relaxed text-white sm:max-w-[560px]">{m.content}</div>
+                      <div className="max-w-[85%] whitespace-pre-wrap rounded-3xl bg-solid px-4 py-2.5 text-base leading-relaxed text-white sm:max-w-[560px]">{m.content}</div>
                     </div>
                   ) : (
                     <div>
                       {m.status !== 'ok'
                         ? <Note m={m} />
                         : (renderAnswer(m, { fresh: m.id !== null && m.id === freshId })
-                          ?? <div className="whitespace-pre-wrap text-[14.5px] leading-relaxed text-slate-900">{m.content}</div>)}
-                      {m.tokens ? <p className="mt-2 text-[11.5px] tabular-nums text-slate-400">{m.tokens.toLocaleString()} tokens</p> : null}
+                          ?? <div className="whitespace-pre-wrap text-base leading-relaxed text-slate-900">{m.content}</div>)}
+                      {m.tokens ? <p className="mt-2 text-2xs tabular-nums text-slate-400">{m.tokens.toLocaleString()} tokens</p> : null}
                     </div>
                   )}
                 </motion.div>
@@ -382,7 +382,7 @@ export function AgentChatShell({ agentId, title, headline, blurb, heroMarkSrc, w
               <AnimatePresence>
                 {error && (
                   <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                    <div className="mb-2 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-[12.5px] font-medium text-rose-700">
+                    <div className="mb-2 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-xs font-medium text-rose-700">
                       <AlertCircle className="h-4 w-4 shrink-0" /><span className="flex-1">{error}</span>
                       <button type="button" onClick={() => setError(null)} aria-label="Dismiss" className="rounded p-0.5 hover:bg-rose-100"><X className="h-3.5 w-3.5" /></button>
                     </div>
@@ -393,14 +393,14 @@ export function AgentChatShell({ agentId, title, headline, blurb, heroMarkSrc, w
                 <div className="mb-2 flex gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none]">
                   {examples.map((ex) => (
                     <button key={ex} type="button" disabled={sending || outOfTokens} onClick={() => void send(ex)}
-                      className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1 text-[12px] text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+                      className="shrink-0 rounded-full border border-slate-200 bg-paper px-3 py-1 text-xs text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
                       {ex}
                     </button>
                   ))}
                 </div>
               )}
               {composer}
-              <p className="mt-2 text-center text-[11px] text-slate-400">AI can make mistakes. Check answers before you use them. Chats are saved to your account.</p>
+              <p className="mt-2 text-center text-2xs text-slate-400">AI can make mistakes. Check answers before you use them. Chats are saved to your account.</p>
             </div>
           </div>
         )}

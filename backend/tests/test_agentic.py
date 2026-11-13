@@ -205,7 +205,8 @@ def test_no_tool_can_delete_edit_or_reset_and_roles_are_least_privilege():
     writing = {t.name for t in tool_registry.ALL_TOOLS.values() if t.writes}
     # a tool that writes either only creates/starts something (and is guarded in code) or is a proposal the person must confirm
     assert {n for n in writing if not n.startswith("propose_")} == {"read_job_file", "draft_job_post", "publish_job_post", "run_matching", "generate_interview_questions", "generate_linkedin_post"}
-    assert {n for n in writing if n.startswith("propose_")} == {"propose_candidate_note", "propose_job_status", "propose_job_changes", "propose_notice", "propose_token_answer", "propose_cv_upload", "propose_jd_upload"}
+    assert {n for n in writing if n.startswith("propose_")} == {"propose_candidate_note", "propose_job_status", "propose_job_changes", "propose_notice", "propose_token_answer", "propose_cv_upload", "propose_jd_upload",
+                                                                         "propose_requirement_create", "propose_requirement_update", "propose_selection_update"}
 
 
 def test_each_specialist_holds_only_its_own_tools():
@@ -953,7 +954,7 @@ def test_only_the_read_only_list_tools_can_be_paged(gateway):
             pages.fetch(gateway, tool, {}, offset=0)
     with pytest.raises(ToolError):
         pages.fetch(gateway, "boolean_search", {"boolean_query": BOOLEAN}, cursor=None)       # a Boolean list pages by cursor only
-    assert set(pages.PAGEABLE) == {"search_candidates", "boolean_search", "list_jobs", "list_job_descriptions"}
+    assert set(pages.PAGEABLE) == {"search_candidates", "boolean_search", "list_jobs", "list_job_descriptions", "list_requirements", "list_closures", "list_selections"}
 
 
 def test_the_show_more_endpoint_pages_without_a_model_and_without_tokens(session, monkeypatch, gateway):
@@ -1125,10 +1126,10 @@ def _card(out):
     return next(c for c in out.assistant_message.meta["cards"] if c["type"] == "action")
 
 
-def _press(session, out, kind="confirm", **extra):
+def _press(session, out, kind="confirm", role="user", username="faizan", **extra):
     usage._busy.clear()
     card = _card(out)
-    return orchestrator.handle_turn(session, user=principal(), message="Yes, do it" if kind == "confirm" else "Cancel", conversation_id=out.conversation.id,
+    return orchestrator.handle_turn(session, user=principal(role, username), message="Yes, do it" if kind == "confirm" else "Cancel", conversation_id=out.conversation.id,
                                     selection={"kind": kind, "action_id": card["id"], **extra})
 
 
@@ -1273,7 +1274,10 @@ def test_no_confirmed_action_can_delete_and_every_executor_path_is_whitelisted(m
         "job.edit": {"job_id": JOB, "changes": {"job_title": "New"}},
         "notice.set": {"message": "Maintenance tonight"},
         "tokens.decide": {"request_id": "abcdefgh-1", "username": "sara", "decision": "reject"},
-        "cv.upload": {"ref": "a" * 32}, "jd.upload": {"ref": "a" * 32}}
+        "cv.upload": {"ref": "a" * 32}, "jd.upload": {"ref": "a" * 32},
+        "requirement.create": {"body": {"position": "P", "client": "C"}, "title": "P for C"},
+        "requirement.update": {"requirement_id": "req-12345678", "body": {"status": "open"}, "title": "P for C"},
+        "selection.update": {"selection_id": "sel-12345678", "body": {"status": "joined"}, "title": "P for C"}}
     assert set(samples) == set(action_catalog.ACTIONS)
     for kind, payload in samples.items():
         assert action_catalog.ACTIONS[kind].run(gateway, payload, "faizan")
@@ -1404,3 +1408,314 @@ def test_a_button_on_one_job_tells_the_model_which_exact_posting(session, monkey
                              selection={"kind": "focus", "job_id": "job-12345678", "name": "Finance Manager"})
     last_user = [m for m in seen[0]["messages"] if m["role"] == "user"][-1]["content"]
     assert "exact job posting" in last_user and "job_id=job-12345678" in last_user
+
+
+
+# ===================================================================================== the requirements tracker in Agentic mode
+REQ = "req-12345678"
+SEL = "sel-12345678"
+PEOPLE = {"recruiters": [{"id": "u-rita-0001", "username": "rita", "location": "Dubai"}, {"id": "u-rob-00001", "username": "rob", "location": "Dubai"}],
+          "managers": [{"id": "u-mona-0001", "username": "mona", "location": "Dubai"}],
+          "sales_managers": [{"id": "u-sam-00001", "username": "sam", "location": "Dubai"}]}
+
+
+def _req(**over):
+    base = {"id": REQ, "position": "Network Engineer", "client": "Acme", "requirement_date": "2026-11-02", "cv_submission_date": "2026-11-20", "status": "open",
+            "job_location": "Dubai", "salary": "12,000", "duration_type": None, "duration_value": None, "duration_unit": None, "duration_extendable": None,
+            "recruiters": [{"id": "u-rita-0001", "username": "rita", "cvs_submitted_date": None, "cvs_submitted_count": None}],
+            "manager": {"id": "u-mona-0001", "username": "mona"}, "sales_manager": {"id": "u-sam-00001", "username": "sam"},
+            "cvs_submitted_count": None, "sales_comments": "s0", "rm_comments": "old rm note", "recruiter_comments": None, "closed_at": None, "days_to_close": None,
+            "history": [{"at": "2026-11-03T10:00:00Z", "actor": "sam", "action": "changed", "field": "status", "old": "open", "new": "hold"}]}
+    base.update(over)
+    return base
+
+
+def _tracker(gateway, **extra):
+    gateway.responses["/api/tracker/options"] = PEOPLE
+    gateway.responses.update(extra)
+
+
+def _names_for(role):
+    return {t.name for s_ in specialists.available(role) for t in specialists.tools_of(s_, role)}
+
+
+def test_the_tracker_tools_follow_the_role_and_none_can_delete():
+    mgr_tools = ("list_selections", "propose_selection_update", "propose_requirement_create", "propose_requirement_update", "list_requirements", "list_closures", "tracker_analytics")
+    for role in ("manager", "account_manager", "evp", "admin"):
+        assert set(mgr_tools) <= _names_for(role), role
+    recruiter = _names_for("user")
+    assert {"list_requirements", "list_closures", "get_requirement", "tracker_analytics", "propose_requirement_update"} <= recruiter
+    assert recruiter.isdisjoint({"list_selections", "propose_selection_update", "propose_requirement_create"})        # selections: not for recruiters; adding: not for them
+    assert not [n for n in tool_registry.ALL_TOOLS if "tracker" in n and any(w in n for w in ("delete", "remove"))]
+    assert "tracker" in [s_.name for s_ in specialists.available("user")]
+
+
+def test_the_gateway_reaches_the_tracker_for_reading_and_for_confirmed_changes_only_and_never_the_exports_or_deleting():
+    for path in ("/api/tracker/options", "/api/tracker/requirements", "/api/tracker/closures", "/api/tracker/analytics", "/api/tracker/selections",
+                 "/api/tracker/selections/options", f"/api/tracker/requirements/{REQ}", f"/api/tracker/selections/{SEL}"):
+        ApiGateway.check("GET", path)
+    for method, path in (("POST", "/api/tracker/requirements"), ("PATCH", f"/api/tracker/requirements/{REQ}"), ("PATCH", f"/api/tracker/selections/{SEL}")):
+        ApiGateway.check(method, path, confirmed=True)
+        with pytest.raises(ToolError):
+            ApiGateway.check(method, path)                                           # a tool (the model) cannot make a change itself
+    for method, path in (("DELETE", f"/api/tracker/requirements/{REQ}"), ("DELETE", f"/api/tracker/selections/{SEL}"), ("GET", "/api/tracker/requirements/export"),
+                         ("GET", "/api/tracker/closures/export"), ("POST", f"/api/tracker/requirements/{REQ}/posted"), ("POST", "/api/tracker/selections")):
+        for confirmed in (False, True):
+            with pytest.raises(ToolError):
+                ApiGateway.check(method, path, confirmed)
+
+
+@pytest.mark.parametrize("message", ["show me the open requirements", "Close the Network Engineer requirement for Acme", "How many requirements did we close this month?",
+                                     "who joined last month", "update the selections", "which candidates backed out", "recruiter analytics for November",
+                                     "add a new requirement for a cloud architect", "mark the offer released for Aisha"])
+def test_tracker_phrases_reach_the_tracker_skill_without_a_model(message, monkeypatch):
+    no_model(monkeypatch)
+    r = route(message, role="manager")
+    assert (r.specialist, r.how) == ("tracker", "rules")
+
+
+def test_a_requirements_list_resolves_names_filters_the_server_and_pages_without_the_model(session, monkeypatch, gateway):
+    rows = [_req(id=f"req-{i:08d}", position=f"Role {i}") for i in range(10)]
+    _tracker(gateway, **{"/api/tracker/requirements": {"items": rows, "total": 37, "stats": {"total": 37, "open": 30, "submitted": 4, "hold": 2, "canceled": 1, "closed": 5, "cvs_submitted": 9}}})
+    script(monkeypatch, [{"calls": [call("list_requirements", status="open", recruiter="rit")]}, {"text": "There are 37; ten are on screen."}])
+    out = turn(session, "show me the open requirements for rita", role="manager")
+    card = out.assistant_message.meta["cards"][0]
+    path, params = gateway.gets[-1]
+    assert path == "/api/tracker/requirements" and params["status"] == "open" and params["recruiter_id"] == "u-rita-0001" and params["limit"] == 10
+    assert card["type"] == "requirements" and len(card["rows"]) == 10 and card["total"] == 37 and card["stats"]["open"] == 30
+    assert card["rows"][0]["position"] == "Role 0" and card["rows"][0]["recruiters"] == "rita" and card["rows"][0]["manager"] == "mona"
+    assert card["page"] == {"tool": "list_requirements", "args": {"status": "open", "recruiter_id": "u-rita-0001"}, "offset": 10, "cursor": None}
+    page = pages.fetch(gateway, "list_requirements", card["page"]["args"], 10)               # "Show 10 more": straight from the API
+    assert gateway.gets[-1][1]["offset"] == 10 and gateway.gets[-1][1]["recruiter_id"] == "u-rita-0001" and page.total == 37
+
+
+def test_an_unknown_or_ambiguous_person_is_asked_about_not_guessed(session, monkeypatch, gateway):
+    _tracker(gateway)
+    script(monkeypatch, [{"calls": [call("list_requirements", recruiter="zed")]}, {"text": "Who do you mean?"}])
+    out = turn(session, "show requirements for zed", role="manager")
+    assert out.assistant_message.meta["trace"][0]["ok"] is False and not out.assistant_message.meta["cards"]
+    PEOPLE_TWO = {**PEOPLE, "recruiters": PEOPLE["recruiters"] + [{"id": "u-rita-0002", "username": "ritam", "location": "Dubai"}]}
+    gateway.responses["/api/tracker/options"] = PEOPLE_TWO
+    usage._busy.clear()
+    script(monkeypatch, [{"calls": [call("list_requirements", recruiter="rit")]}, {"text": "Which one?"}])
+    assert turn(session, "show requirements for rit", role="manager").assistant_message.meta["trace"][0]["ok"] is False
+
+
+def test_a_recruiter_is_never_given_a_person_filter(session, monkeypatch, gateway):
+    gateway.responses["/api/tracker/requirements"] = {"items": [_req()], "total": 1, "stats": {}}
+    script(monkeypatch, [{"calls": [call("list_requirements", recruiter="rob")]}, {"text": "Here is your one requirement."}])
+    turn(session, "show me my requirements", role="user", username="rita")
+    assert not gateway.gets[-1][1].get("recruiter_id") and "/api/tracker/options" not in [g[0] for g in gateway.gets]      # the server already limits them to their own
+
+
+def test_closures_are_listed_for_a_month_with_its_summary(session, monkeypatch, gateway):
+    done = _req(status="closed", closed_at="2026-11-12T10:00:00Z", days_to_close=10)
+    _tracker(gateway, **{"/api/tracker/closures": {"items": [done], "total": 1, "years": [2026], "summary": {"closed": 1, "closed_this_month": 1, "avg_days": 10.0}}})
+    script(monkeypatch, [{"calls": [call("list_closures", year=2026, month=11)]}, {"text": "One closure."}])
+    out = turn(session, "show me the closures for November 2026", role="evp")
+    params = gateway.gets[-1][1]
+    assert params["date_from"] == "2026-11-01" and params["date_to"] == "2026-11-30"
+    card = out.assistant_message.meta["cards"][0]
+    assert card["type"] == "closures" and card["rows"][0]["closed"] == "2026-11-12" and card["rows"][0]["days"] == 10 and card["summary"]["avg_days"] == 10.0
+    assert card["page"] is None
+
+
+def test_analytics_asks_for_the_month_and_shows_who_closed_what(session, monkeypatch, gateway):
+    gateway.responses["/api/tracker/analytics"] = {"label": "November 2026", "scope": "team", "summary": {"received": 12, "closed": 7, "previous_received": 9, "previous_closed": 5,
+                                                                                                          "previous_label": "October 2026", "avg_days": 9.5, "cvs_submitted": 30,
+                                                                                                          "active": {"open": 5, "submitted": 3, "hold": 1}, "canceled": 1, "overdue": 2},
+                                                  "locations": [], "recruiters": [{"username": "rita", "location": "Dubai", "closed": 4, "cvs_submitted": 16, "open": 3, "submitted": 2, "hold": 1, "canceled": 0}]}
+    script(monkeypatch, [{"calls": [call("tracker_analytics", view="monthly", year=2026, month=11, location="dubai")]}, {"text": "Seven closed in November."}])
+    out = turn(session, "how many requirements did we close in November 2026?", role="manager")
+    assert gateway.gets[-1] == ("/api/tracker/analytics", {"view": "monthly", "year": 2026, "month": 11, "location": "Dubai"})
+    card = out.assistant_message.meta["cards"][0]
+    assert card["type"] == "table" and "7 closed of 12 received" in card["title"] and card["rows"][0]["recruiter"] == "rita" and card["rows"][0]["closed"] == 4
+
+
+# ---------------------------------------------------------------------------------------------- adding a requirement
+def test_adding_a_requirement_is_proposed_resolved_and_only_sent_after_confirmation(session, monkeypatch, gateway):
+    _tracker(gateway)
+    script(monkeypatch, [{"calls": [call("propose_requirement_create", position="Cloud Architect", client="Globex", requirement_date="2026-11-10",
+                                         cv_submission_date="2026-11-24", recruiters=["rita", "rob"], recruitment_manager="mona", job_location="Dubai",
+                                         duration_type="fixed", duration_value=6, duration_unit="month")]}, {"text": "Please confirm."}])
+    out = turn(session, "add a requirement for a Cloud Architect for Globex", role="manager")
+    card = _card(out)
+    assert card["kind"] == "requirement.create" and card["title"] == "Add this requirement" and gateway.acts == []
+    assert {"label": "Recruiters", "value": "rita, rob"} in card["rows"] and {"label": "Job duration", "value": "6 months"} in card["rows"]
+    no_model(monkeypatch)
+    done = _press(session, out, role="manager")
+    method, path, body, _ = gateway.acts[-1]
+    assert (method, path) == ("POST", "/api/tracker/requirements")
+    assert body == {"position": "Cloud Architect", "client": "Globex", "requirement_date": "2026-11-10", "job_location": "Dubai", "cv_submission_date": "2026-11-24",
+                    "duration_type": "fixed", "duration_value": 6, "duration_unit": "months", "recruiter_ids": ["u-rita-0001", "u-rob-00001"], "manager_id": "u-mona-0001"}
+    assert done.assistant_message.content == "Done. Added the requirement Cloud Architect for Globex."
+
+
+def test_a_requirement_needs_a_position_and_a_client_and_only_the_right_roles_can_add_one(session, monkeypatch, gateway):
+    _tracker(gateway)
+    script(monkeypatch, [{"calls": [call("propose_requirement_create", position="Cloud Architect")]}, {"text": "Which client?"}])
+    out = turn(session, "add a requirement for a Cloud Architect", role="account_manager")
+    assert out.assistant_message.meta["trace"][0]["ok"] is False and gateway.acts == []
+    usage._busy.clear()
+    script(monkeypatch, [{"calls": [call("propose_requirement_create", position="Cloud Architect", client="Globex")]}, {"text": "I cannot add requirements."}])
+    out = turn(session, "add a requirement for a Cloud Architect for Globex", role="user")               # a recruiter does not have the tool at all
+    assert out.assistant_message.meta["trace"][0]["ok"] is False and not any(c["type"] == "action" for c in out.assistant_message.meta["cards"]) and gateway.acts == []
+    usage._busy.clear()
+    script(monkeypatch, [{"calls": [call("propose_requirement_create", position="Cloud Architect", client="Globex", rm_comments="hot")]}, {"text": "Not allowed."}])
+    out = turn(session, "add the requirement with a recruitment manager comment", role="account_manager")           # a sales manager cannot write the recruitment manager's comment
+    assert out.assistant_message.meta["trace"][0]["ok"] is False and gateway.acts == []
+
+
+# ------------------------------------------------------------------------------------- changing one that exists
+def _propose_update(session, monkeypatch, gateway, role, username="faizan", requirement=None, **args):
+    _tracker(gateway, **{f"/api/tracker/requirements/{REQ}": requirement or _req()})
+    script(monkeypatch, [{"calls": [call("propose_requirement_update", requirement_id=REQ, **args)]}, {"text": "Please confirm."}])
+    return turn(session, "update the requirement", role=role, username=username)
+
+
+def test_closing_a_requirement_says_what_follows_and_is_sent_as_a_patch_after_confirmation(session, monkeypatch, gateway):
+    out = _propose_update(session, monkeypatch, gateway, "manager", status="closed")
+    card = _card(out)
+    assert card["title"] == "Close this requirement" and "Selections and joining" in card["warning"] and gateway.acts == []
+    assert {"label": "Status", "value": "open -> closed"} in card["rows"]
+    no_model(monkeypatch)
+    done = _press(session, out, role="manager")
+    assert gateway.acts[-1] == ("PATCH", f"/api/tracker/requirements/{REQ}", {"status": "closed"}, None)
+    assert "is closed" in done.assistant_message.content and "Closures" in done.assistant_message.content
+
+
+def test_reopening_a_closed_requirement_is_one_status_change(session, monkeypatch, gateway):
+    out = _propose_update(session, monkeypatch, gateway, "manager", requirement=_req(status="closed", closed_at="2026-11-12T10:00:00Z"), status="open")
+    card = _card(out)
+    assert card["title"] == "Reopen this requirement" and "back on the Requirements page" in card["warning"]
+    no_model(monkeypatch)
+    assert "is open again" in _press(session, out, role="manager").assistant_message.content
+
+
+@pytest.mark.parametrize("role,args", [("user", {"client": "Other"}), ("user", {"recruiters": ["rob"]}), ("user", {"sales_comments": "x"}), ("manager", {"sales_comments": "x"}),
+                                       ("account_manager", {"status": "closed"}), ("account_manager", {"rm_comments": "x"}), ("manager", {"recruiter_comments": "x"})])
+def test_a_role_cannot_change_a_field_that_is_not_its_own_and_nothing_is_proposed(session, monkeypatch, gateway, role, args):
+    out = _propose_update(session, monkeypatch, gateway, role, username="rita", **args)
+    assert out.assistant_message.meta["trace"][0]["ok"] is False and gateway.acts == []
+    assert not any(c["type"] == "action" for c in out.assistant_message.meta["cards"])
+
+
+def test_each_role_changes_its_own_comment_and_a_new_comment_is_added_after_the_old_one(session, monkeypatch, gateway):
+    out = _propose_update(session, monkeypatch, gateway, "manager", rm_comments="Candidate shortlisted")
+    no_model(monkeypatch)
+    _press(session, out, role="manager")
+    assert gateway.acts[-1][2] == {"rm_comments": "old rm note\n\nCandidate shortlisted"}
+    usage._busy.clear()
+    gateway.acts.clear()
+    out = _propose_update(session, monkeypatch, gateway, "manager", rm_comments="Fresh start", comments_mode="replace")
+    no_model(monkeypatch)
+    _press(session, out, role="manager")
+    assert gateway.acts[-1][2] == {"rm_comments": "Fresh start"}
+    usage._busy.clear()
+    gateway.acts.clear()
+    out = _propose_update(session, monkeypatch, gateway, "account_manager", sales_comments="Client wants it fast")
+    no_model(monkeypatch)
+    _press(session, out, role="account_manager")
+    assert gateway.acts[-1][2] == {"sales_comments": "s0\n\nClient wants it fast"}
+
+
+def test_a_recruiter_records_their_own_cvs_submitted_and_a_manager_names_whose(session, monkeypatch, gateway):
+    out = _propose_update(session, monkeypatch, gateway, "user", username="rita", cvs_submitted_count=5, cvs_submitted_date="2026-11-12")
+    no_model(monkeypatch)
+    _press(session, out, role="user", username="rita")
+    assert gateway.acts[-1][2] == {"cvs_submissions": [{"recruiter_id": "u-rita-0001", "count": 5, "date": "2026-11-12"}]}
+    usage._busy.clear()
+    two = _req(recruiters=[{"id": "u-rita-0001", "username": "rita", "cvs_submitted_date": None, "cvs_submitted_count": None},
+                           {"id": "u-rob-00001", "username": "rob", "cvs_submitted_date": None, "cvs_submitted_count": None}])
+    out = _propose_update(session, monkeypatch, gateway, "manager", requirement=two, cvs_submitted_count=3)
+    assert out.assistant_message.meta["trace"][0]["ok"] is False                           # two recruiters: it must say whose
+    usage._busy.clear()
+    out = _propose_update(session, monkeypatch, gateway, "manager", requirement=two, cvs_submitted_count=3, cvs_recruiter="rob")
+    no_model(monkeypatch)
+    _press(session, out, role="manager")
+    assert gateway.acts[-1][2] == {"cvs_submissions": [{"recruiter_id": "u-rob-00001", "count": 3}]}
+
+
+def test_assigning_people_and_changing_details_shows_before_and_after(session, monkeypatch, gateway):
+    out = _propose_update(session, monkeypatch, gateway, "evp", recruiters=["rob"], recruitment_manager="none", salary="14,000", cv_submission_date="2026-11-25")
+    card = _card(out)
+    rows = {r["label"]: r["value"] for r in card["rows"]}
+    assert rows["Recruiters"] == "rita -> rob" and rows["Salary"] == "12,000 -> 14,000" and rows["Submission deadline"] == "2026-11-20 -> 2026-11-25"
+    assert rows["Recruitment manager"] == "mona -> (nobody)"
+    no_model(monkeypatch)
+    _press(session, out, role="evp")
+    assert gateway.acts[-1][2] == {"recruiter_ids": ["u-rob-00001"], "manager_id": None, "salary": "14,000", "cv_submission_date": "2026-11-25"}
+
+
+def test_nothing_is_proposed_when_nothing_would_change(session, monkeypatch, gateway):
+    out = _propose_update(session, monkeypatch, gateway, "manager", status="open", client="Acme")
+    assert out.assistant_message.meta["trace"][0]["ok"] is False and gateway.acts == []
+
+
+def test_a_confirmed_change_the_application_refuses_is_reported_and_changes_nothing(session, monkeypatch, gateway):
+    out = _propose_update(session, monkeypatch, gateway, "manager", status="closed")
+    gateway.responses[("PATCH", f"/api/tracker/requirements/{REQ}")] = lambda: (_ for _ in ()).throw(ToolError("Your role is not allowed to do that."))
+    no_model(monkeypatch)
+    done = _press(session, out, role="manager")
+    assert done.assistant_message.content.startswith("I couldn't do that") and "Nothing was changed" in done.assistant_message.content
+
+
+def test_the_saved_change_can_only_carry_fields_the_tracker_allows(session, monkeypatch, gateway):
+    gw = FakeGateway()
+    with pytest.raises(ToolError):
+        action_catalog.ACTIONS["requirement.update"].run(gw, {"requirement_id": REQ, "body": {"created_by": "someone"}}, "faizan")
+    with pytest.raises(ToolError):
+        action_catalog.ACTIONS["requirement.update"].run(gw, {"requirement_id": "x", "body": {"status": "open"}}, "faizan")
+    with pytest.raises(ToolError):
+        action_catalog.ACTIONS["selection.update"].run(gw, {"selection_id": SEL, "body": {"location": "Dubai"}}, "faizan")
+    assert gw.acts == []
+
+
+# -------------------------------------------------------------------------------------- selections and joining
+def _selection(**over):
+    base = {"id": SEL, "requirement_id": REQ, "date": "2026-11-12", "candidate_name": None, "position": "Network Engineer", "client": "Acme", "status": "offer_pending",
+            "recruiters": [{"id": "u-rita-0001", "username": "rita"}], "sales_manager": {"id": "u-sam-00001", "username": "sam"}, "manager": {"id": "u-mona-0001", "username": "mona"},
+            "comments": None, "updated_by": "sam", "updated_at": "2026-11-12T10:00:00Z"}
+    base.update(over)
+    return base
+
+
+def test_selections_are_listed_with_their_counts_and_paged(session, monkeypatch, gateway):
+    _tracker(gateway, **{"/api/tracker/selections": {"items": [_selection(), _selection(id="sel-87654321", status="joined", candidate_name="Aisha Khan")], "total": 153,
+                                                    "stats": {"total": 153, "offer_pending": 16, "offer_released": 8, "joined": 88, "backed_out": 41}}})
+    script(monkeypatch, [{"calls": [call("list_selections", status="joined")]}, {"text": "88 joined."}])
+    out = turn(session, "show me the selections who joined", role="manager")
+    card = out.assistant_message.meta["cards"][0]
+    assert gateway.gets[-1][1]["status"] == "joined" and card["type"] == "selections" and card["stats"]["backed_out"] == 41 and card["total"] == 153
+    assert card["rows"][1]["candidate"] == "Aisha Khan" and card["rows"][0]["account_manager"] == "sam" and card["rows"][0]["recruitment_manager"] == "mona"
+    assert card["page"]["tool"] == "list_selections" and card["page"]["args"]["status"] == "joined"
+
+
+def test_a_selection_is_updated_with_a_normalised_status_and_an_added_comment_after_confirmation(session, monkeypatch, gateway):
+    gateway.responses[f"/api/tracker/selections/{SEL}"] = _selection(comments="Offer letter sent")
+    script(monkeypatch, [{"calls": [call("propose_selection_update", selection_id=SEL, candidate_name="Aisha Khan", status="backed out", comments="Took another offer")]},
+                         {"text": "Please confirm."}])
+    out = turn(session, "Aisha Khan backed out of the Network Engineer job, she took another offer", role="manager")
+    card = _card(out)
+    rows = {r["label"]: r["value"] for r in card["rows"]}
+    assert card["kind"] == "selection.update" and rows["Status"] == "Offer Pending -> Backed Out" and rows["Candidate"] == "(empty) -> Aisha Khan" and gateway.acts == []
+    no_model(monkeypatch)
+    done = _press(session, out, role="manager")
+    assert gateway.acts[-1] == ("PATCH", f"/api/tracker/selections/{SEL}", {"candidate_name": "Aisha Khan", "status": "backed_out", "comments": "Offer letter sent\n\nTook another offer"}, None)
+    assert done.assistant_message.content == "Done. Updated the selection for Network Engineer for Acme."
+
+
+def test_selections_and_joining_is_not_available_to_a_recruiter_in_the_chat(session, monkeypatch, gateway):
+    for tool_call in (call("list_selections"), call("propose_selection_update", selection_id=SEL, status="joined")):
+        usage._busy.clear()
+        script(monkeypatch, [{"calls": [tool_call]}, {"text": "That page is not for recruiters."}])
+        out = turn(session, "mark the selection as joined", role="user", username="rita")
+        assert out.assistant_message.meta["trace"][0]["ok"] is False and gateway.acts == [] and not out.assistant_message.meta["cards"]
+    with pytest.raises(ToolError):
+        action_flow.propose(SimpleNamespace(role="user", proposed=0, specialist="tracker"), "selection.update", [("a", "b")], {})      # and the action itself refuses the role
+
+
+def test_deleting_a_requirement_or_a_selection_is_refused_before_any_model_call(session, monkeypatch):
+    no_model(monkeypatch)
+    for message in ("delete the Acme requirement", "remove the selection for Aisha Khan", "get rid of the closed requirements"):
+        assert isinstance(turn(session, message, role="admin"), Refusal)

@@ -90,7 +90,7 @@ export default function WeeklyReportDialog({ onClose }: { onClose: () => void })
             <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="field-input mt-1 w-full" />
           </label>
         </div>
-        {error && <p className="text-[13px] text-red-700" role="alert">{error}</p>}
+        {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
         <DialogFooter>
           <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
           <Button variant="primary" icon={<Download className="h-4 w-4" />} disabled={!from || !to} loading={busy} onClick={download}>Download report</Button>

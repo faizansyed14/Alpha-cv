@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from typing import Generator
 
+from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config.settings import settings
@@ -49,6 +50,34 @@ engine = create_engine(
 )
 
 
+def pin_utc(dbapi_connection, _record=None) -> None:
+    """Every PostgreSQL connection runs in UTC. The app writes UTC (naive ``datetime.utcnow()`` values and the clock's ``now()`` defaults), so the
+    session time zone must be UTC too, whatever the server, the managed database or a pooler is set to: otherwise ``now()`` would store local
+    time next to UTC values. Done on each new connection, not as a startup option, because poolers such as PgBouncer drop startup options."""
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("SET TIME ZONE 'UTC'")
+    finally:
+        cursor.close()
+    dbapi_connection.commit()
+
+
+if engine.dialect.name == "postgresql":
+    event.listen(engine, "connect", pin_utc)
+
+
+def check_utc() -> None:
+    """Startup check of the same promise: log loudly when a connection is not in UTC (a pooler in transaction mode can undo a SET)."""
+    if engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        zone = conn.execute(text("SHOW TimeZone")).scalar()
+    if str(zone).upper() not in ("UTC", "ETC/UTC"):
+        logger.error("The database session time zone is %s, not UTC: timestamps written by the database defaults would not match the application's UTC values.", zone)
+
+
 def get_session() -> Generator[Session, None, None]:
     with Session(engine) as session:
         yield session
@@ -71,6 +100,8 @@ def run_migrations() -> None:
 
     import app.models.agent  # noqa: F401  (registers the tables)
     import app.models.bug_report  # noqa: F401
+    import app.models.requirement  # noqa: F401
+    import app.models.selection  # noqa: F401
     import app.models.user  # noqa: F401
 
     cfg = _alembic_config()
@@ -123,6 +154,7 @@ def init_database() -> None:
     from app.security.auth import hash_password
 
     run_migrations()
+    check_utc()
     with Session(engine) as session:
         if settings.ENABLE_AUTH:
             admin = session.exec(select(User).where(User.username == settings.ADMIN_USERNAME)).first()
@@ -131,6 +163,7 @@ def init_database() -> None:
                     username=settings.ADMIN_USERNAME,
                     password_hash=hash_password(settings.ADMIN_PASSWORD),
                     email=settings.ADMIN_EMAIL.strip().lower() or None,
+                    otp_mode="captcha",        # the admin starts on the CAPTCHA (needs no mailbox); it can be changed on the Users page
                     role="admin",
                     is_active=True,
                 ))

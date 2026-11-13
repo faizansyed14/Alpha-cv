@@ -34,18 +34,18 @@ export default function TourShell({
   const sections = ['Recruiting', 'Hiring'] as const;
 
   return (
-    <div className="flex h-full min-h-0 w-full overflow-hidden bg-white">
+    <div className="flex h-full min-h-0 w-full overflow-hidden bg-paper">
       {!hideSidebar && (
-        <aside className="relative hidden w-[240px] shrink-0 flex-col overflow-hidden border-r border-surface-border bg-white lg:flex">
-          <div className="relative flex h-16 shrink-0 items-center px-4">
-            <span className="truncate text-[17px] font-bold tracking-[-0.03em] text-slate-900">
+        <aside className="relative hidden w-[220px] shrink-0 flex-col overflow-hidden border-r border-surface-border bg-paper/80 backdrop-blur-xl lg:flex">
+          <div className="relative flex h-14 shrink-0 items-center px-3">
+            <span className="truncate text-md font-semibold tracking-[-0.03em] text-slate-900">
               Alpha<span className="text-navy-600">CV</span>
             </span>
           </div>
-          <nav className="relative min-h-0 flex-1 space-y-5 overflow-y-auto px-3 pb-4 pt-1" aria-label="Tour navigation">
+          <nav className="relative min-h-0 flex-1 space-y-4 overflow-y-auto px-2.5 pb-3 pt-1" aria-label="Tour navigation">
             {sections.map((section) => (
               <div key={section} className="space-y-0.5">
-                <div className="mb-1 px-3 text-[11px] font-semibold text-slate-400">{section}</div>
+                <div className="mb-1 px-2.5 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-slate-400">{section}</div>
                 {TOUR_NAV.filter((t) => t.section === section).map((tab) => {
                   const active = activeId === tab.id;
                   const Icon = NAV_ICONS[tab.id] ?? LayoutDashboard;
@@ -56,15 +56,15 @@ export default function TourShell({
                       data-tour-label={tab.label}
                       aria-current={active ? 'page' : undefined}
                       className={cn(
-                        'relative flex h-11 w-full items-center gap-3 rounded-xl border px-3 text-[13.5px] transition-colors duration-300',
+                        'relative flex h-9 w-full items-center gap-2.5 rounded-lg border px-2.5 text-sm transition-colors duration-300',
                         tourTargetClass,
                         active
-                          ? 'border-navy-300 bg-navy-50/70 font-medium text-navy-700'
-                          : 'border-transparent font-normal text-slate-600',
+                          ? 'border-navy-200 bg-navy-50 font-semibold text-navy-800'
+                          : 'border-transparent font-medium text-slate-600',
                       )}
                     >
-                      <span className="relative flex h-6 w-6 shrink-0 items-center justify-center">
-                        <Icon className={cn('h-5 w-5', active ? 'text-navy-700' : 'text-slate-500')} />
+                      <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+                        <Icon className={cn('h-4 w-4', active ? 'text-navy-700' : 'text-slate-500')} />
                       </span>
                       <span className="relative min-w-0 flex-1 truncate text-left">{tab.label}</span>
                     </div>
@@ -75,7 +75,7 @@ export default function TourShell({
           </nav>
         </aside>
       )}
-      <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
+      <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-paper">
         {/* overflow hidden: tour is video-like; only scripted scrolls move content */}
         <div className="min-h-0 flex-1 overflow-hidden px-4 py-5 sm:px-6 lg:px-8">{children}</div>
       </main>

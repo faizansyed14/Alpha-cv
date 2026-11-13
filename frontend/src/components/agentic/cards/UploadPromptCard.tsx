@@ -19,7 +19,7 @@ export function UploadPromptCard({ onUpload, active, uploading }: { onUpload: (f
           type="button" disabled={disabled} onClick={() => input.current?.click()}
           onDragOver={(e) => { e.preventDefault(); if (!disabled) setOver(true); }} onDragLeave={() => setOver(false)}
           onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files?.[0]; if (f && !disabled) onUpload(f); }}
-          className={cn('flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-[13px] transition-colors',
+          className={cn('flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-sm transition-colors',
             over ? 'border-navy-400 bg-navy-50' : 'border-slate-200 bg-slate-50/70 hover:border-slate-300 hover:bg-slate-50', disabled && 'cursor-not-allowed opacity-60')}
         >
           {uploading ? <Loader2 className="h-6 w-6 animate-spin text-slate-500" /> : <Upload className="h-6 w-6 text-slate-500" />}

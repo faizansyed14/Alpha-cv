@@ -41,7 +41,7 @@ export function ShowMore({ shown, total, hasMore, loading, error, onMore }: {
   shown: number; total: number; hasMore: boolean; loading: boolean; error: string | null; onMore: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-2.5 text-[12px] text-slate-500">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-2.5 text-xs text-slate-500">
       <span className="tabular-nums">
         Showing {shown.toLocaleString()} of {total.toLocaleString()}
         {total > HINT_AFTER ? ' · narrow it down with a keyword or a Boolean string' : ''}
@@ -50,7 +50,7 @@ export function ShowMore({ shown, total, hasMore, loading, error, onMore }: {
         {error ? <span className="text-rose-600">{error}</span> : null}
         {hasMore ? (
           <button type="button" onClick={onMore} disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60">
+            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-paper px-3 py-1 font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60">
             {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
             Show 10 more
           </button>

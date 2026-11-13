@@ -17,14 +17,14 @@ export function JobsCard({ card, onSend }: { card: AgenticCard; onSend: Send }) 
         {rows.map((r, i) => (
           <Row key={r.job_id ?? i} index={i % 10}>
             <div className="min-w-0 flex-1">
-              <p className="flex items-center gap-2 truncate text-[14px] font-semibold text-slate-900">
+              <p className="flex items-center gap-2 truncate text-base font-semibold text-slate-900">
                 <span className="truncate">{dash(r.title)}</span>
                 <Pill tone={r.active ? 'green' : 'slate'}>{r.active ? 'Open' : 'Closed'}</Pill>
               </p>
-              <p className="truncate text-[12.5px] text-slate-500">
+              <p className="truncate text-xs text-slate-500">
                 {dash(r.location)} · {r.applications} {r.applications === 1 ? 'application' : 'applications'}{r.posted ? ` · posted ${r.posted}` : ''}
               </p>
-              {r.subject ? <p className="mt-0.5 truncate font-mono text-[11px] text-slate-400">{r.subject}</p> : null}
+              {r.subject ? <p className="mt-0.5 truncate font-mono text-2xs text-slate-400">{r.subject}</p> : null}
             </div>
             {purpose === 'interview' ? <Action tone="primary" label="Interview questions" onClick={() => onSend(`Interview questions for the ${r.title} job`)} />
               : purpose === 'linkedin' ? <Action tone="primary" label="Write the post" onClick={() => onSend(`Write a LinkedIn post for the ${r.title} job`)} />
@@ -54,8 +54,8 @@ export function JobDescriptionsCard({ card, onSend }: { card: AgenticCard; onSen
         {rows.map((r, i) => (
           <Row key={r.jd_id ?? i} index={i % 10}>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[14px] font-semibold text-slate-900">{dash(r.title)}</p>
-              <p className="truncate text-[12.5px] text-slate-500">{dash(r.file)}{r.category ? ` · ${r.category}` : ''}</p>
+              <p className="truncate text-base font-semibold text-slate-900">{dash(r.title)}</p>
+              <p className="truncate text-xs text-slate-500">{dash(r.file)}{r.category ? ` · ${r.category}` : ''}</p>
             </div>
             <Action label="Preview" onClick={() => preview(r.jd_id, 'jd', r.file || r.title)} />
             {purpose === 'match' ? <Action tone="primary" label="Match" onClick={() => onSend(`Match candidates for the ${r.title} job`)} />
@@ -74,11 +74,11 @@ export function TableCard({ card }: { card: AgenticCard }) {
   const columns = Array.from(new Set(rows.flatMap((r) => Object.keys(r)))).slice(0, 6);
   return (
     <CardShell title={card.title ?? 'Results'} count={`${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`}
-      footer={card.link ? <a href={card.link.href} className="inline-flex rounded-full bg-navy-900 px-3 py-1 text-[12px] font-medium text-white hover:bg-navy-800">{card.link.label}</a> : undefined}>
-      {rows.length === 0 ? <p className="px-4 py-6 text-center text-[13px] text-slate-400">Nothing to show.</p> : (
+      footer={card.link ? <a href={card.link.href} className="inline-flex rounded-full bg-solid px-3 py-1 text-xs font-medium text-white hover:bg-solid-hover">{card.link.label}</a> : undefined}>
+      {rows.length === 0 ? <p className="px-4 py-6 text-center text-sm text-slate-400">Nothing to show.</p> : (
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-[12.5px]">
-            <thead><tr className="border-b border-slate-100 text-[11px] uppercase tracking-wide text-slate-400">
+          <table className="w-full text-left text-xs">
+            <thead><tr className="border-b border-slate-100 text-2xs uppercase tracking-wide text-slate-400">
               {columns.map((c) => <th key={c} className="px-4 py-2 font-semibold">{c.replace(/_/g, ' ')}</th>)}</tr></thead>
             <tbody>{rows.map((r, i) => (
               <tr key={i} className="border-b border-slate-50 last:border-b-0">

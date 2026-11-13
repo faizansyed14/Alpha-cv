@@ -93,7 +93,7 @@ def test_cv_list_ids_only_has_no_contact_data():
                               "facts": {"full_name": "N", "email": f"e{i}@x.com", "phone": "1"}})
 
     def call(**kw):
-        args = dict(limit=None, offset=0, category=None, categories=None, q=None, ids_only=False, _=None)
+        args = dict(limit=None, offset=0, category=None, categories=None, q=None, ids_only=False, cursor=None, _=None)
         args.update(kw)
         return json.loads(asyncio.run(list_cvs(**args)).body)
 
@@ -101,6 +101,12 @@ def test_cv_list_ids_only_has_no_contact_data():
     assert len(page["cvs"]) == CV_LIST_PAGE == 200 and page["total"] == 250       # one page, never the whole database
     ids = call(ids_only=True)
     assert "cvs" not in ids and len(ids["ids"]) == 250 and "e1@x.com" not in json.dumps(ids)
+
+    # the next page starts where the first one ended (cursor), with nothing repeated or skipped, and the total stays the exact count
+    assert page["next_cursor"]
+    rest = call(cursor=page["next_cursor"])
+    assert len(rest["cvs"]) == 50 and rest["next_cursor"] is None and rest["total"] == 250
+    assert [c["id"] for c in page["cvs"] + rest["cvs"]] == ids["ids"]
 
 
 def test_public_health_hides_internals():

@@ -483,3 +483,46 @@ def test_reset_routes_exist_and_stay_inside_get_and_post():
 
     paths = {r.path for r in agents.router.routes}
     assert {"/api/agents/usage/request-reset", "/api/agents/admin/reset-requests", "/api/agents/admin/reset-requests/{request_id}/{decision}"} <= paths
+
+
+# ---------------------------------------------------------------------------------------------------- the apply link appears once
+APPLY = "https://alpha.example/careers/jobs/tok123"
+
+
+def _once(post):
+    from app.agents.linkedin.parser import ensure_apply_url
+
+    out = ensure_apply_url(post, APPLY)
+    assert out.count(APPLY) == 1 and out.count("http") == 1, out
+    assert ensure_apply_url(out, APPLY) == out                                   # asking again changes nothing
+    return out
+
+
+def test_the_post_carries_the_apply_link_once_whatever_the_model_wrote():
+    body = "\n\nWe are hiring a network engineer.\n\nKey Responsibilities\n• Run the network"
+    # plain header, bold header (maths-bold letters were not recognised as "Apply" before: a second line was added)
+    assert "Apply Now: " + APPLY in _once("📢 Now Hiring: X\n📍 Location: Dubai\n👉 Apply Now: https://lnkd.in/abc" + body)
+    assert "𝗔𝗽𝗽𝗹𝘆 𝗡𝗼𝘄: " + APPLY in _once("📢 𝗡𝗼𝘄 𝗛𝗶𝗿𝗶𝗻𝗴: X\n📍 𝗟𝗼𝗰𝗮𝘁𝗶𝗼𝗻: Dubai\n👉 𝗔𝗽𝗽𝗹𝘆 𝗡𝗼𝘄: " + APPLY + body)
+    # a second apply line at the end, with the same link, a different one, or a label only
+    _once("📢 Now Hiring: X\n👉 Apply Now: " + APPLY + body + "\n\nReady? Apply here: " + APPLY)
+    _once("📢 Now Hiring: X\n👉 Apply Now: " + APPLY + body + "\n\n𝗔𝗽𝗽𝗹𝘆 𝗵𝗲𝗿𝗲: https://bit.ly/zzz")
+    out = _once("📢 Now Hiring: X\n👉 Apply Now: " + APPLY + body + "\n\nApply:\n" + APPLY)
+    # a line with real words keeps them, without the second link
+    out = _once("📢 Now Hiring: X\n👉 Apply Now: " + APPLY + body + "\n\nSend your CV and a short note about your best project through the link " + APPLY)
+    assert "Send your CV and a short note about your best project through the link" in out
+    # no apply line at all: one is added
+    assert "Apply Now: " + APPLY in _once("📢 Now Hiring: X\n📍 Location: Dubai" + body)
+    # without a real URL nothing is touched
+    from app.agents.linkedin.parser import ensure_apply_url
+
+    assert ensure_apply_url("Apply: https://x.example/a", None) == "Apply: https://x.example/a"
+
+
+def test_a_parsed_linkedin_answer_has_one_apply_link_even_when_the_pin_runs_twice():
+    text = ("POST:\n📢 𝗡𝗼𝘄 𝗛𝗶𝗿𝗶𝗻𝗴: Senior Python Developer\n📍 𝗟𝗼𝗰𝗮𝘁𝗶𝗼𝗻: Dubai, UAE\n👉 𝗔𝗽𝗽𝗹𝘆 𝗡𝗼𝘄: " + APPLY + "\n\n" + JD
+            + "\n\nInterested? Apply here: " + APPLY + "\nHASHTAGS: #Hiring #Python")
+    p = parse_linkedin(text, JD, APPLY)
+    assert p.meta["post"].count(APPLY) == 1 and p.content.count(APPLY) == 1
+    from app.agents.linkedin.parser import ensure_apply_url
+
+    assert ensure_apply_url(p.meta["post"], APPLY).count(APPLY) == 1                # the agentic chat pins it again after parsing

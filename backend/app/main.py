@@ -23,6 +23,10 @@ from app.api.routers.interview_agent import router as interview_agent_router
 from app.api.routers.linkedin_agent import router as linkedin_agent_router
 from app.api.routers.admin import router as admin_router
 from app.api.routers.bug_reports import router as bug_reports_router
+from app.api.routers.hiring_image import router as hiring_image_router
+from app.api.routers.tracker import router as tracker_router
+from app.api.routers.tracker_closures import router as tracker_closures_router
+from app.api.routers.tracker_selections import router as tracker_selections_router
 
 # Services init
 from app.config.settings import settings
@@ -192,6 +196,10 @@ app.include_router(interview_agent_router)
 app.include_router(linkedin_agent_router)
 app.include_router(admin_router)
 app.include_router(bug_reports_router)
+app.include_router(hiring_image_router)
+app.include_router(tracker_router)
+app.include_router(tracker_closures_router)
+app.include_router(tracker_selections_router)
 app.include_router(notices.router)
 
 # Core routes

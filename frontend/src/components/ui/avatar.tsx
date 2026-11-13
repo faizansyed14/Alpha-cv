@@ -1,13 +1,14 @@
 import { cn } from "@/lib/utils";
 
-/** Soft, deterministic tints so a list of people does not read as one block of blue. */
+/** Deterministic duotone tiles, so a list of people reads as people and not as one block of blue. */
 const TINTS = [
-  "bg-navy-50 text-navy-700 ring-navy-100",
-  "bg-violet-50 text-violet-700 ring-violet-100",
-  "bg-emerald-50 text-emerald-700 ring-emerald-100",
-  "bg-amber-50 text-amber-700 ring-amber-100",
-  "bg-rose-50 text-rose-700 ring-rose-100",
-  "bg-cyan-50 text-cyan-700 ring-cyan-100",
+  "bg-navy-50 text-navy-800 ring-navy-200/70",
+  "bg-violet-50 text-violet-700 ring-violet-200/70",
+  "bg-emerald-50 text-emerald-700 ring-emerald-200/70",
+  "bg-amber-50 text-amber-700 ring-amber-200/70",
+  "bg-rose-50 text-rose-700 ring-rose-200/70",
+  "bg-sky-50 text-sky-700 ring-sky-200/70",
+  "bg-iris-50 text-iris-700 ring-iris-200/70",
 ];
 
 export function initialsOf(name?: string | null): string {
@@ -24,13 +25,13 @@ function tintOf(name?: string | null) {
 }
 
 /** Initials avatar; no network requests. */
-export function Avatar({ name, size = "md", className }: { name?: string | null; size?: "sm" | "md" | "lg"; className?: string }) {
+export function Avatar({ name, size = "md", className }: { name?: string | null; size?: "xs" | "sm" | "md" | "lg" | "xl"; className?: string }) {
   return (
     <span
       aria-hidden
       className={cn(
-        "inline-flex shrink-0 select-none items-center justify-center rounded-full font-semibold ring-1 ring-inset",
-        size === "sm" ? "h-7 w-7 text-[10px]" : size === "lg" ? "h-11 w-11 text-sm" : "h-9 w-9 text-xs",
+        "inline-flex shrink-0 select-none items-center justify-center rounded-full font-semibold tracking-[0.02em] ring-1 ring-inset",
+        size === "xs" ? "h-6 w-6 text-[9px]" : size === "sm" ? "h-7 w-7 text-[10px]" : size === "lg" ? "h-11 w-11 text-sm" : size === "xl" ? "h-14 w-14 text-lg" : "h-9 w-9 text-xs",
         tintOf(name),
         className,
       )}

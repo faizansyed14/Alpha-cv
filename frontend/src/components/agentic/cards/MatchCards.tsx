@@ -17,22 +17,22 @@ export function MatchesCard({ card }: { card: AgenticCard }) {
       <ul>
         {rows.map((r, i) => (
           <Row key={r.cv_id ?? i} index={i}>
-            <span className="w-5 text-center text-[13px] font-semibold tabular-nums text-slate-400">{i + 1}</span>
+            <span className="w-5 text-center text-sm font-semibold tabular-nums text-slate-400">{i + 1}</span>
             <Initials name={r.name} />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[14px] font-semibold text-slate-900">{r.name}</p>
-              <p className="truncate text-[12.5px] text-slate-500">{r.title}{r.years != null ? ` · ${r.years} yrs` : ''}</p>
-              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-slate-500">
+              <p className="truncate text-base font-semibold text-slate-900">{r.name}</p>
+              <p className="truncate text-xs text-slate-500">{r.title}{r.years != null ? ` · ${r.years} yrs` : ''}</p>
+              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-2xs text-slate-500">
                 <span>Skills <b className="font-semibold text-slate-700">{r.skills}%</b></span>
                 <span>Responsibilities <b className="font-semibold text-slate-700">{r.responsibilities}%</b></span>
                 <span>Title <b className="font-semibold text-slate-700">{r.title_fit}%</b></span>
               </div>
               {Array.isArray(r.missing_skills) && r.missing_skills.length > 0 && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-1"><span className="text-[11px] text-slate-400">Missing:</span>{r.missing_skills.map((s: string) => <Pill key={s} tone="amber">{s}</Pill>)}</div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1"><span className="text-2xs text-slate-400">Missing:</span>{r.missing_skills.map((s: string) => <Pill key={s} tone="amber">{s}</Pill>)}</div>
               )}
             </div>
             <div className="w-28">
-              <p className="text-right text-[18px] font-semibold tabular-nums text-slate-900">{r.score}%</p>
+              <p className="text-right text-xl font-semibold tabular-nums text-slate-900">{r.score}%</p>
               <ScoreBar value={r.score} />
             </div>
             <div className="flex gap-1.5">
@@ -83,26 +83,26 @@ export function MatchRunningCard({ card }: { card: AgenticCard }) {
   if (done) {
     return (
       <div className="space-y-2">
-        {done.summary ? <p className="px-1 text-[13px] text-slate-600">{done.summary}</p> : null}
+        {done.summary ? <p className="px-1 text-sm text-slate-600">{done.summary}</p> : null}
         <MatchesCard card={done.card} />
       </div>
     );
   }
   if (failed) {
-    return <CardShell title="Matching"><p className="px-4 py-4 text-[13px] text-rose-700">The matching run failed. Ask me to run it again.</p></CardShell>;
+    return <CardShell title="Matching"><p className="px-4 py-4 text-sm text-rose-700">The matching run failed. Ask me to run it again.</p></CardShell>;
   }
   return (
     <CardShell title="Matching in progress">
       <div className="px-4 py-4">
-        <div className="mb-2 flex items-center justify-between text-[12.5px] text-slate-600">
+        <div className="mb-2 flex items-center justify-between text-xs text-slate-600">
           <span>{card.scope ? `Scoring ${Number(card.scope.cvs_scored).toLocaleString()} CVs against the job...` : 'Scoring the candidates against the job...'}</span>{percent !== null && <span className="tabular-nums font-semibold">{percent}%</span>}
         </div>
         <div className="relative h-2 overflow-hidden rounded-full bg-slate-100">
           {percent !== null
-            ? <motion.div className="h-full rounded-full bg-navy-700" initial={{ width: 0 }} animate={{ width: `${percent}%` }} transition={{ duration: 0.6 }} />
-            : <motion.div className="absolute inset-y-0 w-1/3 rounded-full bg-navy-600" animate={{ left: ['-33%', '100%'] }} transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }} />}
+            ? <motion.div className="h-full rounded-full bg-solid-soft" initial={{ width: 0 }} animate={{ width: `${percent}%` }} transition={{ duration: 0.6 }} />
+            : <motion.div className="absolute inset-y-0 w-1/3 rounded-full bg-solid-soft" animate={{ left: ['-33%', '100%'] }} transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }} />}
         </div>
-        <p className="mt-3 text-[11.5px] text-slate-400">The results appear here on their own. You can keep chatting.</p>
+        <p className="mt-3 text-2xs text-slate-400">The results appear here on their own. You can keep chatting.</p>
       </div>
     </CardShell>
   );

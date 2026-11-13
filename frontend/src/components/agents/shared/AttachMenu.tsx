@@ -15,8 +15,8 @@ function Item({ icon, label, hint, done, onClick }: { icon: React.ReactNode; lab
     <button type="button" onClick={onClick} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-slate-100">
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">{icon}</span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[13.5px] font-medium text-slate-900">{label}</span>
-        {hint && <span className="block truncate text-[11.5px] text-slate-400">{hint}</span>}
+        <span className="block text-sm font-medium text-slate-900">{label}</span>
+        {hint && <span className="block truncate text-2xs text-slate-400">{hint}</span>}
       </span>
       {done && <Check className="h-4 w-4 shrink-0 text-navy-700" />}
     </button>
@@ -27,7 +27,7 @@ function Back({ title, onBack }: { title: string; onBack: () => void }) {
   return (
     <div className="flex items-center gap-1 px-1 pb-1.5">
       <button type="button" onClick={onBack} aria-label="Back" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"><ChevronLeft className="h-4 w-4" /></button>
-      <p className="text-[13px] font-semibold text-slate-900">{title}</p>
+      <p className="text-sm font-semibold text-slate-900">{title}</p>
     </div>
   );
 }
@@ -45,15 +45,15 @@ function PickList({ options, selected, placeholder, empty, onPick }: {
       <div className="relative mb-1.5 px-1">
         <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder}
-          className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-[13px] outline-none transition-colors placeholder:text-slate-400 focus:border-navy-300 focus:bg-white" />
+          className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-slate-400 focus:border-navy-300 focus:bg-paper" />
       </div>
       <div className="max-h-52 overflow-y-auto">
-        {shown.length === 0 ? <p className="px-3 py-6 text-center text-[12.5px] text-slate-400">{empty}</p> : shown.map((o) => (
+        {shown.length === 0 ? <p className="px-3 py-6 text-center text-xs text-slate-400">{empty}</p> : shown.map((o) => (
           <button key={o.value} type="button" onClick={() => onPick(o.value)}
             className={cn('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-slate-100', o.value === selected && 'bg-slate-50')}>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] font-medium text-slate-900">{o.label}</span>
-              {o.hint && <span className="block truncate text-[11.5px] text-slate-400">{o.hint}</span>}
+              <span className="block truncate text-sm font-medium text-slate-900">{o.label}</span>
+              {o.hint && <span className="block truncate text-2xs text-slate-400">{o.hint}</span>}
             </span>
             {o.value === selected && <Check className="h-4 w-4 shrink-0 text-navy-700" />}
           </button>
@@ -118,17 +118,17 @@ export function AttachMenu({ setup, patch, jdOptions, cvOptions, acceptsCv, onUp
       <AnimatePresence>
         {open && (
           <motion.div variants={pop} initial="hidden" animate="show" exit="exit"
-            className={cn('absolute left-0 z-40 w-[320px] rounded-2xl border border-slate-200 bg-white p-1.5 shadow-[0_16px_48px_-12px_rgba(15,23,42,0.28)]', down ? 'top-full mt-2 origin-top-left' : 'bottom-full mb-2 origin-bottom-left')}>
+            className={cn('absolute left-0 z-40 w-[min(320px,calc(100vw-2rem))] rounded-2xl border border-slate-200 bg-paper p-1.5 shadow-[0_16px_48px_-12px_rgba(15,23,42,0.28)]', down ? 'top-full mt-2 origin-top-left' : 'bottom-full mb-2 origin-bottom-left')}>
             {view === 'root' && (
               <>
-                <p className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Job description</p>
+                <p className="px-3 pb-1 pt-1.5 text-2xs font-semibold uppercase tracking-wide text-slate-400">Job description</p>
                 <Item icon={<FileText className="h-4 w-4" />} label="Select from my list" hint="Job descriptions already saved" done={jdReady(setup) && setup.jdSource === 'library'} onClick={() => setView('jd-list')} />
                 <Item icon={<FileText className="h-4 w-4" />} label="Paste text" hint="Paste a job description" done={jdReady(setup) && setup.jdSource === 'pasted'} onClick={() => { setPaste(setup.pastedText); setView('jd-paste'); }} />
                 <Item icon={<Upload className="h-4 w-4" />} label="Upload a file" hint="PDF, DOCX or TXT" done={jdReady(setup) && setup.jdSource === 'uploaded'} onClick={() => jdFile.current?.click()} />
                 {acceptsCv && (
                   <>
                     <div className="mx-3 my-1.5 h-px bg-slate-100" />
-                    <p className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Candidate CV (optional)</p>
+                    <p className="px-3 pb-1 pt-1 text-2xs font-semibold uppercase tracking-wide text-slate-400">Candidate CV (optional)</p>
                     <Item icon={<UserRound className="h-4 w-4" />} label="Select a candidate" hint="Questions will be tailored to them" done={cvReady(setup) && setup.cvMode === 'library'} onClick={() => setView('cv-list')} />
                     <Item icon={<Upload className="h-4 w-4" />} label="Upload a CV" hint="PDF, DOCX or TXT" done={cvReady(setup) && setup.cvMode === 'uploaded'} onClick={() => cvFile.current?.click()} />
                   </>
@@ -153,11 +153,11 @@ export function AttachMenu({ setup, patch, jdOptions, cvOptions, acceptsCv, onUp
               <div className="p-1">
                 <Back title="Paste a job description" onBack={() => setView('root')} />
                 <textarea autoFocus value={paste} onChange={(e) => setPaste(e.target.value)} rows={7} maxLength={maxJdChars} placeholder="Paste the full job description"
-                  className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] leading-relaxed outline-none transition-colors placeholder:text-slate-400 focus:border-navy-300 focus:bg-white" />
+                  className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed outline-none transition-colors placeholder:text-slate-400 focus:border-navy-300 focus:bg-paper" />
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="text-[11.5px] tabular-nums text-slate-400">{paste.length.toLocaleString()} characters</span>
+                  <span className="text-2xs tabular-nums text-slate-400">{paste.length.toLocaleString()} characters</span>
                   <button type="button" disabled={!paste.trim()} onClick={() => { patch({ jdSource: 'pasted', pastedText: paste }); close(); }}
-                    className="rounded-lg bg-navy-900 px-3.5 py-1.5 text-[12.5px] font-semibold text-white transition-colors hover:bg-navy-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400">
+                    className="rounded-lg bg-solid px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-solid-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400">
                     Attach
                   </button>
                 </div>

@@ -23,6 +23,7 @@ class Page:
     rows: List[Dict[str, Any]]
     total: int
     next_offset: Optional[int] = None      # offset based lists
+    stats: Optional[Dict[str, Any]] = None  # counts that belong to the whole list (the tracker's cards), not to this page
     cursor: Optional[str] = None           # cursor based lists (the Boolean search)
 
     @property
@@ -48,6 +49,26 @@ def job_row(j: Dict[str, Any]) -> Dict[str, Any]:
 
 def jd_row(j: Dict[str, Any]) -> Dict[str, Any]:
     return {"jd_id": j.get("id"), "title": text(j.get("job_title"), 90), "file": text(j.get("filename"), 60), "category": text(j.get("category"), 40)}
+
+
+def _person(value: Any) -> Optional[str]:
+    return text((value or {}).get("username"), 40) or None if isinstance(value, dict) else None
+
+
+def requirement_row(v: Dict[str, Any]) -> Dict[str, Any]:
+    """A requirement (open or closed) as one compact row. The id is for the assistant's next call; the screen never shows it."""
+    recruiters = ", ".join(text(r.get("username"), 40) for r in (v.get("recruiters") or []) if isinstance(r, dict))
+    return {"id": v.get("id"), "position": text(v.get("position"), 90), "client": text(v.get("client"), 60), "date": text(v.get("requirement_date"), 10),
+            "deadline": text(v.get("cv_submission_date"), 10) or None, "status": v.get("status"), "recruiters": recruiters or None,
+            "manager": _person(v.get("manager")), "sales_manager": _person(v.get("sales_manager")), "cvs": v.get("cvs_submitted_count"),
+            "job_location": text(v.get("job_location"), 60) or None, "closed": text(v.get("closed_at"), 10) or None, "days": v.get("days_to_close")}
+
+
+def selection_row(v: Dict[str, Any]) -> Dict[str, Any]:
+    recruiters = ", ".join(text(r.get("username"), 40) for r in (v.get("recruiters") or []) if isinstance(r, dict))
+    return {"id": v.get("id"), "date": text(v.get("date"), 10), "candidate": text(v.get("candidate_name"), 80) or None, "position": text(v.get("position"), 90),
+            "client": text(v.get("client"), 60), "status": v.get("status"), "recruiters": recruiters or None, "account_manager": _person(v.get("sales_manager")),
+            "recruitment_manager": _person(v.get("manager")), "comments": text(v.get("comments"), 160) or None}
 
 
 # ----------------------------------------------------------------------------------------------------------------- pages
@@ -94,6 +115,35 @@ def descriptions_page(gateway: Any, *, query: str = "", offset: int = 0, limit: 
     return Page(rows, int(body.get("total") or len(rows)), next_offset=offset + len(rows))
 
 
+def requirements_page(gateway: Any, *, query: str = "", status: str = "", location: str = "", recruiter_id: str = "", manager_id: str = "",
+                      sales_manager_id: str = "", offset: int = 0, limit: int = PAGE) -> Page:
+    body = gateway.get("/api/tracker/requirements", q=text(query, 80), status=status, location=location, recruiter_id=recruiter_id, manager_id=manager_id,
+                       sales_manager_id=sales_manager_id, limit=limit, offset=offset)
+    rows = [requirement_row(v) for v in (body.get("items") or [])[:limit]]
+    return Page(rows, int(body.get("total") or len(rows)), next_offset=offset + len(rows), stats=body.get("stats") or None)
+
+
+def closures_page(gateway: Any, *, query: str = "", location: str = "", recruiter_id: str = "", manager_id: str = "", sales_manager_id: str = "",
+                  year: int = 0, month: int = 0, offset: int = 0, limit: int = PAGE) -> Page:
+    from calendar import monthrange
+
+    date_from = date_to = ""
+    if year:
+        date_from, date_to = (f"{year}-{month:02d}-01", f"{year}-{month:02d}-{monthrange(year, month)[1]:02d}") if month else (f"{year}-01-01", f"{year}-12-31")
+    body = gateway.get("/api/tracker/closures", q=text(query, 80), location=location, recruiter_id=recruiter_id, manager_id=manager_id,
+                       sales_manager_id=sales_manager_id, date_from=date_from, date_to=date_to, limit=limit, offset=offset)
+    rows = [requirement_row(v) for v in (body.get("items") or [])[:limit]]
+    return Page(rows, int(body.get("total") or len(rows)), next_offset=offset + len(rows), stats=body.get("summary") or None)
+
+
+def selections_page(gateway: Any, *, query: str = "", status: str = "", location: str = "", recruiter_id: str = "", date_from: str = "", date_to: str = "",
+                    offset: int = 0, limit: int = PAGE) -> Page:
+    body = gateway.get("/api/tracker/selections", q=text(query, 80), status=status, location=location, recruiter_id=recruiter_id, date_from=date_from,
+                       date_to=date_to, limit=limit, offset=offset)
+    rows = [selection_row(v) for v in (body.get("items") or [])[:limit]]
+    return Page(rows, int(body.get("total") or len(rows)), next_offset=offset + len(rows), stats=body.get("stats") or None)
+
+
 # ------------------------------------------------------------------------------------------- what "Show more" may call
 def _candidates(gateway: Any, a: Dict[str, Any], offset: int, cursor: Optional[str]) -> Page:
     return candidates_page(gateway, query=a.get("query", ""), category=a.get("category", ""), offset=offset)
@@ -114,8 +164,29 @@ def _descriptions(gateway: Any, a: Dict[str, Any], offset: int, cursor: Optional
     return descriptions_page(gateway, query=a.get("query", ""), offset=offset)
 
 
+_TRACKER_KEYS = ("query", "status", "location", "recruiter_id", "manager_id", "sales_manager_id")
+
+
+def _only(a: Dict[str, Any], *keys: str) -> Dict[str, Any]:
+    return {k: text(a.get(k), 80) for k in keys if a.get(k) not in (None, "")}
+
+
+def _requirements(gateway: Any, a: Dict[str, Any], offset: int, cursor: Optional[str]) -> Page:
+    return requirements_page(gateway, offset=offset, **_only(a, *_TRACKER_KEYS))
+
+
+def _closures(gateway: Any, a: Dict[str, Any], offset: int, cursor: Optional[str]) -> Page:
+    return closures_page(gateway, offset=offset, year=number(a.get("year"), 0, 0, 2100), month=number(a.get("month"), 0, 0, 12),
+                         **_only(a, "query", "location", "recruiter_id", "manager_id", "sales_manager_id"))
+
+
+def _selections(gateway: Any, a: Dict[str, Any], offset: int, cursor: Optional[str]) -> Page:
+    return selections_page(gateway, offset=offset, **_only(a, "query", "status", "location", "recruiter_id", "date_from", "date_to"))
+
+
 PAGEABLE: Dict[str, Callable[[Any, Dict[str, Any], int, Optional[str]], Page]] = {
     "search_candidates": _candidates, "boolean_search": _boolean, "list_jobs": _jobs, "list_job_descriptions": _descriptions,
+    "list_requirements": _requirements, "list_closures": _closures, "list_selections": _selections,
 }
 
 

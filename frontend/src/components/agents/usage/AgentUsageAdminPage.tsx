@@ -75,25 +75,25 @@ export default function AgentUsageAdminPage() {
         actions={<Button variant="secondary" size="sm" icon={loading ? <Loader2 className="animate-spin" /> : <RefreshCw />} onClick={() => void load()} disabled={loading}>Refresh</Button>}
       />
 
-      {error && <p className="flex items-center gap-2 text-[13px] font-medium text-rose-600"><AlertCircle className="h-4 w-4" />{error}</p>}
-      {note && <p className="text-[13px] font-medium text-emerald-700">{note}</p>}
+      {error && <p className="flex items-center gap-2 text-sm font-medium text-rose-600"><AlertCircle className="h-4 w-4" />{error}</p>}
+      {note && <p className="text-sm font-medium text-emerald-700">{note}</p>}
 
-      <div className="rounded-2xl border border-surface-border bg-white shadow-card">
+      <div className="rounded-2xl border border-surface-border bg-paper shadow-card">
         <div className="flex items-center justify-between gap-3 border-b border-surface-border px-4 py-3">
-          <p className="text-[14px] font-semibold text-slate-900">Reset requests</p>
-          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[12px] font-medium tabular-nums text-slate-600">{requests.pending.length} waiting</span>
+          <p className="text-base font-semibold text-slate-900">Reset requests</p>
+          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium tabular-nums text-slate-600">{requests.pending.length} waiting</span>
         </div>
         {requests.pending.length === 0 ? (
-          <p className="px-4 py-6 text-center text-[13px] text-slate-400">No one is waiting for a reset.</p>
+          <p className="px-4 py-6 text-center text-sm text-slate-400">No one is waiting for a reset.</p>
         ) : (
           <ul className="divide-y divide-surface-border">
             {requests.pending.map((r) => (
               <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                 <div className="min-w-0">
-                  <p className="text-[13.5px] font-medium text-slate-900">{r.username}
-                    <span className="ml-2 text-[12px] font-normal tabular-nums text-slate-500">{r.used.toLocaleString()} of {r.limit.toLocaleString()} used ({r.percent}%)</span>
+                  <p className="text-sm font-medium text-slate-900">{r.username}
+                    <span className="ml-2 text-xs font-normal tabular-nums text-slate-500">{r.used.toLocaleString()} of {r.limit.toLocaleString()} used ({r.percent}%)</span>
                   </p>
-                  <p className="mt-0.5 text-[12px] text-slate-500">Asked {formatResetTime(r.requested_at)}{r.reason ? ` · "${r.reason}"` : ''}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">Asked {formatResetTime(r.requested_at)}{r.reason ? ` · "${r.reason}"` : ''}</p>
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" disabled={busy === r.id} onClick={() => void decide(r.id, r.username, 'approve')}>Approve</Button>
@@ -105,8 +105,8 @@ export default function AgentUsageAdminPage() {
         )}
         {requests.recent.length > 0 && (
           <div className="border-t border-surface-border px-4 py-2.5">
-            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Recent decisions</p>
-            <ul className="space-y-0.5 text-[12.5px] text-slate-600">
+            <p className="mb-1 text-2xs font-semibold uppercase tracking-wide text-slate-400">Recent decisions</p>
+            <ul className="space-y-0.5 text-xs text-slate-600">
               {requests.recent.slice(0, 6).map((d) => (
                 <li key={d.id}>{d.username}: <span className="font-medium text-slate-900">{d.decision}</span> by {d.decided_by} at {formatResetTime(d.decided_at)}</li>
               ))}
@@ -116,21 +116,21 @@ export default function AgentUsageAdminPage() {
       </div>
 
       {data && (
-        <div className="rounded-2xl border border-surface-border bg-white px-4 py-3 shadow-card">
+        <div className="rounded-2xl border border-surface-border bg-paper px-4 py-3 shadow-card">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <p className="text-[13px] font-semibold text-slate-900">Everyone combined (shared ceiling)</p>
-            <p className={cn('text-[13px] tabular-nums', meterTone(globalPercent).text)}>
+            <p className="text-sm font-semibold text-slate-900">Everyone combined (shared ceiling)</p>
+            <p className={cn('text-sm tabular-nums', meterTone(globalPercent).text)}>
               <span className="font-semibold">{data.global_used.toLocaleString()}</span> of {data.global_limit.toLocaleString()}
             </p>
           </div>
           <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
             <div className={cn('h-full rounded-full transition-all', meterTone(globalPercent).bar)} style={{ width: `${globalPercent}%` }} />
           </div>
-          <p className="mt-1.5 text-[11.5px] text-slate-400">When this is full, no one can use the agents until tomorrow. Each person's own limit is {data.limit_per_user.toLocaleString()} tokens a day.</p>
+          <p className="mt-1.5 text-2xs text-slate-400">When this is full, no one can use the agents until tomorrow. Each person's own limit is {data.limit_per_user.toLocaleString()} tokens a day.</p>
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-2xl border border-surface-border bg-white shadow-card">
+      <div className="overflow-x-auto rounded-2xl border border-surface-border bg-paper shadow-card">
         <Table>
           <THead>
             <TR>
@@ -155,12 +155,12 @@ export default function AgentUsageAdminPage() {
                       <div className="h-1.5 w-28 overflow-hidden rounded-full bg-slate-100">
                         <div className={cn('h-full rounded-full', tone.bar)} style={{ width: `${u.percent}%` }} />
                       </div>
-                      <span className={cn('text-[12.5px] tabular-nums', tone.text)}>{u.used.toLocaleString()} / {u.limit.toLocaleString()}</span>
+                      <span className={cn('text-xs tabular-nums', tone.text)}>{u.used.toLocaleString()} / {u.limit.toLocaleString()}</span>
                     </div>
                   </TD>
                   <TD className="text-right tabular-nums">{u.calls}</TD>
                   <TD className="text-right tabular-nums">{u.cost_usd.toFixed(4)}</TD>
-                  <TD className="text-[12.5px] text-slate-500">{u.last_reset_at ? `${formatResetTime(u.last_reset_at)} by ${u.last_reset_by}` : '-'}</TD>
+                  <TD className="text-xs text-slate-500">{u.last_reset_at ? `${formatResetTime(u.last_reset_at)} by ${u.last_reset_by}` : '-'}</TD>
                   <TD className="text-right">
                     <Button variant="secondary" size="sm" disabled={busy === u.username || u.used === 0} onClick={() => void reset(u.username, u.used)}>
                       {busy === u.username ? 'Resetting...' : 'Reset'}

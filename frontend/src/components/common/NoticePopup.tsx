@@ -70,19 +70,19 @@ export default function NoticePopup() {
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-gray-950/50" aria-hidden onClick={dismiss} />
+      <div className="absolute inset-0 bg-scrim/50" aria-hidden onClick={dismiss} />
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Notice"
-        className="relative z-10 w-full max-w-md overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl"
+        className="relative z-10 w-full max-w-md overflow-hidden rounded-xl border border-gray-200 bg-paper shadow-xl"
       >
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-brand-50 px-4 py-3">
           <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-navy-800 text-paper">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-solid-hover text-white">
               <Megaphone className="h-4 w-4" />
             </span>
-            <h2 className="text-[15px] font-semibold text-gray-900">Notice</h2>
+            <h2 className="text-md font-semibold text-gray-900">Notice</h2>
           </div>
           <button
             type="button"
@@ -95,13 +95,13 @@ export default function NoticePopup() {
           </button>
         </div>
         <div className="px-4 py-4">
-          <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-gray-800">{notice.message}</p>
+          <p className="whitespace-pre-wrap text-base leading-relaxed text-gray-800">{notice.message}</p>
         </div>
         <div className="flex justify-end border-t border-gray-100 px-4 py-3">
           <button
             type="button"
             onClick={dismiss}
-            className="rounded-md bg-navy-700 px-4 py-1.5 text-[13px] font-medium text-paper transition-colors hover:bg-navy-800"
+            className="rounded-md bg-solid-soft px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-solid-hover"
           >
             Got it
           </button>

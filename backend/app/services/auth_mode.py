@@ -13,8 +13,7 @@ def normalize_otp_mode(value) -> str:
 
 
 def auth_mode_for_user(user) -> str:
-    """Second-factor mode for a user: "otp" or "captcha". Admins always use the CAPTCHA (no email needed, and the
-    most privileged account must not log in with a password alone)."""
-    if getattr(user, "role", None) == "admin":
-        return "captcha"
+    """Second-factor mode for a user: "otp" or "captcha", as stored on the account. This holds for the admin too: it starts on the
+    CAPTCHA (set when the account is created, see app/db/database.py) and can be changed on the Users page. Either way no account,
+    the admin included, signs in with a password alone."""
     return "captcha" if normalize_otp_mode(getattr(user, "otp_mode", "real")) == "captcha" else "otp"

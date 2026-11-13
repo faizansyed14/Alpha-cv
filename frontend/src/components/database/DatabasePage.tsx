@@ -20,7 +20,6 @@ import {
 import { useRouter } from 'next/navigation';
 import { canUseAgents, linkedinHref } from '@/lib/agentLinks';
 import { useAppStore } from '@/stores/appStore';
-import { useSavedCvsStore } from '@/stores/savedCvsStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useWorkspaceNav } from '@/hooks/useWorkspaceNav';
 import { api } from '@/lib/api';
@@ -30,7 +29,7 @@ import { InfiniteScrollSentinel } from '@/components/ui/infinite-scroll';
 import { Segmented } from '@/components/ui/segmented';
 import { Avatar } from '@/components/ui/avatar';
 import { CVAdvancedSearchParams, CVListItem, JDListItem, CVSearchResult } from '@/lib/types';
-import { CandidatesListSkeleton, JobsTableSkeleton } from '@/components/skeletons';
+import { Bone, CandidatesListSkeleton, SkeletonJobCards } from '@/components/skeletons';
 import AdvancedSearchModal from '@/components/database/AdvancedSearchModal';
 import ContactActions from '@/components/common/ContactActions';
 import CandidateCard from '@/components/database/CandidateCard';
@@ -137,6 +136,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     cvs,
     jds,
     totalCVs,
+    cvsCursor,
     totalJDs,
     selectedCVs,
     selectedJD,
@@ -153,35 +153,14 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     loadingStates, databaseActiveTab,
   } = useAppStore();
   const { user } = useAuthStore();
-  const savedIds = useSavedCvsStore((st) => st.ids);
-  const saveCvs = useSavedCvsStore((st) => st.save);
-  const unsaveCvs = useSavedCvsStore((st) => st.unsave);
-  const canSave = !!user;
-  const [saveNotice, setSaveNotice] = useState<string | null>(null);
-
-  const toggleSaved = (id: string) => {
-    const wasSaved = savedIds.includes(id);
-    void (wasSaved ? unsaveCvs([id]) : saveCvs([id])).catch(() => setSaveNotice('Could not update your saved CVs. Please try again.'));
-  };
-
-  const saveSelected = async () => {
-    const before = savedIds.length;
-    try {
-      await saveCvs(selectedCVs);
-      const added = useSavedCvsStore.getState().ids.length - before;
-      setSaveNotice(added > 0 ? `${added.toLocaleString()} CV${added === 1 ? '' : 's'} added to Saved CVs` : 'Those CVs are already in Saved CVs');
-    } catch {
-      setSaveNotice('Could not save the selected CVs. Please try again.');
-    }
-    setTimeout(() => setSaveNotice(null), 4000);
-  };
 
   const [search, setSearch] = useState('');
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
   const [searchModalMode, setSearchModalMode] = useState<'keywords' | 'boolean'>('keywords');
   const [activeFolder, setActiveFolder] = useState<string>(CATEGORY_ALL);
   const [categories, setCategories] = useState<Record<string, number>>({});
-  const [folderCVs, setFolderCVs] = useState<Record<string, { items: CVListItem[]; total: number | null }>>({});
+  // cursor: where the category's next page starts (null on its last page, undefined when the server gave none)
+  const [folderCVs, setFolderCVs] = useState<Record<string, { items: CVListItem[]; total: number | null; cursor?: string | null }>>({});
   const [loadingFolderCVs, setLoadingFolderCVs] = useState<Record<string, boolean>>({});
   // Document preview, same approach as the Matching page (always render the
   // original file as a PDF via a blob URL; the modal sniffs the bytes so DOCX
@@ -243,7 +222,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
   };
-  const [serverSearchCVs, setServerSearchCVs] = useState<{ items: CVListItem[]; total: number | null; more: boolean }>({
+  const [serverSearchCVs, setServerSearchCVs] = useState<{ items: CVListItem[]; total: number | null; more: boolean; cursor?: string | null }>({
     items: [],
     total: null,
     more: false,
@@ -508,12 +487,14 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   const loadFolderCVPage = async (category: string, offset: number) => {
     setLoadingFolderCVs((s) => ({ ...s, [category]: true }));
     try {
-      const res = await api.listCVs({ category, limit: ITEMS_PER_PAGE, offset });
+      // the next page starts at the cursor of the last one (the same cost however deep the list is); the first page has none
+      const cursor = offset > 0 ? folderCVs[category]?.cursor : undefined;
+      const res = await api.listCVs(cursor ? { category, limit: ITEMS_PER_PAGE, cursor } : { category, limit: ITEMS_PER_PAGE, offset });
       setFolderCVs((s) => {
         const prev = s[category]?.items ?? [];
         const nextItems = offset === 0 ? res.cvs : [...prev, ...res.cvs];
         const nextTotal = typeof res.total === 'number' ? res.total : (s[category]?.total ?? null);
-        return { ...s, [category]: { items: nextItems, total: nextTotal } };
+        return { ...s, [category]: { items: nextItems, total: nextTotal, cursor: res.next_cursor } };
       });
     } catch {
       // swallow here; UI already handles "no candidates" states
@@ -548,7 +529,12 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         .then((res) => {
           if (cancelled) return;
           const found = res.cvs ?? [];
-          setServerSearchCVs({ items: found, total: typeof res.total === 'number' ? res.total : null, more: found.length >= ITEMS_PER_PAGE });
+          setServerSearchCVs({
+            items: found,
+            total: typeof res.total === 'number' ? res.total : null,
+            more: res.next_cursor !== undefined ? !!res.next_cursor : found.length >= ITEMS_PER_PAGE,
+            cursor: res.next_cursor,
+          });
         })
         .catch(() => {
           if (cancelled) return;
@@ -572,12 +558,16 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     setLoadMoreFailed(false);
     try {
       const category = activeFolder === CATEGORY_ALL ? undefined : activeFolder;
-      const res = await api.listCVs({ q: search.trim(), category, limit: ITEMS_PER_PAGE, offset: serverSearchCVs.items.length });
+      const q = search.trim();
+      const res = await api.listCVs(serverSearchCVs.cursor
+        ? { q, category, limit: ITEMS_PER_PAGE, cursor: serverSearchCVs.cursor }
+        : { q, category, limit: ITEMS_PER_PAGE, offset: serverSearchCVs.items.length });
       const found = res.cvs ?? [];
       setServerSearchCVs((prev) => ({
         items: [...prev.items, ...found],
-        total: typeof res.total === 'number' ? res.total : prev.total,
-        more: found.length >= ITEMS_PER_PAGE,
+        total: typeof res.total === 'number' ? res.total : prev.total,      // the matches are counted with the first page only
+        more: res.next_cursor !== undefined ? !!res.next_cursor : found.length >= ITEMS_PER_PAGE,
+        cursor: res.next_cursor,
       }));
     } catch {
       setLoadMoreFailed(true);
@@ -794,11 +784,15 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     }
   };
 
+  // The server says whether a list has another page (its cursor); the counts decide only when it gave none.
+  const activeCursor = activeFolder === CATEGORY_ALL ? cvsCursor : folderCVs[activeFolder]?.cursor;
   const hasMoreRows = isServerSearchMode
     ? serverSearchCVs.more
     : advancedResults || geoFilterCVs
       ? moreOnServer
-      : activeTotalCount != null && activeLoadedCount < activeTotalCount;
+      : activeCursor !== undefined
+        ? activeCursor !== null
+        : activeTotalCount != null && activeLoadedCount < activeTotalCount;
   const loadingMoreRows = isServerSearchMode
     ? loadingMoreSearch || serverSearching
     : advancedResults || geoFilterCVs
@@ -947,8 +941,6 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         }}
         onPreview={() => openPreview(cv.id, 'cv', d.name, cv)}
         onDelete={() => handleDeleteCV(cv.id)}
-        saved={canSave ? savedIds.includes(cv.id) : undefined}
-        onToggleSave={canSave ? () => toggleSaved(cv.id) : undefined}
         onSaveNote={(text) => handleCardSaveNote(cv.id, text)}
         onDeleteNote={() => handleCardDeleteNote(cv.id, noteMeta?.author)}
       />
@@ -959,17 +951,17 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     if (advancedSearching) {
       return (
         <div className="space-y-3" aria-busy="true" aria-live="polite">
-          <div className="overflow-hidden rounded-2xl border border-surface-border bg-white shadow-card">
+          <div className="overflow-hidden rounded-2xl border border-surface-border bg-paper shadow-card">
             <div className="px-5 pb-3 pt-4">
-              <p className="text-[15px] font-semibold tracking-[-0.01em] text-slate-900">
+              <p className="text-md font-semibold tracking-[-0.01em] text-slate-900">
                 Searching {cvCount > 0 ? `${cvCount.toLocaleString()} CVs` : 'your CVs'}
               </p>
-              <p className="mt-0.5 text-[12.5px] text-slate-500">Checking every CV against your search. Matches appear here as soon as they are found.</p>
+              <p className="mt-0.5 text-xs text-slate-500">Checking every CV against your search. Matches appear here as soon as they are found.</p>
             </div>
             <div className="search-track"><div className="search-bar" /></div>
           </div>
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="search-sheen relative flex gap-3.5 overflow-hidden rounded-2xl border border-surface-border bg-white p-5" style={{ animationDelay: `${i * 140}ms` }}>
+            <div key={i} className="search-sheen relative flex gap-3.5 overflow-hidden rounded-2xl border border-surface-border bg-paper p-5" style={{ animationDelay: `${i * 140}ms` }}>
               <div className="h-12 w-12 shrink-0 rounded-full bg-slate-100" />
               <div className="min-w-0 flex-1 space-y-2.5">
                 <div className="h-3.5 w-1/3 rounded bg-slate-100" />
@@ -1016,7 +1008,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     return (
       <>
         <div className="mb-2.5 flex items-center justify-between gap-2 px-1">
-          <label className="inline-flex cursor-pointer items-center gap-2.5 text-[13px] font-medium text-slate-700">
+          <label className="inline-flex cursor-pointer items-center gap-2.5 text-sm font-medium text-slate-700">
             <input
               type="checkbox"
               checked={allOnPageSelected}
@@ -1030,17 +1022,11 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
             <span className="tabular-nums">
               {paginatedCVs.length.toLocaleString()} of {pagedTotalLabel}
             </span>
-            {selectedCVs.length > 0 && canSave && (
-              <button type="button" onClick={() => void saveSelected()} className="font-semibold text-navy-600 hover:underline">
-                Save {selectedCVs.length} selected
-              </button>
-            )}
             {selectedCVs.length > 0 && (
               <button type="button" onClick={() => deselectAllCVs()} className="font-semibold text-navy-600 hover:underline">
                 Clear {selectedCVs.length} selected
               </button>
             )}
-            {saveNotice && <span className="font-medium text-emerald-700" role="status">{saveNotice}</span>}
           </div>
         </div>
 
@@ -1072,25 +1058,25 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         title={pageTitle}
         description={
           view === 'candidates'
-            ? 'Select candidates, then pick a job description to match them against.'
-            : 'Pick the job description to match your selected candidates against.'
+            ? 'Select people, then pick a JD to match.'
+            : 'Pick the JD for your selected candidates.'
         }
         actions={
           <>
-            <Button variant="secondary" onClick={() => { loadCVs(); loadJDs(); }} icon={<RefreshCw />}>
+            <Button variant="secondary" size="sm" onClick={() => { loadCVs(); loadJDs(); }} icon={<RefreshCw />}>
               Refresh
             </Button>
             {view === 'candidates' && (
               <>
-                <Button variant="secondary" icon={<Code2 />} onClick={() => { setSearchModalMode('boolean'); setShowAdvancedSearch(true); }}>
-                  Boolean search
+                <Button variant="secondary" size="sm" icon={<Code2 />} onClick={() => { setSearchModalMode('boolean'); setShowAdvancedSearch(true); }}>
+                  Boolean
                 </Button>
-                <Button variant="secondary" icon={<SlidersHorizontal />} onClick={() => { setSearchModalMode('keywords'); setShowAdvancedSearch(true); }}>
-                  Advanced search
+                <Button variant="secondary" size="sm" icon={<SlidersHorizontal />} onClick={() => { setSearchModalMode('keywords'); setShowAdvancedSearch(true); }}>
+                  Keyword search
                 </Button>
               </>
             )}
-            <Button variant="primary" icon={<Upload />} onClick={() => go('upload')}>
+            <Button variant="primary" size="sm" icon={<Upload />} onClick={() => go('upload')}>
               Upload
             </Button>
           </>
@@ -1098,7 +1084,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       />
 
       {/* Switch between the two halves of a match */}
-      <div className="mb-4 flex items-center gap-1 border-b border-surface-border">
+      <div className="mb-3 flex items-center gap-1">
         {viewTabs.map((t) => {
           const active = view === t.id;
           const Icon = t.icon;
@@ -1110,20 +1096,20 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                 if (lockedView) go(t.id);
                 else { setView(t.id); }
               }}
-              className={`relative -mb-px inline-flex items-center gap-2 border-b-2 px-3 pb-2.5 pt-1 text-[13px] font-semibold transition-colors ${
-                active ? 'border-navy-600 text-navy-700' : 'border-transparent text-slate-500 hover:text-slate-900'
+              className={`relative inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-semibold transition-colors ${
+                active ? 'bg-navy-50 text-navy-800' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
               }`}
             >
-              <Icon className="h-4 w-4" />
+              <Icon className="h-3.5 w-3.5" />
               {t.label}
-              <span className={`rounded-full px-2 py-0.5 text-[11px] tabular-nums ${active ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'}`}>
-                {t.count.toLocaleString()}
+              <span className={`rounded-md px-1.5 py-0.5 text-2xs tabular-nums ${active ? 'bg-paper text-navy-800' : 'bg-slate-100 text-slate-500'}`}>
+                {(t.id === 'candidates' ? cvLoading : jdLoading) && t.count === 0 ? <Bone className="h-3 w-5" /> : t.count.toLocaleString()}
               </span>
               {t.id === 'candidates' && selectedCVs.length > 0 && (
-                <span className="rounded-full bg-navy-600 px-2 py-0.5 text-[11px] text-white tabular-nums">{selectedCVs.length} selected</span>
+                <span className="rounded-md bg-solid px-1.5 py-0.5 text-2xs tabular-nums text-white">{selectedCVs.length}</span>
               )}
               {t.id === 'jobs' && selectedJD && (
-                <span className="rounded-full bg-navy-600 px-2 py-0.5 text-[11px] text-white">1 selected</span>
+                <span className="rounded-md bg-solid px-1.5 py-0.5 text-2xs text-white">1</span>
               )}
             </button>
           );
@@ -1131,18 +1117,18 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       </div>
 
       {/* Toolbar */}
-      <div className="toolbar-bar">
-        <div className="relative min-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      <div className="toolbar-bar min-w-0">
+        <div className="relative min-w-0 w-full flex-1 sm:min-w-[200px]">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder={view === 'candidates' ? 'Search candidates by name, title, skill…' : 'Search job descriptions…'}
+            placeholder={view === 'candidates' ? 'Search name, title, skill…' : 'Search job descriptions…'}
             value={search}
             onChange={(e) => { setSearch(e.target.value); }}
-            className="h-9 w-full rounded-lg border border-transparent bg-slate-50 pl-9 pr-9 text-[13px] text-slate-900 placeholder:text-slate-400 transition-colors hover:bg-slate-100/70 focus:border-navy-500 focus:bg-white focus:outline-none focus:shadow-glow"
+            className="field-input h-8 w-full !pl-8 pr-8 text-sm"
           />
           {view === 'candidates' && serverSearching && search.trim() ? (
-            <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" />
+            <Loader2 className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-slate-400" />
           ) : null}
         </div>
 
@@ -1165,7 +1151,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
 
       {view === 'candidates' && (
         <div className="mb-4 flex flex-wrap items-center gap-2 px-1">
-          <span className="text-[13px] font-medium text-slate-700 tabular-nums">
+          <span className="text-sm font-medium text-slate-700 tabular-nums">
             {pagedTotalLabel} candidates
           </span>
           {Object.entries(sidebarFilters).flatMap(([group, vals]) =>
@@ -1174,7 +1160,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                 key={`${group}:${v}`}
                 type="button"
                 onClick={() => toggleSidebarFilter(group, v)}
-                className="inline-flex items-center gap-1 rounded-md bg-navy-50 px-2 py-0.5 text-[11.5px] font-medium text-navy-700 hover:bg-navy-100"
+                className="inline-flex items-center gap-1 rounded-md bg-navy-50 px-2 py-0.5 text-2xs font-medium text-navy-700 hover:bg-navy-100"
                 title="Remove filter"
               >
                 {group[0].toUpperCase() + group.slice(1)}: {v} <X className="h-3 w-3" />
@@ -1198,7 +1184,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         <div className="mb-4 space-y-3 rounded-xl border border-navy-100 bg-navy-50/70 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[13px] font-semibold text-navy-900">
+              <p className="text-sm font-semibold text-navy-900">
                 {advancedError
                   ? 'Search failed'
                   : `Showing ${filteredCVs.length.toLocaleString()} match${filteredCVs.length === 1 ? '' : 'es'}${
@@ -1207,7 +1193,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                         : ''
                     }`}
               </p>
-              <p className="mt-0.5 text-[12px] text-navy-700/80">
+              <p className="mt-0.5 text-xs text-navy-700/80">
                 {advancedError || 'Edit the boolean string below and search again, or clear to return to all candidates.'}
               </p>
             </div>
@@ -1218,7 +1204,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
 
           {(Boolean(advancedQuery?.boolean_query) || booleanEdit.trim().length > 0) && (
             <div>
-              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-navy-700">
+              <label className="mb-1.5 block text-2xs font-semibold uppercase tracking-[0.08em] text-navy-700">
                 Boolean string
               </label>
               <textarea
@@ -1233,7 +1219,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                 rows={3}
                 spellCheck={false}
                 placeholder={'("Cloud Engineer") AND ("Azure" OR "Terraform") NOT intern'}
-                className="field-input w-full resize-y bg-white font-mono text-[12px] leading-relaxed"
+                className="field-input w-full resize-y bg-paper font-mono text-xs leading-relaxed"
               />
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Button
@@ -1246,7 +1232,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                 >
                   Search again
                 </Button>
-                <span className="text-[11px] text-navy-600/70">Ctrl+Enter to search</span>
+                <span className="text-2xs text-navy-600/70">Ctrl+Enter to search</span>
               </div>
             </div>
           )}
@@ -1256,7 +1242,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       {/* JD sidebar selector hint + content */}
       {view === 'jobs' ? (
         jdLoading ? (
-          <JobsTableSkeleton />
+          <SkeletonJobCards />
         ) : filteredJDs.length === 0 ? (
           <EmptyState
             icon={FileText}
@@ -1310,12 +1296,12 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       {detailCVId && (
         <>
           <div
-            className="fixed inset-0 z-[998] bg-slate-900/40"
+            className="fixed inset-0 z-[998] bg-scrim/40"
             onClick={() => setDetailCVId(null)}
             aria-hidden
           />
           <div
-            className="fixed inset-y-0 right-0 z-[999] flex w-full flex-col border-l border-surface-border bg-white shadow-xl sm:w-[var(--detail-w)]"
+            className="fixed inset-y-0 right-0 z-[999] flex w-full flex-col border-l border-surface-border bg-paper shadow-xl sm:w-[var(--detail-w)]"
             style={{ ['--detail-w' as string]: `${detailWidth}px` }}
           >
             <button
@@ -1323,12 +1309,12 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
               aria-label="Drag to widen details"
               title="Drag to see more"
               onPointerDown={onDetailDragStart}
-              className="absolute -left-3 top-1/2 z-10 hidden h-11 w-6 -translate-y-1/2 cursor-col-resize items-center justify-center rounded-md border border-surface-border bg-white shadow-sm hover:border-navy-400 sm:flex"
+              className="absolute -left-3 top-1/2 z-10 hidden h-11 w-6 -translate-y-1/2 cursor-col-resize items-center justify-center rounded-md border border-surface-border bg-paper shadow-sm hover:border-navy-400 sm:flex"
             >
               <GripVertical className="h-4 w-4 text-slate-400" />
             </button>
             <div className="flex items-center justify-between border-b border-surface-border px-5 py-4">
-              <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-slate-900">Candidate details</h2>
+              <h2 className="text-md font-semibold tracking-[-0.015em] text-slate-900">Candidate details</h2>
               <button
                 type="button"
                 onClick={() => setDetailCVId(null)}
@@ -1341,20 +1327,20 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
             </div>
             <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/60 p-4">
               {detailLoading ? (
-                <div className="flex flex-col items-center justify-center gap-2 py-12 text-[13px] text-slate-500">
+                <div className="flex flex-col items-center justify-center gap-2 py-12 text-sm text-slate-500">
                   <Loader2 className="h-5 w-5 animate-spin" />
                   Loading details...
                 </div>
               ) : detailCV ? (
                 <>
-                  <div className="rounded-xl border border-surface-border bg-white p-4 shadow-card">
+                  <div className="rounded-xl border border-surface-border bg-paper p-4 shadow-card">
                     <div className="flex items-center gap-3">
                       <Avatar name={detailCV.candidate?.full_name || detailCV.structured_info?.full_name} size="lg" />
                       <div className="min-w-0">
-                        <h3 className="truncate text-[15px] font-semibold text-slate-900">
+                        <h3 className="truncate text-md font-semibold text-slate-900">
                           {detailCV.candidate?.full_name || detailCV.structured_info?.full_name || 'Unknown'}
                         </h3>
-                        <p className="truncate text-[13px] text-slate-500">
+                        <p className="truncate text-sm text-slate-500">
                           {detailCV.candidate?.job_title || detailCV.structured_info?.job_title || '-'}
                         </p>
                       </div>
@@ -1388,24 +1374,24 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                     <dl className="mt-3 grid grid-cols-2 gap-3">
                       <div>
                         <dt className="section-label">Experience</dt>
-                        <dd className="mt-0.5 text-[13px] text-slate-900">
+                        <dd className="mt-0.5 text-sm text-slate-900">
                           {detailCV.candidate?.years_of_experience ?? detailCV.structured_info?.years_of_experience ?? '-'} years
                         </dd>
                       </div>
                       <div>
                         <dt className="section-label">Skills</dt>
-                        <dd className="mt-0.5 text-[13px] text-slate-900">
+                        <dd className="mt-0.5 text-sm text-slate-900">
                           {(detailCV.candidate?.skills || detailCV.structured_info?.skills_sentences || []).length}
                         </dd>
                       </div>
                       <div>
                         <dt className="section-label">Category</dt>
-                        <dd className="mt-0.5 text-[13px] text-slate-900">{detailCV.structured_info?.category ?? 'General'}</dd>
+                        <dd className="mt-0.5 text-sm text-slate-900">{detailCV.structured_info?.category ?? 'General'}</dd>
                       </div>
                       {(detailCV.candidate?.gender || detailCV.structured_info?.gender) ? (
                         <div>
                           <dt className="section-label">Gender</dt>
-                          <dd className="mt-0.5 text-[13px] text-slate-900">
+                          <dd className="mt-0.5 text-sm text-slate-900">
                             {detailCV.candidate?.gender || detailCV.structured_info?.gender}
                           </dd>
                         </div>
@@ -1416,7 +1402,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                         return (
                           <div>
                             <dt className="section-label">Languages</dt>
-                            <dd className="mt-0.5 text-[13px] text-slate-900">{langs.join(', ')}</dd>
+                            <dd className="mt-0.5 text-sm text-slate-900">{langs.join(', ')}</dd>
                           </div>
                         );
                       })()}
@@ -1428,7 +1414,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                             <dt className="section-label">Certifications</dt>
                             <dd className="mt-1 flex flex-wrap gap-1.5">
                               {certs.map((c: string) => (
-                                <span key={c} className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[12px] font-medium text-amber-900">{c}</span>
+                                <span key={c} className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-900">{c}</span>
                               ))}
                             </dd>
                           </div>
@@ -1441,27 +1427,27 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                         return es ? (
                           <div>
                             <dt className="section-label">Expected salary</dt>
-                            <dd className="mt-0.5 text-[13px] font-medium text-green-600">{es}</dd>
+                            <dd className="mt-0.5 text-sm font-medium text-green-600">{es}</dd>
                           </div>
                         ) : null;
                       })()}
                     </dl>
                   </div>
 
-                  <div className="rounded-xl border border-surface-border bg-white p-4 shadow-card">
-                    <h4 className="mb-3 text-[13px] font-semibold text-slate-900">Skills</h4>
+                  <div className="rounded-xl border border-surface-border bg-paper p-4 shadow-card">
+                    <h4 className="mb-3 text-sm font-semibold text-slate-900">Skills</h4>
                     {(() => {
                       const skills = (detailCV.candidate?.skills || detailCV.structured_info?.skills_sentences || [])
                         .filter(Boolean)
                         .slice(0, 20);
                       if (!skills.length) {
-                        return <p className="text-[13px] text-slate-400">No skills extracted.</p>;
+                        return <p className="text-sm text-slate-400">No skills extracted.</p>;
                       }
                       return (
                         <ol className="space-y-2">
                           {skills.map((s: string, i: number) => (
-                            <li key={i} className="flex gap-2.5 text-[13px] text-slate-700">
-                              <span className="w-6 shrink-0 tabular-nums text-[12px] font-semibold text-navy-600">{i + 1}.</span>
+                            <li key={i} className="flex gap-2.5 text-sm text-slate-700">
+                              <span className="w-6 shrink-0 tabular-nums text-xs font-semibold text-navy-600">{i + 1}.</span>
                               <span className="min-w-0 whitespace-pre-wrap break-words leading-relaxed">{s}</span>
                             </li>
                           ))}
@@ -1470,20 +1456,20 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                     })()}
                   </div>
 
-                  <div className="rounded-xl border border-surface-border bg-white p-4 shadow-card">
-                    <h4 className="mb-3 text-[13px] font-semibold text-slate-900">Responsibilities</h4>
+                  <div className="rounded-xl border border-surface-border bg-paper p-4 shadow-card">
+                    <h4 className="mb-3 text-sm font-semibold text-slate-900">Responsibilities</h4>
                     {(() => {
                       const resps = (detailCV.candidate?.responsibilities || detailCV.structured_info?.responsibility_sentences || [])
                         .filter(Boolean)
                         .slice(0, 20);
                       if (!resps.length) {
-                        return <p className="text-[13px] text-slate-400">No responsibilities extracted.</p>;
+                        return <p className="text-sm text-slate-400">No responsibilities extracted.</p>;
                       }
                       return (
                         <ol className="space-y-2">
                           {resps.map((r: string, i: number) => (
-                            <li key={i} className="flex gap-2.5 text-[13px] text-slate-700">
-                              <span className="w-6 shrink-0 tabular-nums text-[12px] font-semibold text-navy-600">{i + 1}.</span>
+                            <li key={i} className="flex gap-2.5 text-sm text-slate-700">
+                              <span className="w-6 shrink-0 tabular-nums text-xs font-semibold text-navy-600">{i + 1}.</span>
                               <span className="min-w-0 whitespace-pre-wrap break-words leading-relaxed">{r}</span>
                             </li>
                           ))}
@@ -1493,7 +1479,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                   </div>
                 </>
               ) : (
-                <p className="text-[13px] text-slate-500">Failed to load details.</p>
+                <p className="text-sm text-slate-500">Failed to load details.</p>
               )}
             </div>
           </div>
@@ -1504,12 +1490,12 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       {detailJDId && (
         <>
           <div
-            className="fixed inset-0 z-[998] bg-slate-900/40"
+            className="fixed inset-0 z-[998] bg-scrim/40"
             onClick={() => setDetailJDId(null)}
             aria-hidden
           />
           <div
-            className="fixed inset-y-0 right-0 z-[999] flex w-full flex-col border-l border-surface-border bg-white shadow-xl sm:w-[var(--detail-w)]"
+            className="fixed inset-y-0 right-0 z-[999] flex w-full flex-col border-l border-surface-border bg-paper shadow-xl sm:w-[var(--detail-w)]"
             style={{ ['--detail-w' as string]: `${detailWidth}px` }}
           >
             <button
@@ -1517,12 +1503,12 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
               aria-label="Drag to widen details"
               title="Drag to see more"
               onPointerDown={onDetailDragStart}
-              className="absolute -left-3 top-1/2 z-10 hidden h-11 w-6 -translate-y-1/2 cursor-col-resize items-center justify-center rounded-md border border-surface-border bg-white shadow-sm hover:border-navy-400 sm:flex"
+              className="absolute -left-3 top-1/2 z-10 hidden h-11 w-6 -translate-y-1/2 cursor-col-resize items-center justify-center rounded-md border border-surface-border bg-paper shadow-sm hover:border-navy-400 sm:flex"
             >
               <GripVertical className="h-4 w-4 text-slate-400" />
             </button>
             <div className="flex items-center justify-between border-b border-surface-border px-5 py-4">
-              <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-slate-900">Job description details</h2>
+              <h2 className="text-md font-semibold tracking-[-0.015em] text-slate-900">Job description details</h2>
               <button
                 type="button"
                 onClick={() => setDetailJDId(null)}
@@ -1535,23 +1521,23 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
             </div>
             <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/60 p-4">
               {detailJDLoading ? (
-                <div className="flex flex-col items-center justify-center gap-2 py-12 text-[13px] text-slate-500">
+                <div className="flex flex-col items-center justify-center gap-2 py-12 text-sm text-slate-500">
                   <Loader2 className="h-5 w-5 animate-spin" />
                   Loading JD...
                 </div>
               ) : detailJD ? (
                 <>
-                  <div className="rounded-xl border border-surface-border bg-white p-4 shadow-card">
+                  <div className="rounded-xl border border-surface-border bg-paper p-4 shadow-card">
                     <h3 className="text-sm font-semibold text-slate-900">
                       {detailJD.job_requirements?.job_title || detailJD.structured_info?.job_title || detailJD.filename || 'Untitled'}
                     </h3>
-                    <p className="mt-0.5 text-[13px] text-slate-500">
+                    <p className="mt-0.5 text-sm text-slate-500">
                       {detailJD.job_requirements?.years_of_experience ?? detailJD.structured_info?.years_of_experience ?? '-'} years experience required
                     </p>
                   </div>
 
-                  <div className="rounded-xl border border-surface-border bg-white p-4 shadow-card">
-                    <h4 className="mb-3 flex items-center gap-2 text-[13px] font-semibold text-slate-900">
+                  <div className="rounded-xl border border-surface-border bg-paper p-4 shadow-card">
+                    <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
                       <Code className="h-4 w-4 text-slate-400" /> Skills
                     </h4>
                     {(() => {
@@ -1565,13 +1551,13 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                         .filter(Boolean)
                         .slice(0, 20);
                       if (!skills.length) {
-                        return <p className="text-[13px] text-slate-400">No skills extracted for this JD.</p>;
+                        return <p className="text-sm text-slate-400">No skills extracted for this JD.</p>;
                       }
                       return (
                         <ol className="space-y-2">
                           {skills.map((s: string, i: number) => (
-                            <li key={i} className="flex gap-2.5 text-[13px] text-slate-700">
-                              <span className="w-6 shrink-0 tabular-nums text-[12px] font-semibold text-navy-600">{i + 1}.</span>
+                            <li key={i} className="flex gap-2.5 text-sm text-slate-700">
+                              <span className="w-6 shrink-0 tabular-nums text-xs font-semibold text-navy-600">{i + 1}.</span>
                               <span className="min-w-0 whitespace-pre-wrap break-words leading-relaxed">{s}</span>
                             </li>
                           ))}
@@ -1582,9 +1568,9 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
 
                   {/* Naukri Gulf boolean search string, copy straight into a job-portal search box. */}
                   {(detailJD.job_requirements?.boolean_search_string || detailJD.boolean_search_string) && (
-                    <div className="rounded-xl border border-surface-border bg-white p-4 shadow-card">
+                    <div className="rounded-xl border border-surface-border bg-paper p-4 shadow-card">
                       <div className="mb-2 flex items-center justify-between">
-                        <h4 className="flex items-center gap-2 text-[13px] font-semibold text-slate-900">
+                        <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                           <Search className="h-4 w-4 text-slate-400" /> Boolean search string
                         </h4>
                         <button
@@ -1595,7 +1581,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                             setBooleanCopied(true);
                             setTimeout(() => setBooleanCopied(false), 2000);
                           }}
-                          className="flex shrink-0 items-center gap-1.5 rounded-md border border-surface-border bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600 transition-colors hover:border-brand-300 hover:text-brand-600"
+                          className="flex shrink-0 items-center gap-1.5 rounded-md border border-surface-border bg-slate-50 px-2 py-1 text-2xs font-medium text-slate-600 transition-colors hover:border-brand-300 hover:text-brand-600"
                         >
                           {booleanCopied ? (
                             <>
@@ -1608,16 +1594,16 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                           )}
                         </button>
                       </div>
-                      <p className="mb-1 text-[11px] text-slate-400">
+                      <p className="mb-1 text-2xs text-slate-400">
                         Paste into Naukri Gulf (or any job portal) candidate search.
                       </p>
-                      <pre className="whitespace-pre-wrap break-words rounded-md border border-surface-border bg-slate-50 p-2.5 font-mono text-[11.5px] leading-relaxed text-slate-700">
+                      <pre className="whitespace-pre-wrap break-words rounded-md border border-surface-border bg-slate-50 p-2.5 font-mono text-2xs leading-relaxed text-slate-700">
                         {detailJD.job_requirements?.boolean_search_string || detailJD.boolean_search_string}
                       </pre>
                     </div>
                   )}
-                  <div className="rounded-xl border border-surface-border bg-white p-4 shadow-card">
-                    <h4 className="mb-3 text-[13px] font-semibold text-slate-900">Responsibilities</h4>
+                  <div className="rounded-xl border border-surface-border bg-paper p-4 shadow-card">
+                    <h4 className="mb-3 text-sm font-semibold text-slate-900">Responsibilities</h4>
                     {(() => {
                       const resps = (
                         detailJD.job_requirements?.responsibilities ||
@@ -1628,13 +1614,13 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                         .filter(Boolean)
                         .slice(0, 20);
                       if (!resps.length) {
-                        return <p className="text-[13px] text-slate-400">No responsibilities extracted.</p>;
+                        return <p className="text-sm text-slate-400">No responsibilities extracted.</p>;
                       }
                       return (
                         <ol className="space-y-2">
                           {resps.map((r: string, i: number) => (
-                            <li key={i} className="flex gap-2.5 text-[13px] text-slate-700">
-                              <span className="w-6 shrink-0 tabular-nums text-[12px] font-semibold text-navy-600">{i + 1}.</span>
+                            <li key={i} className="flex gap-2.5 text-sm text-slate-700">
+                              <span className="w-6 shrink-0 tabular-nums text-xs font-semibold text-navy-600">{i + 1}.</span>
                               <span className="min-w-0 whitespace-pre-wrap break-words leading-relaxed">{r}</span>
                             </li>
                           ))}
@@ -1644,7 +1630,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                   </div>
                 </>
               ) : (
-                <p className="text-[13px] text-slate-500">Failed to load JD.</p>
+                <p className="text-sm text-slate-500">Failed to load JD.</p>
               )}
             </div>
           </div>
@@ -1653,17 +1639,17 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
 
       {/* Document preview, same flow as the Matching page. */}
       {previewData.isOpen && (previewLoading || previewLoadError) ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40">
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-surface-border bg-white p-6 shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/40">
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-surface-border bg-paper p-6 shadow-xl">
             {previewLoadError ? (
               <>
-                <p className="text-[13px] text-red-600">{previewLoadError}</p>
+                <p className="text-sm text-red-600">{previewLoadError}</p>
                 <Button onClick={closePreview} variant="secondary">Close</Button>
               </>
             ) : (
               <>
                 <Loader2 className="h-8 w-8 animate-spin text-brand-600" />
-                <p className="text-[13px] text-slate-700">Loading document…</p>
+                <p className="text-sm text-slate-700">Loading document…</p>
               </>
             )}
           </div>

@@ -15,7 +15,7 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      'flex h-9 w-full items-center justify-between rounded-lg border border-surface-strong bg-white px-3 py-1.5 text-[13px] text-slate-900 shadow-soft outline-none transition-colors hover:border-slate-300',
+      'flex h-9 w-full items-center justify-between rounded-lg border border-surface-strong bg-paper px-3 py-1.5 text-sm text-slate-900 shadow-soft outline-none transition-colors hover:border-slate-300',
       'focus:border-navy-500 focus:shadow-glow',
       'disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-60',
       className
@@ -40,7 +40,7 @@ export const SelectContent = React.forwardRef<
       position={position}
       className={cn(
         // Above dialog layers; explicit pointer-events for interaction with scroll-lock / overlays
-        'pointer-events-auto z-[200] min-w-[8rem] overflow-hidden rounded-xl border border-surface-border bg-white shadow-panel',
+        'pointer-events-auto z-[200] min-w-[8rem] overflow-hidden rounded-xl border border-surface-border bg-paper shadow-panel',
         className
       )}
       {...props}
@@ -58,7 +58,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex w-full cursor-default select-none items-center rounded-md py-1.5 pl-8 pr-2 text-[13px] text-slate-700 outline-none',
+      'relative flex w-full cursor-default select-none items-center rounded-md py-1.5 pl-8 pr-2 text-sm text-slate-700 outline-none',
       'focus:bg-navy-50 focus:text-navy-800 data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className
     )}

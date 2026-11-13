@@ -2,16 +2,17 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Card: white surface, thin dark-navy border, soft shadow.
+ * Card: the paper surface with a hairline border and a soft shadow. `interactive` lifts it a touch on hover for cards that open something.
  */
 const Card = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
+  React.HTMLAttributes<HTMLDivElement> & { interactive?: boolean }
+>(({ className, interactive, ...props }, ref) => (
   <div
     ref={ref}
     className={cn(
       "rounded-2xl border border-surface-border bg-paper text-ink shadow-card",
+      interactive && "card-interactive cursor-pointer",
       className
     )}
     {...props}
@@ -34,7 +35,7 @@ const CardTitle = React.forwardRef<
   <h3
     ref={ref}
     className={cn(
-      "text-[15px] font-semibold leading-tight tracking-[-0.015em] text-slate-900",
+      "text-md font-semibold leading-tight tracking-[-0.015em] text-slate-900",
       className
     )}
     {...props}

@@ -80,7 +80,7 @@ export function GradientBackdrop({ calm = false, fixed = false }: { calm?: boole
       />
 
       {/* Top vignette — keeps header readable */}
-      <div className="absolute inset-0 bg-gradient-to-b from-white/50 via-transparent to-white/40" />
+      <div className="absolute inset-0 bg-gradient-to-b from-paper/50 via-transparent to-paper/40" />
     </div>
   );
 }

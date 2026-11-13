@@ -9,8 +9,10 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader, EmptyState } from '@/components/ui/page';
 import { ROLE_LABELS, STAFF_ROLES, roleLabel } from '@/lib/roles';
+import { LOCATIONS, needsLocation } from '@/lib/locations';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table';
-import { AlertCircle, X, Trash2, Pencil, Users as UsersIcon, Plus, Megaphone, Eye, EyeOff } from '@/components/icons';
+import { AlertCircle, X, Power, Trash2, Pencil, Users as UsersIcon, Plus, Megaphone, Eye, EyeOff } from '@/components/icons';
+import { Bone } from '@/components/skeletons';
 function roleBadgeVariant(role?: string) {
   switch (role) {
     case 'admin':
@@ -65,6 +67,7 @@ export default function AdminUsersPage() {
     email: '',
     role: 'user',
     otp_mode: 'real',
+    location: '',
   });
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -179,6 +182,11 @@ export default function AdminUsersPage() {
       return;
     }
 
+    if (needsLocation(createForm.role) && !createForm.location) {
+      setCreateError('Choose a location: it is set now and cannot be changed later');
+      return;
+    }
+
     try {
       setCreateLoading(true);
       setCreateError(null);
@@ -186,10 +194,11 @@ export default function AdminUsersPage() {
       const payload: CreateUserRequest = {
         ...createForm,
         email: createForm.email.trim(),
+        location: needsLocation(createForm.role) ? createForm.location : undefined,
       };
       await api.createUser(token, payload);
       setShowCreateModal(false);
-      setCreateForm({ username: '', password: '', email: '', role: 'user', otp_mode: 'real' });
+      setCreateForm({ username: '', password: '', email: '', role: 'user', otp_mode: 'real', location: '' });
       setCreateError(null);
       await fetchUsers();
     } catch (err: any) {
@@ -211,6 +220,7 @@ export default function AdminUsersPage() {
       if (typeof payload.email === 'string' && !payload.email.trim()) delete payload.email;
       else if (typeof payload.email === 'string') payload.email = payload.email.trim();
       if (typeof payload.password === 'string' && !payload.password.trim()) delete payload.password;
+      if (!payload.location) delete payload.location;
       await api.updateUser(token, editUser.id, payload);
       setEditUser(null);
       setEditForm({});
@@ -222,15 +232,27 @@ export default function AdminUsersPage() {
     }
   };
 
-  const handleDeleteUser = async (userId: string) => {
+  // A user is never deleted. Deactivating one stops them signing in and switches off the Careers jobs they posted; everything that refers to
+  // them (requirements, selections, notes, history) stays. Turning them back on does not turn their jobs back on: do that in Careers.
+  const handleDeactivateUser = async (u: AdminUser) => {
     if (!token) return;
-    if (!confirm('Are you sure you want to delete this user?')) return;
+    if (!confirm(`Deactivate ${u.username}?\n\nThey can no longer sign in and the jobs they posted in Careers stop taking applications. Nothing is deleted: the requirements, jobs, applications and history that mention them stay.`)) return;
 
     try {
-      await api.deleteUser(token, userId);
+      await api.deleteUser(token, u.id);
       await fetchUsers();
     } catch (err: any) {
-      setError(err.message || 'Failed to delete user');
+      setError(err.message || 'Failed to deactivate user');
+    }
+  };
+
+  const handleReactivateUser = async (u: AdminUser) => {
+    if (!token) return;
+    try {
+      await api.updateUser(token, u.id, { is_active: true });
+      await fetchUsers();
+    } catch (err: any) {
+      setError(err.message || 'Failed to reactivate user');
     }
   };
 
@@ -250,7 +272,7 @@ export default function AdminUsersPage() {
           />
 
           {/* Signed-in user hint */}
-          <div className="mb-4 flex items-center gap-2 text-[13px] text-gray-500">
+          <div className="mb-4 flex items-center gap-2 text-sm text-gray-500">
             <span>Signed in as</span>
             <span className="font-medium text-gray-900">{user?.username}</span>
             <Badge variant={roleBadgeVariant(user?.role)}>{roleLabel(user?.role)}</Badge>
@@ -259,7 +281,7 @@ export default function AdminUsersPage() {
           {/* Error Banner */}
           {error && (
             <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-              <div className="flex items-start gap-2 text-[13px] text-red-700">
+              <div className="flex items-start gap-2 text-sm text-red-700">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -276,7 +298,7 @@ export default function AdminUsersPage() {
           {/* Users Table */}
           <div className="mb-2 flex items-center justify-between gap-3">
             <p className="section-label">All users</p>
-            <div className="flex items-center gap-3 text-[11px] text-gray-500">
+            <div className="flex items-center gap-3 text-2xs text-gray-500">
               <span className="flex items-center gap-1.5">
                 <span className="inline-block h-2 w-2 rounded-full bg-blue-500" /> Online
               </span>
@@ -286,9 +308,30 @@ export default function AdminUsersPage() {
             </div>
           </div>
           {loading ? (
-            <div className="flex items-center justify-center rounded-xl border border-surface-border bg-white py-12 shadow-card">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200 border-t-brand-600" />
-            </div>
+            <Table aria-busy="true">
+              <THead>
+                <TR>
+                  <TH>User</TH>
+                  <TH>Email</TH>
+                  <TH>Role</TH>
+                  <TH>Location</TH>
+                  <TH>Status</TH>
+                  <TH className="text-right">Actions</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <TR key={i}>
+                    <TD><div className="flex items-center gap-3"><Bone className="h-8 w-8 shrink-0 rounded-full" /><Bone className="h-4 w-24" /></div></TD>
+                    <TD><Bone className="h-4 w-44" /></TD>
+                    <TD><Bone className="h-5 w-24 rounded-full" /></TD>
+                    <TD><Bone className="h-4 w-20" /></TD>
+                    <TD><div className="flex items-center gap-2"><Bone className="h-3 w-12" /><Bone className="h-5 w-14 rounded-full" /></div></TD>
+                    <TD><div className="flex justify-end gap-2"><Bone className="h-8 w-8 rounded-lg" /><Bone className="h-8 w-8 rounded-lg" /></div></TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
           ) : users.length === 0 ? (
             <EmptyState
               icon={UsersIcon}
@@ -307,6 +350,7 @@ export default function AdminUsersPage() {
                   <TH>User</TH>
                   <TH>Email</TH>
                   <TH>Role</TH>
+                  <TH>Location</TH>
                   <TH>Status</TH>
                   <TH className="text-right">Actions</TH>
                 </TR>
@@ -316,7 +360,7 @@ export default function AdminUsersPage() {
                   <TR key={u.id}>
                     <TD>
                       <div className="flex items-center gap-3">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-[11px] font-semibold text-brand-700">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-2xs font-semibold text-brand-700">
                           {initials(u.username)}
                         </span>
                         <span className="font-medium text-gray-900">{u.username}</span>
@@ -327,6 +371,11 @@ export default function AdminUsersPage() {
                     </TD>
                     <TD>
                       <Badge variant={roleBadgeVariant(u.role)}>{roleLabel(u.role)}</Badge>
+                    </TD>
+                    <TD>
+                      {u.location ? u.location
+                        : needsLocation(u.role) ? <span className="italic text-amber-600" title="Open Edit to set it. It cannot be changed afterwards.">Not set</span>
+                        : <span className="text-slate-500">All locations</span>}
                     </TD>
                     <TD>
                       {(() => {
@@ -357,8 +406,7 @@ export default function AdminUsersPage() {
                           size="sm"
                           variant="ghost"
                           className="h-8 w-8 p-0"
-                          disabled={u.role === 'admin'}
-                          title={u.role === 'admin' ? "The admin's email and password are set in the server's .env file" : undefined}
+                          title={u.role === 'admin' ? 'Edit MFA (email and password are set in the server .env file)' : 'Edit user'}
                           aria-label="Edit user"
                           onClick={() => {
                             setEditUser(u);
@@ -371,11 +419,12 @@ export default function AdminUsersPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700"
-                            aria-label="Delete user"
-                            onClick={() => handleDeleteUser(u.id)}
+                            className={u.is_active ? 'h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700' : 'h-8 w-8 p-0 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700'}
+                            title={u.is_active ? 'Deactivate: no sign-in, and their Careers jobs stop taking applications' : 'Reactivate (their jobs stay off until switched on in Careers)'}
+                            aria-label={u.is_active ? 'Deactivate user' : 'Reactivate user'}
+                            onClick={() => (u.is_active ? handleDeactivateUser(u) : handleReactivateUser(u))}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Power className="h-4 w-4" />
                           </Button>
                         )}
                       </div>
@@ -388,19 +437,19 @@ export default function AdminUsersPage() {
 
           {/* Notice popup management */}
           <p className="section-label mb-2 mt-8">Notice popup</p>
-          <div className="rounded-xl border border-surface-border bg-white p-5 shadow-card">
+          <div className="rounded-xl border border-surface-border bg-paper p-5 shadow-card">
             <div className="flex items-start gap-3">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-brand-50 text-brand-600">
                 <Megaphone className="h-[18px] w-[18px]" />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-semibold text-gray-900">Login notice for all users</p>
-                <p className="mt-0.5 text-[13px] text-gray-500">
+                <p className="text-sm font-semibold text-gray-900">Login notice for all users</p>
+                <p className="mt-0.5 text-sm text-gray-500">
                   This message pops up for every non-admin user when they log in. They can dismiss it
                   with the X; you can show or remove it at any time. Admins don&apos;t see the popup.
                 </p>
                 <div className="mt-3 flex items-center gap-2">
-                  <span className="text-[13px] text-gray-600">Status:</span>
+                  <span className="text-sm text-gray-600">Status:</span>
                   <Badge variant={noticeActive ? 'success' : 'secondary'}>
                     {noticeActive ? 'Showing to users' : 'Hidden'}
                   </Badge>
@@ -411,10 +460,10 @@ export default function AdminUsersPage() {
                   placeholder="e.g. System maintenance tonight from 10pm–11pm. Please save your work."
                   rows={4}
                   maxLength={4000}
-                  className="mt-3 w-full resize-y rounded-md border border-gray-200 bg-white px-3 py-2 text-[13px] text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                  className="mt-3 w-full resize-y rounded-md border border-gray-200 bg-paper px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
                 />
                 {noticeStatus && (
-                  <p className="mt-2 text-[12px] text-brand-600">{noticeStatus}</p>
+                  <p className="mt-2 text-xs text-brand-600">{noticeStatus}</p>
                 )}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Button
@@ -454,18 +503,18 @@ export default function AdminUsersPage() {
           <Dialog open={showCreateModal} onOpenChange={(open) => {
             setShowCreateModal(open);
             if (!open) {
-              setCreateForm({ username: '', password: '', email: '', role: 'user' });
+              setCreateForm({ username: '', password: '', email: '', role: 'user', otp_mode: 'real', location: '' });
               setCreateError(null);
             }
           }}>
             <DialogContent className="max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Create new user</DialogTitle>
-                <p className="text-[13px] text-gray-500">Add a new user to the system</p>
+                <p className="text-sm text-gray-500">Add a new user to the system</p>
               </DialogHeader>
 
               {createError && (
-                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">
+                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>{createError}</span>
                 </div>
@@ -473,7 +522,7 @@ export default function AdminUsersPage() {
 
               <form onSubmit={handleCreateUser} className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">
+                  <label className="block text-sm font-medium text-gray-700">
                     Username <span className="text-red-500">*</span>
                     <span className="ml-2 text-xs text-gray-500">(the name shown in the app)</span>
                   </label>
@@ -489,7 +538,7 @@ export default function AdminUsersPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">
+                  <label className="block text-sm font-medium text-gray-700">
                     Password <span className="text-red-500">*</span>
                   </label>
                   <Input
@@ -505,7 +554,7 @@ export default function AdminUsersPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">
+                  <label className="block text-sm font-medium text-gray-700">
                     Email <span className="text-red-500">*</span>
                     <span className="ml-2 text-xs text-gray-500">(they sign in with this)</span>
                   </label>
@@ -527,7 +576,7 @@ export default function AdminUsersPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">
+                  <label className="block text-sm font-medium text-gray-700">
                     Role <span className="text-red-500">*</span>
                   </label>
                   <select
@@ -537,15 +586,35 @@ export default function AdminUsersPage() {
                       setCreateForm({...createForm, role: newRole});
                       setCreateError(null);
                     }}
-                    className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
+                    className="h-9 w-full rounded-md border border-gray-200 bg-paper px-3 text-sm text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
                   >
                     {STAFF_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
                   </select>
                 </div>
 
+                {needsLocation(createForm.role) ? (
+                  <div className="space-y-1.5">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Location <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={createForm.location || ''}
+                      onChange={(e) => { setCreateForm({ ...createForm, location: e.target.value }); setCreateError(null); }}
+                      className="h-9 w-full rounded-md border border-gray-200 bg-paper px-3 text-sm text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
+                    >
+                      <option value="">Choose a location</option>
+                      {LOCATIONS.map((l) => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                    <p className="text-xs text-slate-500">This person sees only the requirements of this location. It is set now and cannot be changed later.</p>
+                  </div>
+                ) : (
+                  <p className="rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-600">The EVP sees the requirements of every location.</p>
+                )}
+
                 <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">
-                    Authentication <span className="text-red-500">*</span>
+                  <label className="block text-sm font-medium text-gray-700">
+                    MFA <span className="text-red-500">*</span>
+                    <span className="ml-1 text-xs font-normal text-gray-500">(second sign-in step)</span>
                   </label>
                   <select
                     value={createForm.otp_mode || 'real'}
@@ -554,14 +623,11 @@ export default function AdminUsersPage() {
                       setCreateForm({ ...createForm, otp_mode: mode });
                       setCreateError(null);
                     }}
-                    className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
+                    className="h-9 w-full rounded-md border border-gray-200 bg-paper px-3 text-sm text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
                   >
                     <option value="real">Email OTP</option>
                     <option value="captcha">CAPTCHA (image, no email)</option>
                   </select>
-                  {createForm.role === 'admin' && (
-                    <p className="text-xs text-slate-500">Admins always sign in with the CAPTCHA, whatever is chosen here.</p>
-                  )}
                 </div>
 
                 <div className="flex gap-2 pt-2">
@@ -573,7 +639,7 @@ export default function AdminUsersPage() {
                     variant="secondary"
                     onClick={() => {
                       setShowCreateModal(false);
-                      setCreateForm({ username: '', password: '', email: '', role: 'user', otp_mode: 'real' });
+                      setCreateForm({ username: '', password: '', email: '', role: 'user', otp_mode: 'real', location: '' });
                       setCreateError(null);
                     }}
                     className="flex-1"
@@ -595,11 +661,11 @@ export default function AdminUsersPage() {
             <DialogContent className="max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Edit user: {editUser.username}</DialogTitle>
-                <p className="text-[13px] text-gray-500">Update user information</p>
+                <p className="text-sm text-gray-500">Update user information</p>
               </DialogHeader>
               <form onSubmit={handleEditUser} className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">
+                  <label className="block text-sm font-medium text-gray-700">
                     Email <span className="text-red-500">*</span>
                     <span className="ml-2 text-xs text-gray-500">(they sign in with this)</span>
                   </label>
@@ -617,7 +683,7 @@ export default function AdminUsersPage() {
                   )}
                 </div>
                 <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">
+                  <label className="block text-sm font-medium text-gray-700">
                     New Password <span className="text-xs text-gray-500">(optional)</span>
                   </label>
                   <Input
@@ -629,40 +695,62 @@ export default function AdminUsersPage() {
                 </div>
                 {editUser.role === 'admin' ? (
                   <p className="rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                    The admin account always keeps the admin role, stays active and cannot be deleted. Its email and
+                    The admin account always keeps the admin role, stays active and cannot be deactivated. Its email and
                     password are set in the server&apos;s .env file and cannot be changed here.
                   </p>
                 ) : (
                 <>
                 <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">
+                  <label className="block text-sm font-medium text-gray-700">
                     Role
                   </label>
                   <select
                     value={editForm.role || editUser.role}
                     onChange={(e) => setEditForm({...editForm, role: e.target.value as UpdateUserRequest['role']})}
-                    className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
+                    className="h-9 w-full rounded-md border border-gray-200 bg-paper px-3 text-sm text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
                   >
                     {STAFF_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
                   </select>
                 </div>
+                {editUser.location ? (
+                  <div className="space-y-1.5">
+                    <label className="block text-sm font-medium text-gray-700">Location</label>
+                    <p className="flex h-9 items-center rounded-md border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700">{editUser.location}</p>
+                    <p className="text-xs text-slate-500">Set when the login was created. It cannot be changed.</p>
+                  </div>
+                ) : needsLocation(editForm.role || editUser.role) ? (
+                  <div className="space-y-1.5">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Location <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={editForm.location || ''}
+                      onChange={(e) => setEditForm({ ...editForm, location: e.target.value })}
+                      className="h-9 w-full rounded-md border border-gray-200 bg-paper px-3 text-sm text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
+                    >
+                      <option value="">Choose a location</option>
+                      {LOCATIONS.map((l) => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                    <p className="text-xs text-amber-600">This account has no location yet, so it sees no requirements. Choose one: it cannot be changed afterwards.</p>
+                  </div>
+                ) : null}
                 </>
                 )}
 
                 <div className="space-y-1.5">
-                  <label className="block text-[13px] font-medium text-gray-700">
-                    OTP Mode
+                  <label className="block text-sm font-medium text-gray-700">
+                    MFA <span className="ml-1 text-xs font-normal text-gray-500">(second sign-in step)</span>
                   </label>
                   <select
                     value={editForm.otp_mode || editUser.otp_mode || 'real'}
                     onChange={(e) => setEditForm({ ...editForm, otp_mode: e.target.value as UpdateUserRequest['otp_mode'] })}
-                    className="h-9 w-full rounded-md border border-gray-200 bg-white px-3 text-[13px] text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
+                    className="h-9 w-full rounded-md border border-gray-200 bg-paper px-3 text-sm text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
                   >
-                    <option value="real">Email OTP</option>
                     <option value="captcha">CAPTCHA (image, no email)</option>
+                    <option value="real">Email OTP</option>
                   </select>
-                  {(editForm.role || editUser.role) === 'admin' && (
-                    <p className="text-xs text-slate-500">Admins always sign in with the CAPTCHA, whatever is chosen here.</p>
+                  {(editForm.otp_mode || editUser.otp_mode) !== 'captcha' && !(editForm.email ?? editUser.email) && (
+                    <p className="text-xs text-amber-700">Email OTP needs an email address on the account.</p>
                   )}
                 </div>
                 {editUser.role !== 'admin' && (
@@ -674,7 +762,7 @@ export default function AdminUsersPage() {
                       onChange={(e) => setEditForm({...editForm, is_active: e.target.checked})}
                       className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500/30"
                     />
-                    <span className="text-[13px] font-medium text-gray-700">Active</span>
+                    <span className="text-sm font-medium text-gray-700">Active</span>
                   </label>
                 </div>
                 )}

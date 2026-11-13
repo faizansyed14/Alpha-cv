@@ -56,11 +56,11 @@ interface AppState {
   jds: JDListItem[];
   /** Total count from API when using pagination (so UI can show "X of Y") */
   totalCVs: number | null;
+  /** Where the next page of the Candidates list starts: a cursor from the server, null on the last page, undefined when the server gave none. */
+  cvsCursor: string | null | undefined;
   totalJDs: number | null;
   selectedJD: string | null;
   selectedCVs: string[];
-  /** Names of CVs picked on pages that do not load the whole Candidates list (Saved CVs), so the match tray can name them. */
-  knownCVs: Record<string, { name: string; title: string }>;
   
   // Matching
   matchWeights: MatchWeights;
@@ -106,7 +106,6 @@ interface AppState {
   deselectCV: (cvId: string) => void;
   selectAllCVs: () => void;
   deselectAllCVs: () => void;
-  rememberCVs: (items: { id: string; full_name?: string; filename?: string; job_title?: string }[]) => void;
   uploadCV: (file: File) => Promise<void>;
   uploadCVs: (files: File[]) => Promise<void>;
   deleteCV: (cvId: string) => Promise<void>;
@@ -161,10 +160,10 @@ export const useAppStore = create<AppState>()(
       cvs: [],
       jds: [],
       totalCVs: null,
+      cvsCursor: undefined,
       totalJDs: null,
       selectedJD: null,
       selectedCVs: [],
-      knownCVs: {},
       matchWeights: defaultWeights,
       matchResult: null,
       matchingProgress: {
@@ -244,6 +243,7 @@ export const useAppStore = create<AppState>()(
           set({
             cvs: response.cvs,
             totalCVs: total,
+            cvsCursor: response.next_cursor,
           });
           setLoading('cvs', false);
           logger.info(`Loaded ${response.cvs.length} CVs${total > response.cvs.length ? ` of ${total}` : ''}`);
@@ -254,14 +254,19 @@ export const useAppStore = create<AppState>()(
       },
       
       loadMoreCVs: async () => {
-        const { setLoading, cvs, totalCVs } = get();
-        if (totalCVs != null && cvs.length >= totalCVs) return;
+        const { setLoading, cvs, totalCVs, cvsCursor, loadingStates } = get();
+        if (loadingStates.cvs.isLoading) return;                       // one page at a time: a second call would fetch the same page
+        if (cvsCursor === null) return;                                // the last page is already here
+        if (cvsCursor === undefined && totalCVs != null && cvs.length >= totalCVs) return;
         setLoading('cvs', true);
         try {
-          const response = await api.listCVs({ limit: LIST_PAGE_SIZE, offset: cvs.length });
+          // The cursor starts the next page right after the last row shown, however deep the list is (an offset makes the database
+          // walk past every row before it). Without one (an older server) the offset is used.
+          const response = await api.listCVs(cvsCursor ? { limit: LIST_PAGE_SIZE, cursor: cvsCursor } : { limit: LIST_PAGE_SIZE, offset: cvs.length });
           set((s) => ({
             cvs: [...s.cvs, ...response.cvs],
             totalCVs: response.total ?? s.totalCVs ?? s.cvs.length + response.cvs.length,
+            cvsCursor: response.next_cursor,
           }));
           setLoading('cvs', false);
           logger.info(`Loaded more CVs: ${cvs.length + response.cvs.length} total`);
@@ -294,14 +299,6 @@ export const useAppStore = create<AppState>()(
         set({ selectedCVs: [] });
       },
 
-      rememberCVs: (items) => {
-        set((state) => {
-          const next = { ...state.knownCVs };
-          for (const cv of items) next[cv.id] = { name: cv.full_name || cv.filename || 'Candidate', title: cv.job_title && cv.job_title !== 'Not specified' ? cv.job_title : '' };
-          return { knownCVs: next };
-        });
-      },
-      
       uploadCV: async (file) => {
         const { setLoading, loadCVs } = get();
         setLoading('upload', true);

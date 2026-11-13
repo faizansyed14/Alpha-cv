@@ -89,6 +89,13 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT_SECONDS: int = 10
     # A search that runs longer than this is cancelled by PostgreSQL, so one expensive query cannot hold the database for everyone.
     SEARCH_STATEMENT_TIMEOUT_SECONDS: int = 30
+    # Storage watch (app/services/db_health.py): the background worker checks the database's size and bloat this often (0 = never) and logs a
+    # warning when a table has more than DB_DEAD_ROW_WARN_RATIO dead rows (vacuum is behind), when the search index takes more than
+    # DB_SEARCH_BYTES_PER_CV_WARN bytes per CV (it grows faster than the CVs do), or when the database passes DB_SIZE_WARN_GB (0 = no limit).
+    DB_HEALTH_INTERVAL_SECONDS: int = 21600
+    DB_DEAD_ROW_WARN_RATIO: float = 0.2
+    DB_SEARCH_BYTES_PER_CV_WARN: int = 200000
+    DB_SIZE_WARN_GB: float = 0
     ALLOW_PROD_DATA_ACCESS: bool = False
     PROD_DB_URL_HINTS: str = ""  # comma-separated substrings treated as prod
 
@@ -182,7 +189,7 @@ class Settings(BaseSettings):
     S3_BUCKET: str = ""             # required when STORAGE_BACKEND=s3
     S3_REGION: str = ""
     S3_PREFIX: str = ""             # optional key prefix inside the bucket
-    MAX_FILE_SIZE_MB: int = 10
+    MAX_FILE_SIZE_MB: int = 5
     # Optional antivirus for uploaded files: tcp://host:3310 of a ClamAV daemon. Empty = off. With CLAMAV_REQUIRED an
     # unreachable scanner rejects the upload instead of letting it through unscanned.
     CLAMAV_URL: str = ""

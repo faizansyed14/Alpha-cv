@@ -23,8 +23,9 @@ ROLES = frozenset(ALL_ROLES)
 _UUID = re.compile(r"^[0-9a-fA-F-]{32,40}$")
 
 
-def _job_text(ctx: ToolContext, args: Dict[str, Any]) -> Tuple[str, str]:
-    """The job's text and title, from a saved job description or from a job posting."""
+def _job_text(ctx: ToolContext, args: Dict[str, Any]) -> Tuple[str, str, str]:
+    """The job's text, title, and public apply URL (when it is a live posting)."""
+    from app.config.settings import settings
     from app.api.routers.agent_chat import _library_jd
 
     jd_id, job_id = text(args.get("jd_id"), 60), text(args.get("job_id"), 60)
@@ -35,12 +36,21 @@ def _job_text(ctx: ToolContext, args: Dict[str, Any]) -> Tuple[str, str]:
             found = _library_jd(jd_id)
         except AgentError as exc:
             raise ToolError(str(exc))
-        return found["text"], found["title"]
+        return found["text"], found["title"], ""
     if job_id:
         body = ctx.gateway.get(f"/api/careers/admin/jobs/{job_id}/edit-data")      # applies the person's own access
         parts = [body.get("job_title"), body.get("job_location"), body.get("job_summary"),
                  body.get("key_responsibilities"), body.get("qualifications")]
-        return "\n\n".join(str(p) for p in parts if p), text(body.get("job_title"), 120)
+        apply_url = ""
+        try:
+            from app.store import get_store
+            posting = get_store().get_job_posting_by_id(job_id) or {}
+            token = text(posting.get("public_token"), 160)
+            if token and token != "unknown":
+                apply_url = f"{settings.FRONTEND_URL.rstrip('/')}/careers/jobs/{token}"
+        except Exception:
+            apply_url = ""
+        return "\n\n".join(str(p) for p in parts if p), text(body.get("job_title"), 120), apply_url
     raise ToolError("Say which job: a jd_id (saved job description) or a job_id (job posting).")
 
 
@@ -56,8 +66,21 @@ def _cv_text(ctx: ToolContext, cv_id: str) -> str:
         raise ToolError(str(exc))
 
 
+def _apply_linkedin_url(parsed, apply_url: str):
+    """Pin the Apply Now line to this posting's real public URL."""
+    from app.agents.linkedin.parser import ensure_apply_url
+
+    if not apply_url or not parsed.in_scope or parsed.meta.get("type") != "linkedin":
+        return parsed
+    post = ensure_apply_url(str(parsed.meta.get("post") or ""), apply_url)
+    tags = list(parsed.meta.get("hashtags") or [])
+    parsed.meta = {**parsed.meta, "post": post, "chars": len(post)}
+    parsed.content = post + ("\n\n" + " ".join(tags) if tags else "")
+    return parsed
+
+
 def _write(ctx: ToolContext, agent: AgentSpec, args: Dict[str, Any]) -> ToolOutput:
-    job_text, title = _job_text(ctx, args)
+    job_text, title, apply_url = _job_text(ctx, args)
     if len(job_text.strip()) < 80:
         raise ToolError("That job has too little text to work from.")
     cv = ""
@@ -65,7 +88,7 @@ def _write(ctx: ToolContext, agent: AgentSpec, args: Dict[str, Any]) -> ToolOutp
     if cv_id and agent.accepts_cv:
         cv = prepare_cv(agent, _cv_text(ctx, cv_id))
     request = text(args.get("request"), 400) or agent.default_request
-    messages = build_messages(agent, job_text, [], request, cv)
+    messages = build_messages(agent, job_text, [], request, cv, apply_url=apply_url if agent.id == "linkedin" else "")
     max_tokens, why_not = usage.plan_call(ctx.session, ctx.username, messages, in_flight=ctx.spent_tokens)
     if why_not:
         raise ToolError(why_not)
@@ -77,6 +100,8 @@ def _write(ctx: ToolContext, agent: AgentSpec, args: Dict[str, Any]) -> ToolOutp
     parsed = parse_answer(agent, (response.data or {}).get("_text", ""), job_text, bool(getattr(response, "truncated", False)))
     if not parsed.in_scope:
         raise ToolError(parsed.refusal)
+    if agent.id == "linkedin":
+        parsed = _apply_linkedin_url(parsed, apply_url)
     meta = dict(parsed.meta)
     if parsed.warnings:
         meta["warnings"] = parsed.warnings

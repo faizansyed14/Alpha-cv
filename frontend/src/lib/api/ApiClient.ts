@@ -51,6 +51,8 @@ import {
   UsersPresenceResponse,
   CVAdvancedSearchParams,
   CVAdvancedSearchResponse,
+  TrackerOptions, Requirement, RequirementPage, RequirementDetail, RequirementFilters, RequirementInput, ClosuresPage, TrackerAnalytics, AnalyticsView,
+  Selection, SelectionFilters, SelectionInput, SelectionOptions, SelectionPage,
 } from '../types';
 
 export class ApiClient {
@@ -90,7 +92,7 @@ export class ApiClient {
     return response.data;
   }
 
-  async listCVs(params?: { limit?: number; offset?: number; category?: string; q?: string }): Promise<CVListResponse> {
+  async listCVs(params?: { limit?: number; offset?: number; cursor?: string; category?: string; q?: string }): Promise<CVListResponse> {
     const response = await this.client.get<CVListResponse>('/api/cv/cvs', {
       // Disable the browser HTTP cache + bust it with _t so switching category/search
       // never serves a stale (wrong-category) response.
@@ -572,29 +574,6 @@ export class ApiClient {
     return { jobs, total, counts: data.counts };
   }
 
-  // ---- saved CVs (each recruiter's own list)
-  async getSavedCVs(params: { limit?: number; offset?: number; q?: string } = {}): Promise<{ cvs: CVListItem[]; total: number; count: number }> {
-    const response = await this.client.get<{ cvs: CVListItem[]; total: number; count: number }>('/api/cv/saved', {
-      params: { limit: params.limit, offset: params.offset, q: params.q?.trim() || undefined },
-    });
-    return response.data;
-  }
-
-  async getSavedCVIds(): Promise<string[]> {
-    const response = await this.client.get<{ ids: string[] }>('/api/cv/saved/ids');
-    return response.data.ids || [];
-  }
-
-  async saveCVs(cvIds: string[]): Promise<number> {
-    const response = await this.client.post<{ saved: number }>('/api/cv/saved', { cv_ids: cvIds });
-    return response.data.saved;
-  }
-
-  async unsaveCVs(cvIds: string[]): Promise<number> {
-    const response = await this.client.post<{ removed: number }>('/api/cv/saved/remove', { cv_ids: cvIds });
-    return response.data.removed;
-  }
-
   // ---- bug reports
   async submitBugReport(body: BugCreateRequest): Promise<BugReport> {
     const response = await this.client.post<BugReport>('/api/bugs', body);
@@ -884,6 +863,94 @@ export class ApiClient {
       }
     );
     return response.data;
+  }
+
+  /** The "We are hiring" picture (a JPEG) for a role typed by hand. Nothing is stored on the server. */
+  async getHiringImage(title: string, location: string): Promise<Blob> {
+    const response = await this.client.get('/api/hiring-image', { params: { title, location }, responseType: 'blob', timeout: 60000 });
+    return response.data as Blob;
+  }
+
+  /** The "We are hiring" picture (a JPEG) for a job: drawn on the server from the job's title and city, no AI involved. */
+  async getJobHiringImage(jobId: string): Promise<Blob> {
+    const response = await this.client.get(`/api/careers/admin/jobs/${jobId}/hiring-image`, { responseType: 'blob', timeout: 60000 });
+    return response.data as Blob;
+  }
+
+  // ----- Requirements tracker
+  async getTrackerOptions(): Promise<TrackerOptions> {
+    return (await this.client.get<TrackerOptions>('/api/tracker/options')).data;
+  }
+
+  async listRequirements(filters: RequirementFilters = {}, limit = 50, offset = 0): Promise<RequirementPage> {
+    const params: Record<string, string | number> = { limit, offset };
+    for (const [k, v] of Object.entries(filters)) if (v) params[k] = v as string;
+    return (await this.client.get<RequirementPage>('/api/tracker/requirements', { params })).data;
+  }
+
+  async getRequirement(id: string): Promise<RequirementDetail> {
+    return (await this.client.get<RequirementDetail>(`/api/tracker/requirements/${encodeURIComponent(id)}`)).data;
+  }
+
+  async createRequirement(body: RequirementInput): Promise<Requirement> {
+    return (await this.client.post<Requirement>('/api/tracker/requirements', body)).data;
+  }
+
+  async updateRequirement(id: string, body: RequirementInput): Promise<Requirement> {
+    return (await this.client.patch<Requirement>(`/api/tracker/requirements/${encodeURIComponent(id)}`, body)).data;
+  }
+
+  // ---- Selections and joining (managers, EVP, admin)
+  async getSelectionOptions(): Promise<SelectionOptions> {
+    return (await this.client.get<SelectionOptions>('/api/tracker/selections/options')).data;
+  }
+
+  async listSelections(filters: SelectionFilters = {}, limit = 50, offset = 0): Promise<SelectionPage> {
+    const params: Record<string, string | number> = { limit, offset };
+    for (const [k, v] of Object.entries(filters)) if (v) params[k] = v as string;
+    return (await this.client.get<SelectionPage>('/api/tracker/selections', { params })).data;
+  }
+
+  async updateSelection(id: string, body: SelectionInput): Promise<Selection> {
+    return (await this.client.patch<Selection>(`/api/tracker/selections/${encodeURIComponent(id)}`, body)).data;
+  }
+
+  async deleteSelection(id: string): Promise<void> {
+    await this.client.delete(`/api/tracker/selections/${encodeURIComponent(id)}`);
+  }
+
+  async deleteRequirement(id: string): Promise<void> {
+    await this.client.delete(`/api/tracker/requirements/${encodeURIComponent(id)}`);
+  }
+
+  /** Remember which Careers job a requirement's job description was posted as. */
+  async markRequirementPosted(id: string, jobId: string): Promise<Requirement> {
+    return (await this.client.post<Requirement>(`/api/tracker/requirements/${encodeURIComponent(id)}/posted`, { job_id: jobId })).data;
+  }
+
+  /** Closed requirements, credited to their recruiters. The dates filter the day it was closed. */
+  async listClosures(filters: RequirementFilters = {}, limit = 50, offset = 0): Promise<ClosuresPage> {
+    const params: Record<string, string | number> = { limit, offset };
+    for (const [k, v] of Object.entries(filters)) if (v) params[k] = v as string;
+    return (await this.client.get<ClosuresPage>('/api/tracker/closures', { params })).data;
+  }
+
+  async exportClosures(filters: RequirementFilters = {}): Promise<Blob> {
+    const params: Record<string, string> = {};
+    for (const [k, v] of Object.entries(filters)) if (v) params[k] = v as string;
+    return (await this.client.get('/api/tracker/closures/export', { params, responseType: 'blob', timeout: 120000 })).data as Blob;
+  }
+
+  async getTrackerAnalytics(params: { view: AnalyticsView; year: number; month?: number; location?: string }): Promise<TrackerAnalytics> {
+    const query = { view: params.view, year: params.year, ...(params.view === 'monthly' && params.month ? { month: params.month } : {}), ...(params.location ? { location: params.location } : {}) };
+    return (await this.client.get<TrackerAnalytics>('/api/tracker/analytics', { params: query })).data;
+  }
+
+  /** The requirements the filters match, as an Excel file. */
+  async exportRequirements(filters: RequirementFilters = {}): Promise<Blob> {
+    const params: Record<string, string> = {};
+    for (const [k, v] of Object.entries(filters)) if (v) params[k] = v as string;
+    return (await this.client.get('/api/tracker/requirements/export', { params, responseType: 'blob', timeout: 120000 })).data as Blob;
   }
 
   /** Candidates in the database who fit the job's boolean search string and have not applied to it (one page; newest first). */

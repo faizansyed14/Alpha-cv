@@ -1,5 +1,6 @@
 'use client';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AlertCircle, Briefcase, Copy, Download, ExternalLink, Globe, Plus, RefreshCw, Search, Trash2, X } from '@/components/icons';
 import { useCareersStore } from '@/stores/careersStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -15,44 +16,24 @@ import { InfiniteScrollSentinel } from '@/components/ui/infinite-scroll';
 import { PageHeader, EmptyState } from '@/components/ui/page';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { CareersSkeleton } from '@/components/skeletons';
 import { cn } from '@/lib/utils';
 import JobPostingForm from './JobPostingForm';
-import JobRow, { JobListHeader, type JobHandlers, type JobTab, type MatchScope } from './JobRow';
-import JobWorkspace from './JobWorkspace';
+import JobRow, { JobListHeader, JobRowSkeleton, type JobHandlers, type JobTab, type MatchScope } from './JobRow';
+import { Bone } from '@/components/skeletons';
 import JobAiDialog, { type JobAiKind } from './JobAiDialog';
+import HiringImageDialog from './HiringImageDialog';
 import WeeklyReportDialog from './WeeklyReportDialog';
 
 type Owner = 'yours' | 'all' | 'others';
 type Status = 'all' | 'active' | 'inactive';
 const TABS: JobTab[] = ['applicants', 'database', 'details'];
 
-/** The open job and its tab are kept in the address (?job=ID&tab=database), so coming back from a candidate's page reopens the same view. */
-function readAddress(): { job: string | null; tab: JobTab } {
-  try {
-    const p = new URLSearchParams(window.location.search);
-    const tab = p.get('tab') as JobTab | null;
-    return { job: p.get('job'), tab: tab && TABS.includes(tab) ? tab : 'applicants' };
-  } catch {
-    return { job: null, tab: 'applicants' };
-  }
-}
-
-function writeAddress(jobId: string | null, tab: JobTab = 'applicants') {
-  try {
-    const url = new URL(window.location.href);
-    if (jobId) {
-      url.searchParams.set('job', jobId);
-      if (tab === 'applicants') url.searchParams.delete('tab');
-      else url.searchParams.set('tab', tab);
-    } else {
-      url.searchParams.delete('job');
-      url.searchParams.delete('tab');
-    }
-    window.history.replaceState(window.history.state, '', url.toString());
-  } catch {
-    /* the address is only a convenience */
-  }
+function jobHref(jobId: string, tab: JobTab = 'applicants', edit = false) {
+  const q = new URLSearchParams();
+  if (tab !== 'applicants') q.set('tab', tab);
+  if (edit) q.set('edit', '1');
+  const qs = q.toString();
+  return `/careers-manage/${encodeURIComponent(jobId)}${qs ? `?${qs}` : ''}`;
 }
 
 function errorText(error: any, fallback: string): string {
@@ -60,6 +41,7 @@ function errorText(error: any, fallback: string): string {
 }
 
 export default function CareersPage() {
+  const router = useRouter();
   const { user } = useAuthStore();
   const { jobPostings, totalJobPostings, jobCounts, isLoading, error, loadJobPostings, loadMoreJobPostings, updateJobStatus, selectJob, matchJobCandidates } = useCareersStore();
   const { setMatchingProgress, hideMatchingProgress, setLoading: setAppLoading } = useAppStore();
@@ -67,8 +49,19 @@ export default function CareersPage() {
   const { toasts, showSuccess, showError, removeToast } = useToast();
 
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [open, setOpen] = useState<{ jobId: string; tab: JobTab; edit: boolean } | null>(null);
+  // "Post job" from a requirement opens this page with the requirement's job description ready (nothing is posted until Post job is clicked)
+  const [fromJd, setFromJd] = useState<{ id: string; name: string; requirementId: string } | null>(null);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const id = q.get('postFromJd');
+    if (!id) return;
+    setFromJd({ id, name: q.get('jdName') || '', requirementId: q.get('requirement') || '' });
+    setShowCreateForm(true);
+    router.replace('/careers-manage');
+  }, [router]);
+
   const [ai, setAi] = useState<{ job: JobPostingListItem; kind: JobAiKind } | null>(null);
+  const [image, setImage] = useState<JobPostingListItem | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [openingsUrl, setOpeningsUrl] = useState('/careers/openings');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -81,12 +74,19 @@ export default function CareersPage() {
 
   useEffect(() => {
     setOpeningsUrl(`${window.location.origin}/careers/openings`);
-    const at = readAddress();
-    if (at.job) {
-      setOpen({ jobId: at.job, tab: at.tab, edit: false });
-      setOwner('all');       // the job may be someone else's
+    // Legacy ?job= deep links → full job page
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const job = p.get('job');
+      if (job) {
+        const tab = p.get('tab');
+        const t = tab && TABS.includes(tab as JobTab) ? (tab as JobTab) : 'applicants';
+        router.replace(jobHref(job, t));
+      }
+    } catch {
+      /* ignore */
     }
-  }, []);
+  }, [router]);
 
   // The server filters and searches every posting; a change of filter loads the first page of what matches (the typed search waits a moment).
   useEffect(() => {
@@ -99,13 +99,6 @@ export default function CareersPage() {
     }, query.trim() ? 300 : 0);
     return () => clearTimeout(t);
   }, [owner, status, query, loadJobPostings]);
-
-  const openJob = useMemo(() => jobPostings.find((j) => j.job_id === open?.jobId) ?? null, [jobPostings, open?.jobId]);
-
-  const closeWorkspace = useCallback(() => {
-    setOpen(null);
-    writeAddress(null);
-  }, []);
 
   const copy = useCallback((text: string, what: string) => {
     if (!text) return;
@@ -132,7 +125,6 @@ export default function CareersPage() {
       estimatedTimeRemaining: undefined,
     });
     setAppLoading('careersMatching', true);
-    closeWorkspace();
     go('match');
     try {
       let databaseIds: string[] = [];
@@ -153,7 +145,6 @@ export default function CareersPage() {
     try {
       const response = await api.deleteJobPosting(job.job_id);
       if (!response.success) throw new Error('The job could not be deleted.');
-      closeWorkspace();
       await loadJobPostings();
       showSuccess('Job deleted', `"${job.job_title}" was removed. Its ${response.details?.applications_archived ?? 0} application(s) were archived.`);
     } catch (e: any) {
@@ -170,11 +161,11 @@ export default function CareersPage() {
 
   const handlers: JobHandlers = {
     onOpen: (job, tab = 'applicants', edit = false) => {
-      setOpen({ jobId: job.job_id, tab, edit });
-      writeAddress(job.job_id, tab);
+      router.push(jobHref(job.job_id, tab, edit));
     },
     onMatch: (job, scope) => void startMatch(job, scope),
     onAi: (job, kind) => setAi({ job, kind }),
+    onImage: (j) => setImage(j),
     onToggleStatus: async (job) => {
       const ok = await updateJobStatus(job.job_id, !job.is_active);
       if (ok) showSuccess(job.is_active ? 'Job deactivated' : 'Job is live', job.is_active ? 'It no longer takes applications.' : 'It takes applications again.');
@@ -187,7 +178,7 @@ export default function CareersPage() {
   if (!user) {
     return (
       <div className="p-4 sm:p-6">
-        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-[13px] text-amber-800">
+        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>You need to be logged in to access the careers page.</span>
         </div>
@@ -195,12 +186,12 @@ export default function CareersPage() {
     );
   }
 
-  if (!firstLoadDone) return <CareersSkeleton />;
+  const initialLoading = !firstLoadDone;      // the page, its tabs and its toolbar are real; only the job rows are placeholders
 
   if (error) {
     return (
       <div className="p-4 sm:p-6">
-        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-[13px] text-red-800" role="alert">
+        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <p>The jobs could not be loaded: {error}</p>
@@ -215,7 +206,7 @@ export default function CareersPage() {
   const shownTotal = totalJobPostings ?? jobPostings.length;
   const hasMore = totalJobPostings != null && jobPostings.length < totalJobPostings;
   const postJob = (
-    <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setShowCreateForm(true)} disabled={showCreateForm}>
+    <Button variant="primary" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setShowCreateForm(true)} disabled={showCreateForm}>
       Post a job
     </Button>
   );
@@ -226,13 +217,13 @@ export default function CareersPage() {
 
       <PageHeader
         title="Careers"
-        description="Post jobs, review who applied, find people you already have in the database, and match them to the job."
+        description="Jobs, applicants, database matches, and AI scoring."
         actions={
           <>
-            <IconButton label="Refresh the list" icon={<RefreshCw />} loading={isRefreshing} onClick={refresh} tip="bottom" className="!h-9 !w-9" />
+            <IconButton label="Refresh the list" icon={<RefreshCw />} loading={isRefreshing} onClick={refresh} tip="bottom" />
             <Menu
               trigger={({ ref, ...props }) => (
-                <Button ref={ref} variant="secondary" icon={<Globe className="h-4 w-4" />} {...props}>Public jobs page</Button>
+                <Button ref={ref} variant="secondary" size="sm" icon={<Globe className="h-4 w-4" />} {...props}>Public page</Button>
               )}
               items={[
                 { label: 'Open the public jobs page', hint: 'What candidates see', icon: <ExternalLink />, onSelect: () => window.open(openingsUrl, '_blank', 'noopener') },
@@ -249,21 +240,30 @@ export default function CareersPage() {
       {showCreateForm && (
         <section className="mb-5" aria-label="Post a new job">
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-[14px] font-semibold text-slate-900">New job</h2>
-            <Button variant="ghost" size="sm" icon={<X className="h-3.5 w-3.5" />} onClick={() => setShowCreateForm(false)}>Close</Button>
+            <h2 className="text-base font-semibold text-slate-900">New job</h2>
+            <Button variant="ghost" size="sm" icon={<X className="h-3.5 w-3.5" />} onClick={() => { setShowCreateForm(false); setFromJd(null); }}>Close</Button>
           </div>
           <JobPostingForm
+            key={fromJd?.id || 'new'}
+            fromJdId={fromJd?.id}
+            fromJdName={fromJd?.name}
+            onPosted={(jobId) => {
+              if (fromJd?.requirementId) {
+                api.markRequirementPosted(fromJd.requirementId, jobId).catch(() => showError('The requirement was not updated', 'The job is posted, but the requirement could not be linked to it.'));
+              }
+            }}
             onSuccess={() => {
               setShowCreateForm(false);
+              setFromJd(null);
               void loadJobPostings();
             }}
           />
         </section>
       )}
 
-      {/* filters: status tabs, search, whose jobs */}
-      <div className="mb-3 flex flex-wrap items-end gap-x-5 gap-y-3 border-b border-surface-border">
-        <div role="tablist" aria-label="Job status" className="flex items-center gap-5">
+      {/* filters: status tabs, search, whose jobs — one dense toolbar */}
+      <div className="toolbar-bar !mb-3 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div role="tablist" aria-label="Job status" className="-mx-1 flex items-center gap-1 overflow-x-auto px-1">
           {([['all', 'All', jobCounts.all], ['active', 'Live', jobCounts.active], ['inactive', 'Inactive', jobCounts.inactive]] as const).map(([id, label, n]) => (
             <button
               key={id}
@@ -272,27 +272,27 @@ export default function CareersPage() {
               aria-selected={status === id}
               onClick={() => setStatus(id)}
               className={cn(
-                '-mb-px border-b-2 pb-2.5 text-[13.5px] font-semibold transition-colors',
-                status === id ? 'border-navy-700 text-navy-800' : 'border-transparent text-slate-500 hover:text-slate-900',
+                'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-semibold transition-colors',
+                status === id ? 'bg-navy-50 text-navy-800' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900',
               )}
             >
               {label}
-              <span className={cn('ml-1.5 rounded-full px-1.5 py-0.5 text-[11px] tabular-nums', status === id ? 'bg-navy-50 text-navy-800' : 'bg-slate-100 text-slate-600')}>
-                {n.toLocaleString()}
+              <span className={cn('rounded-md px-1.5 py-0.5 text-2xs tabular-nums', status === id ? 'bg-paper text-navy-800' : 'bg-slate-100 text-slate-600')}>
+                {initialLoading ? <Bone className="h-3 w-4" /> : n.toLocaleString()}
               </span>
             </button>
           ))}
         </div>
-        <div className="ml-auto flex w-full flex-wrap items-center gap-2 pb-2 sm:w-auto">
-          <div className="relative min-w-0 flex-1 sm:w-72 sm:flex-none">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <label htmlFor="job-search" className="sr-only">Search jobs</label>
             <input
               id="job-search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by title, recruiter or subject"
-              className="field-input w-full !pl-9 pr-8"
+              placeholder="Search title, recruiter, subject"
+              className="field-input h-8 w-full !pl-8 pr-7 text-sm"
             />
             {query && (
               <button type="button" aria-label="Clear search" onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:text-slate-700">
@@ -305,8 +305,8 @@ export default function CareersPage() {
             onChange={setOwner}
             size="sm"
             items={[
-              { value: 'yours', label: 'My jobs' },
-              { value: 'all', label: 'Everyone' },
+              { value: 'yours', label: 'Mine' },
+              { value: 'all', label: 'All' },
               { value: 'others', label: 'Others' },
             ]}
           />
@@ -314,7 +314,12 @@ export default function CareersPage() {
       </div>
 
       {/* the jobs */}
-      {jobPostings.length === 0 ? (
+      {initialLoading ? (
+        <div className="overflow-hidden rounded-xl border border-surface-border bg-paper shadow-card" role="status" aria-busy="true" aria-label="Loading jobs">
+          <JobListHeader />
+          {Array.from({ length: 8 }).map((_, i) => <JobRowSkeleton key={i} />)}
+        </div>
+      ) : jobPostings.length === 0 ? (
         <EmptyState
           icon={Briefcase}
           title={filtered ? 'No jobs match these filters' : 'No jobs yet'}
@@ -323,38 +328,21 @@ export default function CareersPage() {
         />
       ) : (
         <>
-          <div className="rounded-2xl border border-surface-border bg-white shadow-card" role="table" aria-label="Jobs">
-            <div className="overflow-hidden rounded-t-2xl"><JobListHeader /></div>
+          <div className="overflow-hidden rounded-xl border border-surface-border bg-paper shadow-card" role="table" aria-label="Jobs">
+            <JobListHeader />
             {jobPostings.map((job) => (
               <JobRow key={job.job_id} job={job} currentUser={user.username} handlers={handlers} />
             ))}
           </div>
-          <p className="mt-3 text-center text-[12.5px] text-slate-500 tabular-nums">
-            Showing {jobPostings.length.toLocaleString()} of {shownTotal.toLocaleString()} job{shownTotal === 1 ? '' : 's'}
+          <p className="mt-2 text-center text-xs tabular-nums text-slate-500">
+            {jobPostings.length.toLocaleString()} of {shownTotal.toLocaleString()} job{shownTotal === 1 ? '' : 's'}
           </p>
           <InfiniteScrollSentinel hasMore={hasMore} loading={isLoading} itemCount={jobPostings.length} onLoadMore={() => loadMoreJobPostings()} />
         </>
       )}
 
-      {/* one job: applicants, database matches, details */}
-      {openJob && open && (
-        <JobWorkspace
-          job={openJob}
-          currentUser={user.username}
-          tab={open.tab}
-          startInEdit={open.edit}
-          onTab={(tab) => {
-            setOpen((o) => (o ? { ...o, tab } : o));
-            writeAddress(openJob.job_id, tab);
-          }}
-          onClose={closeWorkspace}
-          onChanged={() => void loadJobPostings()}
-          onMatchScope={(job, scope, customQuery, expected) => void startMatch(job, scope, customQuery, expected)}
-          handlers={handlers}
-        />
-      )}
-
       {ai && <JobAiDialog job={ai.job} kind={ai.kind} onClose={() => setAi(null)} />}
+      {image && <HiringImageDialog jobId={image.job_id} title={image.job_title} onClose={() => setImage(null)} />}
       {showReport && <WeeklyReportDialog onClose={() => setShowReport(false)} />}
 
       {/* delete confirmation */}
@@ -365,7 +353,7 @@ export default function CareersPage() {
             <DialogDescription>&ldquo;{confirmDelete?.job_title}&rdquo;</DialogDescription>
           </DialogHeader>
           {confirmDelete && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[13px] text-amber-900">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               <ul className="list-inside list-disc space-y-0.5">
                 <li>The job disappears from this list and from the public jobs page.</li>
                 <li>Its {confirmDelete.application_count || 0} application(s) are archived, and the candidates stay in the database.</li>

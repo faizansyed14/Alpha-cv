@@ -1,5 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Check, X, AlertCircle, Info } from '@/components/icons';
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { AlertCircle, AlertTriangle, CheckCircle, Info, X } from '@/components/icons';
+import { cn } from '@/lib/utils';
+import { ease } from '@/lib/motion';
 
 export interface ToastProps {
   id: string;
@@ -10,185 +15,103 @@ export interface ToastProps {
   onClose: (id: string) => void;
 }
 
+const LOOK = {
+  success: { Icon: CheckCircle, tile: 'bg-emerald-50 text-emerald-600 ring-emerald-100', bar: 'bg-emerald-500' },
+  error: { Icon: AlertCircle, tile: 'bg-red-50 text-red-600 ring-red-100', bar: 'bg-red-500' },
+  warning: { Icon: AlertTriangle, tile: 'bg-amber-50 text-amber-600 ring-amber-100', bar: 'bg-amber-500' },
+  info: { Icon: Info, tile: 'bg-navy-50 text-navy-700 ring-navy-100', bar: 'bg-solid-soft' },
+} as const;
+
+/** One notification: a glass card with a coloured icon tile and a thin bar that counts the time down. Hovering pauses it. */
 export function Toast({ id, type, title, message, duration = 4000, onClose }: ToastProps) {
-  const [isVisible, setIsVisible] = useState(false);
-  const [isLeaving, setIsLeaving] = useState(false);
-  
+  const [paused, setPaused] = useState(false);
+  const left = useRef(duration);
+  const started = useRef(Date.now());
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const close = useCallback(() => onClose(id), [id, onClose]);
 
   useEffect(() => {
-    // Trigger entrance animation
-    const timer = setTimeout(() => setIsVisible(true), 10);
-    return () => clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    // Auto-close after duration
-    const timer = setTimeout(() => {
-      handleClose();
-    }, duration);
-
-    return () => clearTimeout(timer);
-  }, [duration]);
-
-  const handleClose = () => {
-    setIsLeaving(true);
-    setTimeout(() => {
-      onClose(id);
-    }, 300); // Match animation duration
-  };
-
-  const getIcon = () => {
-    switch (type) {
-      case 'success':
-        return <Check className="w-4 h-4 text-green-600" />;
-      case 'error':
-        return <X className="w-4 h-4 text-red-600" />;
-      case 'warning':
-        return <AlertCircle className="w-4 h-4 text-amber-500" />;
-      case 'info':
-        return <Info className="w-4 h-4 text-blue-600" />;
-      default:
-        return <Check className="w-4 h-4 text-green-600" />;
+    if (paused) {
+      if (timer.current) clearTimeout(timer.current);
+      left.current -= Date.now() - started.current;
+      return;
     }
-  };
+    started.current = Date.now();
+    timer.current = setTimeout(close, Math.max(0, left.current));
+    return () => { if (timer.current) clearTimeout(timer.current); };
+  }, [paused, close]);
 
-  const getAccent = () => {
-    switch (type) {
-      case 'success':
-        return { iconBg: 'bg-green-50', bar: 'bg-green-600' };
-      case 'error':
-        return { iconBg: 'bg-red-50', bar: 'bg-red-600' };
-      case 'warning':
-        return { iconBg: 'bg-amber-50', bar: 'bg-amber-500' };
-      case 'info':
-        return { iconBg: 'bg-blue-50', bar: 'bg-blue-600' };
-      default:
-        return { iconBg: 'bg-green-50', bar: 'bg-green-600' };
-    }
-  };
-
-  const accent = getAccent();
-
+  const { Icon, tile, bar } = LOOK[type] ?? LOOK.success;
   return (
-    <div
-      className={`
-        max-w-sm w-full
-        transform transition-all duration-300 ease-in-out
-        ${isVisible && !isLeaving
-          ? 'translate-x-0 opacity-100 scale-100'
-          : 'translate-x-full opacity-0 scale-95'
-        }
-        bg-white border border-surface-border rounded-lg shadow-lg shadow-gray-900/5 overflow-hidden
-      `}
+    <motion.div
+      layout
+      initial={{ opacity: 0, x: 24, scale: 0.97 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 24, scale: 0.97, transition: { duration: 0.16, ease } }}
+      transition={{ duration: 0.26, ease }}
+      role="status"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      className="glass w-full max-w-sm overflow-hidden rounded-xl"
     >
-      <div className="p-3.5">
-        <div className="flex items-start space-x-3">
-          <div className="flex-shrink-0">
-            <div className={`w-7 h-7 rounded-md ${accent.iconBg} flex items-center justify-center`}>
-              {getIcon()}
-            </div>
-          </div>
-
-          <div className="flex-1 min-w-0">
-            <h4 className="text-[13px] font-semibold text-slate-900">
-              {title}
-            </h4>
-            {message && (
-              <p className="text-[13px] mt-0.5 text-slate-500">
-                {message}
-              </p>
-            )}
-          </div>
-
-          <button
-            onClick={handleClose}
-            className="flex-shrink-0 ml-2 p-1 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
+      <div className="flex items-start gap-3 p-3.5">
+        <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset', tile)}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <p className="text-sm font-semibold text-slate-900">{title}</p>
+          {message ? <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{message}</p> : null}
         </div>
+        <button type="button" onClick={close} aria-label="Dismiss" className="-mr-1 -mt-1 rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+          <X className="h-4 w-4" />
+        </button>
       </div>
-
-      {/* Progress bar */}
-      <div className="h-0.5 bg-slate-100 overflow-hidden">
+      <div className="h-0.5 w-full bg-slate-100">
         <div
-          className={`h-full transition-all ease-linear ${accent.bar}`}
-          style={{
-            width: '100%',
-            animation: `shrink ${duration}ms linear forwards`
-          }}
+          className={cn('h-full', bar)}
+          style={{ animation: `toast-shrink ${duration}ms linear forwards`, animationPlayState: paused ? 'paused' : 'running' }}
         />
       </div>
-    </div>
+    </motion.div>
   );
 }
 
-// Toast Container Component
 export interface ToastContainerProps {
   toasts: ToastProps[];
   onClose: (id: string) => void;
 }
 
 export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
-  if (toasts.length === 0) {
-    return null;
-  }
-  
   return (
-    <div className="fixed top-4 right-4 z-[9999] space-y-2 pointer-events-none" style={{ zIndex: 9999 }}>
-      {toasts.map((toast, index) => (
-        <div key={toast.id} className="pointer-events-auto" style={{ zIndex: 9999 - index }}>
-          <Toast
-            {...toast}
-            onClose={onClose}
-          />
-        </div>
-      ))}
+    <div className="pointer-events-none fixed right-4 top-4 z-[9999] flex w-full max-w-sm flex-col gap-2">
+      <AnimatePresence initial={false}>
+        {toasts.map((toast) => (
+          <div key={toast.id} className="pointer-events-auto">
+            <Toast {...toast} onClose={onClose} />
+          </div>
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
 
-// Hook for managing toasts
+/** Local toast state for a page. */
 export function useToast() {
   const [toasts, setToasts] = useState<ToastProps[]>([]);
 
-  const addToast = (toast: Omit<ToastProps, 'id' | 'onClose'>) => {
-    const id = Math.random().toString(36).substr(2, 9);
-    const newToast: ToastProps = {
-      ...toast,
-      id,
-      onClose: removeToast
-    };
-    
-    setToasts(prev => [...prev, newToast]);
-  };
+  const removeToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
-  const removeToast = (id: string) => {
-    setToasts(prev => prev.filter(toast => toast.id !== id));
-  };
+  const addToast = useCallback((toast: Omit<ToastProps, 'id' | 'onClose'>) => {
+    const id = Math.random().toString(36).slice(2, 11);
+    setToasts((prev) => [...prev.slice(-4), { ...toast, id, onClose: removeToast }]);   // at most five on screen
+  }, [removeToast]);
 
-  const showSuccess = (title: string, message?: string) => {
-    addToast({ type: 'success', title, message });
-  };
+  const showSuccess = useCallback((title: string, message?: string) => addToast({ type: 'success', title, message }), [addToast]);
+  const showError = useCallback((title: string, message?: string) => addToast({ type: 'error', title, message, duration: 6000 }), [addToast]);
+  const showWarning = useCallback((title: string, message?: string) => addToast({ type: 'warning', title, message }), [addToast]);
+  const showInfo = useCallback((title: string, message?: string) => addToast({ type: 'info', title, message }), [addToast]);
 
-  const showError = (title: string, message?: string) => {
-    addToast({ type: 'error', title, message });
-  };
-
-  const showWarning = (title: string, message?: string) => {
-    addToast({ type: 'warning', title, message });
-  };
-
-  const showInfo = (title: string, message?: string) => {
-    addToast({ type: 'info', title, message });
-  };
-
-  return {
-    toasts,
-    showSuccess,
-    showError,
-    showWarning,
-    showInfo,
-    removeToast
-  };
+  return { toasts, showSuccess, showError, showWarning, showInfo, removeToast };
 }

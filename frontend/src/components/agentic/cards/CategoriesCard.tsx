@@ -32,8 +32,8 @@ export function CategoriesCard({ card, onSend, active }: { card: AgenticCard; on
           const on = picked.includes(r.name);
           return (
             <button key={r.name} type="button" disabled={!active} onClick={() => toggle(r.name)} aria-pressed={on}
-              className={cn('inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-                on ? 'border-navy-800 bg-navy-900 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50')}>
+              className={cn('inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                on ? 'border-navy-800 bg-solid text-white' : 'border-slate-200 bg-paper text-slate-700 hover:bg-slate-50')}>
               {on && <Check className="h-3.5 w-3.5" />}
               {r.name}<span className={cn('tabular-nums', on ? 'text-white/70' : 'text-slate-400')}>{r.count.toLocaleString()}</span>
             </button>
@@ -42,19 +42,19 @@ export function CategoriesCard({ card, onSend, active }: { card: AgenticCard; on
       </div>
       <div className="flex flex-wrap items-end gap-3 px-4 py-4">
         <label className="block">
-          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">How many CVs</span>
+          <span className="mb-1 block text-2xs font-semibold uppercase tracking-wide text-slate-400">How many CVs</span>
           <input type="number" min={1} max={limit || undefined} value={howMany} disabled={!active || picked.length === 0}
             onChange={(e) => setHowMany(e.target.value)} placeholder={picked.length ? `up to ${limit.toLocaleString()}` : 'pick a category'}
-            className="h-9 w-44 rounded-lg border border-slate-200 bg-white px-3 text-[13px] tabular-nums outline-none focus:border-navy-300 disabled:bg-slate-50" />
+            className="h-9 w-44 rounded-lg border border-slate-200 bg-paper px-3 text-sm tabular-nums outline-none focus:border-navy-300 disabled:bg-slate-50" />
         </label>
         {picked.length > 0 && (
           <div className="flex gap-1.5 pb-0.5">
             {[100, 500, 1000, 5000, cap].filter((n) => n <= limit).slice(0, 4).map((n) => (
               <button key={n} type="button" disabled={!active} onClick={() => setHowMany(String(n))}
-                className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11.5px] tabular-nums text-slate-600 hover:bg-slate-50">{n.toLocaleString()}</button>
+                className="rounded-full border border-slate-200 bg-paper px-2.5 py-1 text-2xs tabular-nums text-slate-600 hover:bg-slate-50">{n.toLocaleString()}</button>
             ))}
             <button type="button" disabled={!active} onClick={() => setHowMany(String(limit))}
-              className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11.5px] text-slate-600 hover:bg-slate-50">All ({limit.toLocaleString()})</button>
+              className="rounded-full border border-slate-200 bg-paper px-2.5 py-1 text-2xs text-slate-600 hover:bg-slate-50">All ({limit.toLocaleString()})</button>
           </div>
         )}
         <div className="ml-auto pb-0.5"><Action tone="primary" label={ready ? `Match ${wanted.toLocaleString()} CVs` : 'Match'} onClick={() => ready && submit()} /></div>

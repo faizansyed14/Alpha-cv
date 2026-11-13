@@ -168,7 +168,7 @@ export default function JobApplicantsPage() {
             <button
               type="button"
               onClick={() => router.push('/careers-manage')}
-              className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-slate-500 transition-colors hover:text-navy-600"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 transition-colors hover:text-navy-600"
             >
               <ArrowLeft className="h-4 w-4" /> Careers
             </button>
@@ -176,14 +176,14 @@ export default function JobApplicantsPage() {
 
           <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="flex min-w-0 items-center gap-3.5">
-              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-navy-600 text-white shadow-sm">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-solid-soft text-white shadow-sm">
                 <Briefcase className="h-5 w-5" />
               </span>
               <div className="min-w-0">
-                <h1 className="truncate text-[22px] font-bold tracking-[-0.025em] text-slate-900 sm:text-2xl">
+                <h1 className="truncate text-2xl font-bold tracking-[-0.025em] text-slate-900 sm:text-2xl">
                   {selectedJob?.job_title || 'Applicants'}
                 </h1>
-                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[13px] text-slate-500">
+                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-slate-500">
                   <span className="inline-flex items-center gap-1.5">
                     <Users className="h-4 w-4 text-slate-400" />
                     {applications.length} applicant{applications.length !== 1 ? 's' : ''}

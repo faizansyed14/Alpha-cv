@@ -102,6 +102,29 @@ async def _run_public_cv_consumer() -> None:
     await asyncio.gather(*(runner() for _ in range(runners)))
 
 
+async def _run_storage_watch() -> None:
+    """Every DB_HEALTH_INTERVAL_SECONDS look at the database's size and dead rows and log what is wrong, so growth is seen early."""
+    from app.config.settings import settings
+
+    interval = settings.DB_HEALTH_INTERVAL_SECONDS
+    if interval <= 0:
+        return
+    from app.db.database import engine
+    from app.services.db_health import storage_report
+
+    while True:
+        try:
+            report = await asyncio.to_thread(storage_report, engine)
+            if report.get("supported"):
+                logger.info("Database storage: %.1f GB, %s CVs, search index %s bytes per CV",
+                            report["database_bytes"] / 1024 ** 3, report["candidates"], report["search_bytes_per_cv"])
+            for warning in report.get("warnings", []):
+                logger.warning("Database storage warning: %s", warning)
+        except Exception:  # noqa: BLE001 - a monitoring failure never stops the worker
+            logger.exception("The database storage check failed")
+        await asyncio.sleep(interval)
+
+
 async def main() -> None:
     from app.monitoring.recorder import get_recorder
 
@@ -114,7 +137,7 @@ async def main() -> None:
         init_database()
 
     logger.info("Background worker started (CV ingestion queue consumer)")
-    await _run_public_cv_consumer()
+    await asyncio.gather(_run_public_cv_consumer(), _run_storage_watch())
     logger.info("Background worker: all tasks exited")
 
 

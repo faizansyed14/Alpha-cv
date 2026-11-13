@@ -11,6 +11,7 @@ import { CategoriesCard } from './CategoriesCard';
 import { MatchesCard, MatchRunningCard } from './MatchCards';
 import { MatchSetupCard, type MatchSelection } from './MatchSetupCard';
 import { UploadPromptCard } from './UploadPromptCard';
+import { ClosuresCard, RequirementsCard, SelectionsCard } from './TrackerCards';
 import type { Send } from './ui';
 
 /** Interview questions and LinkedIn posts reuse the cards of the dedicated chat pages, so they look and copy exactly the same. */
@@ -27,6 +28,9 @@ export function CardRenderer({ card, onSend, onSelect, draftActive, fresh, onUpl
     case 'applications': return <ApplicationsCard card={card} />;
     case 'jobs': return <JobsCard card={card} onSend={onSend} />;
     case 'job_descriptions': return <JobDescriptionsCard card={card} onSend={onSend} />;
+    case 'requirements': return <RequirementsCard card={card} onSend={onSend} />;
+    case 'closures': return <ClosuresCard card={card} onSend={onSend} />;
+    case 'selections': return <SelectionsCard card={card} onSend={onSend} />;
     case 'matches': return <MatchesCard card={card} />;
     case 'match_running': return <MatchRunningCard card={card} />;
     case 'action': return <ActionCard card={card} active={draftActive} />;

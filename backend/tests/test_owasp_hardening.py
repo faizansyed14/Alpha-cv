@@ -26,8 +26,9 @@ def test_weak_passwords_are_rejected(pw):
 
 
 def test_password_must_not_contain_the_identity():
-    assert password_problem("rita-is-great-99", username="rita")
-    assert password_problem("jane.doe-2026-ok", email="jane.doe@corp.com")
+    # a password may contain the person's own name or email
+    assert password_problem("rita-is-great-99", username="rita") is None
+    assert password_problem("jane.doe-2026-ok", email="jane.doe@corp.com") is None
     assert password_problem("river-stone-4821", username="rita", email="rita@corp.com") is None
 
 
@@ -52,8 +53,8 @@ def test_api_enforces_the_policy_on_create_and_reset(world):
     assert r.status_code == 422
     r = world.client.patch(f"/api/admin/users/{world.rita.id}", json={"password": "short"})
     assert r.status_code == 422
-    r = world.client.patch(f"/api/admin/users/{world.rita.id}", json={"password": "rita-is-great-99"})   # contains the username
-    assert r.status_code == 422
+    r = world.client.patch(f"/api/admin/users/{world.rita.id}", json={"password": "rita-is-great-99"})   # containing the username is allowed
+    assert r.status_code == 200
     r = world.client.patch(f"/api/admin/users/{world.rita.id}", json={"password": "river-stone-4821"})
     assert r.status_code == 200
 

@@ -86,9 +86,9 @@ class TestLoginEndpoint:
 class TestVerifyPasswordEndpoint:
     """Test the /api/auth/verify-password endpoint."""
     
-    def test_verify_password_admin_user_requires_captcha(self, test_client, db_session):
-        """Admins get the CAPTCHA step (no email needed), and can complete the flow that issues the CAPTCHA."""
-        db_session.add(User(username="admin", password_hash=hash_password("admin123"), email="admin@example.com", role="admin", is_active=True))
+    def test_admin_on_captcha_mode_gets_the_captcha_step(self, test_client, db_session):
+        """An admin whose MFA is the CAPTCHA (the default a new admin starts with) gets the CAPTCHA step and can complete it."""
+        db_session.add(User(username="admin", password_hash=hash_password("admin123"), email="admin@example.com", role="admin", is_active=True, otp_mode="captcha"))
         db_session.commit()
 
         response = test_client.post("/api/auth/verify-password", json={"email": "admin@example.com", "password": "admin123"})
@@ -97,9 +97,19 @@ class TestVerifyPasswordEndpoint:
         data = response.json()
         assert data["success"] is True and data["requires_otp"] is True and data["auth_mode"] == "captcha"
 
-        # the CAPTCHA endpoint no longer turns admins away
         challenge = test_client.post("/api/auth/captcha", json={"email": "admin@example.com", "password": "admin123"})
         assert challenge.status_code == status.HTTP_200_OK and challenge.json()["captcha_id"]
+
+    def test_admin_on_email_mode_gets_the_otp_step(self, test_client, db_session):
+        """An admin whose MFA was switched to the email code gets the OTP step, like any other account on email codes."""
+        db_session.add(User(username="admin", password_hash=hash_password("admin123"), email="admin@example.com", role="admin", is_active=True, otp_mode="real"))
+        db_session.commit()
+
+        response = test_client.post("/api/auth/verify-password", json={"email": "admin@example.com", "password": "admin123"})
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["success"] is True and data["requires_otp"] is True and data["auth_mode"] == "otp"
 
     def test_verify_password_regular_user(self, test_client, db_session):
         """Test password verification for regular user (OTP required)."""
@@ -306,7 +316,7 @@ class TestGetCurrentUserEndpoint:
         data = response.json()
         assert data["username"] == "user1"
         assert data["role"] == "user"
-        assert "email" not in data and set(data) == {"id", "username", "role", "is_active"}      # the email is not sent back
+        assert "email" not in data and set(data) == {"id", "username", "role", "is_active", "location"}      # the email is not sent back
     
     def test_get_current_user_unauthorized(self, test_client):
         """Test getting current user without token."""

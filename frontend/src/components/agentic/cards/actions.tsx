@@ -68,17 +68,17 @@ export function useDocPreview() {
     state.url ? (
       <FilePreviewModal isOpen onClose={close} fileUrl={state.url} fileName={state.name} fileId={state.id} docType={state.type} />
     ) : (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40" onClick={state.error ? close : undefined}>
-        <div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/40" onClick={state.error ? close : undefined}>
+        <div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border border-slate-200 bg-paper p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
           {state.error ? (
             <>
-              <p className="text-center text-[13px] text-rose-600">{state.error}</p>
-              <button type="button" onClick={close} className="rounded-full border border-slate-200 px-4 py-1.5 text-[12.5px] font-medium text-slate-700 hover:bg-slate-50">Close</button>
+              <p className="text-center text-sm text-rose-600">{state.error}</p>
+              <button type="button" onClick={close} className="rounded-full border border-slate-200 px-4 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">Close</button>
             </>
           ) : (
             <>
               <Loader2 className="h-8 w-8 animate-spin text-navy-700" />
-              <p className="text-[13px] text-slate-700">Loading document...</p>
+              <p className="text-sm text-slate-700">Loading document...</p>
             </>
           )}
         </div>

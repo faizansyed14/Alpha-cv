@@ -239,6 +239,19 @@ class JobStore:
         self._invalidate_posting_cache()
         return True
 
+    def deactivate_jobs_posted_by(self, username: str) -> int:
+        """Stop taking applications on every live job this person posted (nothing is deleted: the jobs, their applications and CVs stay, and a
+        job can be switched on again in Careers). Returns how many were switched off."""
+        if not username:
+            return 0
+        with Session(self.engine) as s:
+            done = s.execute(update(JobPosting).where(JobPosting.posted_by_user == username, JobPosting.is_active.is_(True), JobPosting.deleted_at.is_(None))
+                             .values(is_active=False, updated_at=datetime.utcnow())).rowcount or 0
+            s.commit()
+        if done:
+            self._invalidate_posting_cache()
+        return int(done)
+
     def _posting_views(self, s: Session, postings: List[JobPosting], with_counts: bool = False) -> List[Dict[str, Any]]:
         jd_ids = [p.job_description_id for p in postings if p.job_description_id]
         jds = {j.id: j for part in chunks(jd_ids) for j in s.execute(select(JobDescription).where(JobDescription.id.in_(part))).scalars()}

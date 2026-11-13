@@ -52,8 +52,8 @@ function FilterChip({ checked, onToggle, children }: { checked: boolean; onToggl
       aria-pressed={checked}
       className={`rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-all duration-150 ${
         checked
-          ? 'border-navy-800 bg-navy-900 text-white shadow-sm'
-          : 'border-white/80 bg-white/70 text-slate-600 shadow-sm backdrop-blur hover:border-navy-200 hover:text-navy-800'
+          ? 'border-navy-800 bg-solid text-white shadow-sm'
+          : 'border-slate-200/70 bg-paper/70 text-slate-600 shadow-sm backdrop-blur hover:border-navy-200 hover:text-navy-800'
       }`}
     >
       {children}
@@ -136,7 +136,7 @@ export default function PublicJobOpeningsPage() {
 
       <PublicBody>
         {/* Centered hero */}
-        <section className="relative overflow-hidden border-b border-white/60">
+        <section className="relative overflow-hidden border-b border-slate-200/70">
           <div
             aria-hidden
             className="pointer-events-none absolute -left-24 top-0 h-64 w-64 rounded-full bg-sky-300/25 blur-3xl"
@@ -145,22 +145,22 @@ export default function PublicJobOpeningsPage() {
             aria-hidden
             className="pointer-events-none absolute -right-16 bottom-0 h-72 w-72 rounded-full bg-navy-400/15 blur-3xl"
           />
-          <div className="relative mx-auto max-w-3xl px-4 pb-12 pt-16 text-center sm:px-6 sm:pb-14 sm:pt-20">
+          <div className="relative mx-auto max-w-5xl px-4 pb-10 pt-12 text-center sm:px-6 sm:pb-12 sm:pt-16 lg:px-8">
             <motion.div variants={stagger(0.07, 0.05)} initial="hidden" animate="show" className="mx-auto flex flex-col items-center">
               <motion.p
                 variants={rise}
-                className="mb-5 inline-flex rounded-full border border-white/80 bg-white/80 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-navy-700 shadow-[var(--shadow-card)] backdrop-blur"
+                className="mb-4 inline-flex rounded-full border border-slate-200 bg-paper/90 px-4 py-1.5 text-2xs font-semibold uppercase tracking-[0.14em] text-navy-700 shadow-card"
               >
                 Careers at AlphaData
               </motion.p>
               <motion.h1
                 variants={rise}
-                className="max-w-2xl text-[34px] font-bold leading-[1.1] tracking-[-0.03em] text-slate-900 sm:text-[44px]"
+                className="max-w-3xl text-[32px] font-semibold leading-[1.08] tracking-[-0.035em] text-slate-900 sm:text-[42px]"
               >
                 Find the role that fits your{' '}
                 <span className="bg-gradient-to-r from-navy-700 to-sky-600 bg-clip-text text-transparent">next chapter</span>
               </motion.h1>
-              <motion.p variants={rise} className="mx-auto mt-4 max-w-lg text-[15px] leading-relaxed text-slate-500">
+              <motion.p variants={rise} className="mx-auto mt-4 max-w-lg text-md leading-relaxed text-slate-500">
                 Explore current opportunities across the UAE and Saudi Arabia, and apply in a few minutes.
               </motion.p>
 
@@ -170,7 +170,7 @@ export default function PublicJobOpeningsPage() {
                   value={keyword}
                   onChange={(e) => setKeyword(e.target.value)}
                   placeholder="Search by job title or location"
-                  className="h-14 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-12 text-[15px] text-ink shadow-[var(--shadow-md)] transition-[border-color,box-shadow] duration-150 placeholder:text-slate-400 hover:border-navy-300 focus:border-navy-500 focus:shadow-glow focus:outline-none"
+                  className="h-14 w-full rounded-2xl border border-slate-200 bg-paper pl-12 pr-12 text-md text-ink shadow-[var(--shadow-md)] transition-[border-color,box-shadow] duration-150 placeholder:text-slate-400 hover:border-navy-300 focus:border-navy-500 focus:shadow-glow focus:outline-none"
                 />
                 {keyword ? (
                   <button
@@ -185,7 +185,7 @@ export default function PublicJobOpeningsPage() {
               </motion.div>
 
               {!loading ? (
-                <motion.p variants={rise} className="mt-5 text-[13px] text-slate-500">
+                <motion.p variants={rise} className="mt-5 text-sm text-slate-500">
                   <span className="font-semibold tabular-nums text-navy-800">{total.toLocaleString()}</span>
                   {' '}open {total === 1 ? 'role' : 'roles'}
                 </motion.p>
@@ -245,7 +245,7 @@ export default function PublicJobOpeningsPage() {
 
             <div className="flex w-full max-w-xl flex-wrap items-center justify-center gap-2">
               {skills.map((sk) => (
-                <span key={sk} className="inline-flex items-center gap-1.5 rounded-full border border-navy-800 bg-navy-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
+                <span key={sk} className="inline-flex items-center gap-1.5 rounded-full border border-navy-800 bg-solid px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
                   {sk}
                   <button
                     type="button"
@@ -269,7 +269,7 @@ export default function PublicJobOpeningsPage() {
                   setSkillDraft('');
                 }}
                 placeholder="Add a skill · Enter"
-                className="h-9 min-w-[180px] max-w-xs flex-1 rounded-full border border-slate-200 bg-white px-4 text-center text-xs shadow-sm placeholder:text-slate-400 hover:border-navy-300 focus:border-navy-500 focus:outline-none"
+                className="h-9 w-full min-w-0 max-w-xs flex-1 rounded-full border border-slate-200 bg-paper px-4 text-center text-xs shadow-sm placeholder:text-slate-400 hover:border-navy-300 focus:border-navy-500 focus:outline-none sm:w-auto sm:min-w-[180px]"
               />
               {skills.length > 0 ? (
                 <button
@@ -289,11 +289,11 @@ export default function PublicJobOpeningsPage() {
           {loading ? (
             <OpeningCardsSkeleton />
           ) : pageJobs.length === 0 ? (
-            <div className="mx-auto flex max-w-md flex-col items-center justify-center rounded-3xl border border-dashed border-navy-200/80 bg-white/70 px-6 py-16 text-center shadow-[var(--shadow-card)] backdrop-blur">
+            <div className="mx-auto flex max-w-md flex-col items-center justify-center rounded-3xl border border-dashed border-navy-200/80 bg-paper/70 px-6 py-16 text-center shadow-[var(--shadow-card)] backdrop-blur">
               <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-navy-50 ring-1 ring-inset ring-navy-100">
                 <Briefcase className="h-5 w-5 text-navy-700" />
               </div>
-              <div className="text-[16px] font-semibold text-ink">No roles match your search</div>
+              <div className="text-lg font-semibold text-ink">No roles match your search</div>
               <div className="mt-1.5 text-sm text-slate-500">Try a different keyword or clear a filter.</div>
             </div>
           ) : (
@@ -313,8 +313,8 @@ export default function PublicJobOpeningsPage() {
                     variants={rise}
                     whileHover={tokenOk ? { y: -4 } : undefined}
                     transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                    className={`group relative flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 text-left shadow-[var(--shadow-card)] transition-[border-color,box-shadow] duration-200 ${
-                      tokenOk ? 'cursor-pointer hover:border-navy-300 hover:shadow-[var(--shadow-md)]' : ''
+                    className={`group relative flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-paper p-5 text-left shadow-card transition-[border-color,box-shadow,transform] duration-200 ${
+                      tokenOk ? 'cursor-pointer hover:border-navy-300 hover:shadow-md' : ''
                     }`}
                     onClick={() => tokenOk && openJob(job)}
                     role="button"
@@ -325,10 +325,10 @@ export default function PublicJobOpeningsPage() {
                     }}
                   >
                     <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-br from-navy-50 via-sky-50/50 to-transparent" />
-                    <h3 className="relative text-[17px] font-semibold leading-snug tracking-[-0.015em] text-navy-900">
+                    <h3 className="relative text-lg font-semibold leading-snug tracking-[-0.015em] text-navy-900">
                       {job.job_title || 'Open position'}
                     </h3>
-                    <div className="relative mt-4 space-y-2 text-[13px] text-slate-500">
+                    <div className="relative mt-4 space-y-2 text-sm text-slate-500">
                       <div className="flex items-center gap-2">
                         <MapPin className="h-4 w-4 shrink-0 text-sky-500" />
                         <span className="truncate">{job.job_location || 'Location to be confirmed'}</span>
@@ -341,10 +341,10 @@ export default function PublicJobOpeningsPage() {
                       ) : null}
                     </div>
                     <div className="relative mt-auto flex items-center justify-between border-t border-slate-100 pt-4 mt-6">
-                      <span className={`text-[13px] font-semibold ${tokenOk ? 'text-navy-800' : 'text-slate-400'}`}>
+                      <span className={`text-sm font-semibold ${tokenOk ? 'text-navy-800' : 'text-slate-400'}`}>
                         View and apply
                       </span>
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-navy-50 text-navy-700 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:bg-navy-900 group-hover:text-white">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-navy-50 text-navy-700 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:bg-solid group-hover:text-white">
                         <ArrowRight className="h-4 w-4" />
                       </span>
                     </div>

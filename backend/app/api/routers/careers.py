@@ -905,6 +905,30 @@ async def get_job_database_candidates(
         raise HTTPException(status_code=500, detail="Could not search the database for this job. Please try again.")
 
 
+@router.get("/admin/jobs/{job_id}/hiring-image")
+async def get_job_hiring_image(
+    job_id: str,
+    download: bool = Query(False, description="Send it as a file to save instead of showing it"),
+    _: User = Depends(require_core_app),
+):
+    """The "We are hiring" picture (a JPEG) for this job, drawn from a fixed template with its title and city. No AI model is used."""
+    from fastapi.responses import Response
+    from app.services.hiring_image import file_name, hiring_image
+
+    job = await asyncio.to_thread(get_store().get_job_posting_by_id, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job posting not found")
+    title, location = job.get("job_title") or "", job.get("job_location") or ""
+    try:
+        data = await asyncio.to_thread(hiring_image, title, location)
+    except Exception:
+        logger.exception("Hiring image could not be drawn")
+        raise HTTPException(status_code=500, detail="The hiring image could not be created. Please try again.")
+    disposition = "attachment" if download else "inline"
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Content-Disposition": f'{disposition}; filename="{file_name(title)}"', "Cache-Control": "private, max-age=300"})
+
+
 # ==================== UTILITY ENDPOINTS ====================
 
 @router.post("/admin/jobs/{jd_id}/extract-ui-data")

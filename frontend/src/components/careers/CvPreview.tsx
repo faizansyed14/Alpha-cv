@@ -53,19 +53,19 @@ export function useCvPreview() {
   const close = useCallback(() => setTarget(null), []);
 
   const element = !target ? null : error ? (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50" role="alertdialog" aria-label="CV could not be loaded">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/50" role="alertdialog" aria-label="CV could not be loaded">
       <div className="surface-panel flex max-w-sm flex-col items-center gap-3 p-6 text-center">
-        <p className="text-[13px] text-red-700">{error}</p>
+        <p className="text-sm text-red-700">{error}</p>
         <Button onClick={close} variant="secondary">Close</Button>
       </div>
     </div>
   ) : blobUrl ? (
     <FilePreviewModal isOpen onClose={close} fileUrl={blobUrl} fileName={target.fileName} fileId={target.cvId} />
   ) : (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50" role="status" aria-label="Loading CV">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/50" role="status" aria-label="Loading CV">
       <div className="surface-panel flex flex-col items-center gap-3 p-6">
         <Loader2 className="h-8 w-8 animate-spin text-navy-600" />
-        <p className="text-[13px] text-slate-700">Loading the CV…</p>
+        <p className="text-sm text-slate-700">Loading the CV…</p>
       </div>
     </div>
   );

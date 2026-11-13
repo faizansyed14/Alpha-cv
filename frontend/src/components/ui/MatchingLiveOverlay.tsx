@@ -57,26 +57,26 @@ export default function MatchingLiveOverlay({
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 8 }}
           transition={{ duration: 0.2 }}
-          className="fixed bottom-4 right-4 z-[110] w-[min(100vw-2rem,320px)] rounded-xl border border-navy-100 bg-white px-4 py-3 shadow-card"
+          className="fixed bottom-4 right-4 z-[110] w-[min(100vw-2rem,320px)] rounded-xl border border-navy-100 bg-paper px-4 py-3 shadow-card"
         >
           <div className="flex items-center gap-3">
             <img src="/icons/match/ai-robot.gif" alt="" aria-hidden className="h-9 w-9 shrink-0 object-contain" />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline justify-between gap-3">
-                <p className="text-[13px] font-semibold text-slate-900">{label}</p>
-                <p className="text-[13px] font-semibold tabular-nums text-navy-800">{displayPct}%</p>
+                <p className="text-sm font-semibold text-slate-900">{label}</p>
+                <p className="text-sm font-semibold tabular-nums text-navy-800">{displayPct}%</p>
               </div>
             </div>
           </div>
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-100">
             <motion.div
-              className="h-full rounded-full bg-navy-800"
+              className="h-full rounded-full bg-solid-hover"
               initial={false}
               animate={{ width: `${Math.max(pct, 1)}%` }}
               transition={{ duration: 0.25, ease: 'linear' }}
             />
           </div>
-          <p className="mt-2 truncate text-[12px] text-slate-500">
+          <p className="mt-2 truncate text-xs text-slate-500">
             {phase === 'llm_verification'
               ? `Verifying${llmTotal > 0 ? ` ${llmDone} of ${llmTotal}` : ''}`
               : phase === 'finalizing'

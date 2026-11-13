@@ -32,17 +32,17 @@ export function ModeToggle({ className }: { className?: string }) {
       type="button" role="switch" aria-checked={on} onClick={toggle}
       title={on ? 'Switch back to the classic screens' : 'Switch to Agentic mode'}
       className={cn(
-        'group inline-flex items-center gap-2 rounded-full border py-1 pl-2 pr-1.5 text-[12.5px] font-semibold transition-colors',
-        on ? 'border-navy-200 bg-navy-50 text-navy-900' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900',
+        'group inline-flex items-center gap-2 rounded-full border py-1 pl-2 pr-1.5 text-xs font-semibold transition-colors',
+        on ? 'border-navy-200 bg-navy-50 text-navy-900' : 'border-slate-200 bg-paper text-slate-600 hover:border-slate-300 hover:text-slate-900',
         className,
       )}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/video/ai-robot.gif" alt="" aria-hidden className="h-5 w-5 shrink-0 object-contain" />
       <span>Agentic mode</span>
-      <span className={cn('relative h-5 w-9 rounded-full transition-colors', on ? 'bg-navy-800' : 'bg-slate-300 group-hover:bg-slate-400')}>
+      <span className={cn('relative h-5 w-9 rounded-full transition-colors', on ? 'bg-solid-hover' : 'bg-slate-300 group-hover:bg-slate-400')}>
         <motion.span
-          className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow"
+          className="absolute top-0.5 h-4 w-4 rounded-full bg-paper shadow"
           animate={{ left: on ? 18 : 2 }} transition={spring.snappy}
         />
       </span>

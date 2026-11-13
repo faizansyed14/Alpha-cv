@@ -3,7 +3,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Award,
-  Bookmark,
   Briefcase,
   Eye,
   FileText as FileTextIcon,
@@ -59,7 +58,7 @@ function scoreToneClasses(score: number) {
 /** One fact about the candidate, shown as a quiet labelled chip. */
 function Fact({ icon: Icon, label, children }: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }) {
   return (
-    <div className="flex min-w-0 items-center gap-1.5 text-[12px]" title={label}>
+    <div className="flex min-w-0 items-center gap-1.5 text-xs" title={label}>
       <Icon className="h-4 w-4 shrink-0 text-slate-400" />
       <span className="sr-only">{label}: </span>
       <span className="truncate text-slate-700">{children}</span>
@@ -79,13 +78,10 @@ interface CandidateCardProps {
   onToggleSelect: () => void;
   onOpenDetails: () => void;
   onPreview: () => void;
-  /** Without these the card has no delete button / no notes (the Saved CVs page). */
+  /** Without these the card has no delete button / no notes. */
   onDelete?: () => void;
   onSaveNote?: (text: string) => Promise<void> | void;
   onDeleteNote?: () => Promise<void> | void;
-  /** Whether this CV is on the signed-in person's saved list, and how to save / unsave it. Without the handler there is no bookmark. */
-  saved?: boolean;
-  onToggleSave?: () => void;
   detailsTourId?: string;
   detailsTourLabel?: string;
 }
@@ -111,8 +107,6 @@ export default function CandidateCard({
   onDelete,
   onSaveNote,
   onDeleteNote,
-  saved = false,
-  onToggleSave,
   detailsTourId,
   detailsTourLabel,
 }: CandidateCardProps) {
@@ -201,19 +195,19 @@ export default function CandidateCard({
         if ((e.target as HTMLElement).closest('button, a, input, label, textarea')) return;
         onOpenDetails();
       }}
-      className={`group relative overflow-hidden rounded-2xl border bg-white transition-[border-color,box-shadow] duration-150 ${
+      className={`group relative overflow-hidden rounded-xl border bg-paper transition-[border-color,box-shadow] duration-150 ${
         selected
           ? 'border-navy-300 shadow-[0_0_0_3px_rgba(22,32,75,0.12)]'
-          : 'border-surface-border shadow-card hover:border-navy-300 hover:shadow-[0_6px_16px_-6px_rgba(16,24,40,0.10)]'
+          : 'border-slate-200 shadow-card hover:border-navy-300 hover:shadow-md'
       }`}
     >
-      {/* Same soft navy wash as the candidate profile hero */}
+      {/* Soft navy wash — kept short for denser cards */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-br from-navy-50 via-sky-50/60 to-white"
+        className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-br from-navy-50 via-sky-50/50 to-transparent"
       />
 
-      <div className="relative flex cursor-pointer gap-3.5 p-5">
+      <div className="relative flex cursor-pointer gap-3 p-3.5 sm:p-4">
       <div className="flex shrink-0 flex-col items-center gap-2 pt-1">
         <input
           type="checkbox"
@@ -222,37 +216,37 @@ export default function CandidateCard({
           className="h-4 w-4 cursor-pointer rounded accent-navy-600"
           aria-label={selected ? 'Deselect' : 'Select'}
         />
-        <span className="text-[11px] font-medium tabular-nums text-slate-400">{index}</span>
+        <span className="text-2xs font-medium tabular-nums text-slate-400">{index}</span>
       </div>
 
-      <Avatar name={d.name} size="lg" className="mt-0.5 ring-4 ring-white shadow-md" />
+      <Avatar name={d.name} size="lg" className="mt-0.5 ring-4 ring-paper shadow-md" />
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <button
             type="button"
             onClick={onOpenDetails}
-            className="max-w-full truncate text-left text-[15px] font-semibold tracking-[-0.01em] text-slate-900 hover:text-navy-600"
+            className="max-w-full truncate text-left text-md font-semibold tracking-[-0.01em] text-slate-900 hover:text-navy-600"
             title={d.name}
           >
             {d.name}
           </button>
           {d.isTopForJob && (
             <span
-              className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white"
+              className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-2xs font-semibold text-white"
               title={d.appliedJob ? `#1 candidate for ${d.appliedJob}` : '#1 candidate'}
             >
               <Trophy className="h-3 w-3" /> #1{d.appliedJob ? ` for ${d.appliedJob}` : ''}
             </span>
           )}
           {d.matchScore != null ? (
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${scoreToneClasses(d.matchScore)}`}>
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-2xs font-semibold ring-1 ring-inset ${scoreToneClasses(d.matchScore)}`}>
               {Math.round(d.matchScore * 100)}% match
             </span>
           ) : null}
         </div>
 
-        <p className="mt-0.5 truncate text-[13px] text-slate-500">
+        <p className="mt-0.5 truncate text-sm text-slate-500">
           {d.title !== '-' ? d.title : 'No title'}
           {d.category && d.category !== 'General' ? <span className="text-slate-400"> · {d.category}</span> : null}
           <span className="text-slate-400"> · {d.appliedJob ? `Applied for ${d.appliedJob}` : d.isApplication ? 'Application' : 'Direct upload'}</span>
@@ -272,9 +266,9 @@ export default function CandidateCard({
 
         {matchedKeywords.length > 0 && (
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-semibold text-slate-500">Matched</span>
+            <span className="text-2xs font-semibold text-slate-500">Matched</span>
             {matchedKeywords.map((k, i) => (
-              <span key={i} className="rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+              <span key={i} className="rounded-md bg-emerald-50 px-2 py-0.5 text-2xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
                 {k}
               </span>
             ))}
@@ -284,7 +278,7 @@ export default function CandidateCard({
         {(keywords.length > 0 || skills.length > 0) && (
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             {visibleKeywords.map((kw, i) => (
-              <span key={i} className="max-w-[220px] truncate rounded-full border border-surface-border bg-white px-2.5 py-0.5 text-[11.5px] font-medium text-slate-700 shadow-sm" title={kw}>
+              <span key={i} className="max-w-[220px] truncate rounded-full border border-surface-border bg-paper px-2.5 py-0.5 text-2xs font-medium text-slate-700 shadow-sm" title={kw}>
                 {kw}
               </span>
             ))}
@@ -292,7 +286,7 @@ export default function CandidateCard({
               <button
                 type="button"
                 onClick={() => setShowAllKeywords((v) => !v)}
-                className="rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-navy-600 hover:bg-navy-50"
+                className="rounded-md px-1.5 py-0.5 text-2xs font-semibold text-navy-600 hover:bg-navy-50"
               >
                 {showAllKeywords ? 'Show less' : `+${hiddenKeywordsCount} more`}
               </button>
@@ -301,7 +295,7 @@ export default function CandidateCard({
               <button
                 type="button"
                 onClick={() => setShowSkills((v) => !v)}
-                className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-navy-600 hover:bg-navy-50"
+                className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-semibold text-navy-600 hover:bg-navy-50"
               >
                 <Tags className="h-3 w-3" />
                 {showSkills ? 'Hide skills' : `Skills (${skills.length})`}
@@ -310,7 +304,7 @@ export default function CandidateCard({
           </div>
         )}
         {showSkills && skills.length > 0 && (
-          <ol className="mt-2 space-y-1.5 rounded-lg bg-navy-50/60 px-3 py-2.5 text-[12px] leading-relaxed text-navy-900">
+          <ol className="mt-2 space-y-1.5 rounded-lg bg-navy-50/60 px-3 py-2.5 text-xs leading-relaxed text-navy-900">
             {skills.map((sk, i) => (
               <li key={i} className="flex gap-2">
                 <span className="w-5 shrink-0 tabular-nums font-semibold text-navy-500">{i + 1}.</span>
@@ -322,14 +316,14 @@ export default function CandidateCard({
 
         {/* Inline note */}
         {composing ? (
-          <div className="mt-3 rounded-lg border border-navy-200 bg-white p-3" onClick={(e) => e.stopPropagation()}>
+          <div className="mt-3 rounded-lg border border-navy-200 bg-paper p-3" onClick={(e) => e.stopPropagation()}>
             <textarea
               ref={textareaRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               rows={3}
               placeholder="Write a note…"
-              className="field-input w-full resize-y text-[13px]"
+              className="field-input w-full resize-y text-sm"
               disabled={noteSaving}
             />
             <div className="mt-2 flex justify-end gap-2">
@@ -344,7 +338,7 @@ export default function CandidateCard({
         ) : noteText ? (
           <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50/70 px-3 py-2" onClick={(e) => e.stopPropagation()}>
             <div className="mb-1 flex items-start justify-between gap-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-800">
+              <p className="text-2xs font-semibold uppercase tracking-wide text-amber-800">
                 Note{noteAuthor ? ` · ${noteAuthor}` : ''}
               </p>
               <div className="flex items-center gap-0.5">
@@ -382,12 +376,12 @@ export default function CandidateCard({
                   {menuOpen && (
                     <div
                       role="menu"
-                      className="absolute right-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-surface-border bg-white py-1 shadow-lg"
+                      className="absolute right-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-surface-border bg-paper py-1 shadow-lg"
                     >
                       <button
                         type="button"
                         role="menuitem"
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-slate-700 hover:bg-slate-50"
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
                         onClick={startEdit}
                       >
                         <Pencil className="h-3.5 w-3.5" />
@@ -396,7 +390,7 @@ export default function CandidateCard({
                       <button
                         type="button"
                         role="menuitem"
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-red-600 hover:bg-red-50"
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
                         onClick={removeNote}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -407,23 +401,12 @@ export default function CandidateCard({
                 </div>
               </div>
             </div>
-            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-slate-800">{noteText}</p>
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{noteText}</p>
           </div>
         ) : null}
       </div>
 
       <div className="flex shrink-0 flex-col items-center gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
-        {onToggleSave && (
-          <button
-            type="button"
-            onClick={onToggleSave}
-            aria-pressed={saved}
-            title={saved ? 'Saved: click to remove from your saved CVs' : 'Save this CV'}
-            className={`rounded-lg p-2 transition-colors ${saved ? 'bg-navy-600 text-white shadow-sm hover:bg-navy-700' : 'text-slate-500 hover:bg-navy-50 hover:text-navy-700'}`}
-          >
-            <Bookmark className={`h-4 w-4 ${saved ? 'text-white' : 'text-slate-500'}`} />
-          </button>
-        )}
         <button
           type="button"
           onClick={onOpenDetails}

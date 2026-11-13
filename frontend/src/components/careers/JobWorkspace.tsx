@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
 import {
-  ArrowLeft, Calendar, Check, ChevronDown, ClipboardList, Copy, Database, Edit3, ExternalLink, FileText, Linkedin, Mail, MapPin,
-  MoreHorizontal, Power, Target, Trash2, Users, X,
+  ArrowLeft, Calendar, Check, ChevronDown, Copy, Database, Edit3, ExternalLink, FileText, Mail, MapPin,
+  MoreHorizontal, Power, Target, Trash2, Users,
+  ImageIcon,
 } from '@/components/icons';
 import { api } from '@/lib/api';
 import { JobPostingListItem } from '@/lib/types';
@@ -14,7 +14,8 @@ import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
 import { Menu } from '@/components/ui/menu';
 import { cn } from '@/lib/utils';
-import ApplicationsList from './ApplicationsList';
+import { Bone } from '@/components/skeletons';
+import ApplicationsList, { CandidateRowsSkeleton } from './ApplicationsList';
 import DatabaseCandidates from './DatabaseCandidates';
 import JobPostingForm from './JobPostingForm';
 import { formatPostedOn, type JobHandlers, type JobTab, type MatchScope } from './JobRow';
@@ -23,8 +24,8 @@ function CopyRow({ label, value, icon: Icon, href }: { label: string; value: str
   const [copied, setCopied] = useState(false);
   return (
     <div>
-      <p className="mb-1 text-xs font-medium text-slate-500">{label}</p>
-      <div className="flex items-center gap-2 rounded-lg border border-surface-border bg-white px-3 py-2 text-[13px] text-slate-800">
+      <p className="mb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-slate-500">{label}</p>
+      <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-paper px-3 py-2 text-sm text-slate-800">
         <Icon className="h-4 w-4 shrink-0 text-slate-400" />
         <span className="min-w-0 flex-1 truncate" title={value}>{value}</span>
         <button
@@ -53,9 +54,9 @@ function CopyRow({ label, value, icon: Icon, href }: { label: string; value: str
 function TextBlock({ title, text }: { title: string; text?: string }) {
   if (!text?.trim()) return null;
   return (
-    <section>
-      <h4 className="mb-1.5 text-[13px] font-semibold text-slate-900">{title}</h4>
-      <p className="whitespace-pre-wrap rounded-xl border border-surface-border bg-white p-3.5 text-[13px] leading-relaxed text-slate-700">{text}</p>
+    <section className="rounded-xl border border-slate-200 bg-paper p-4 shadow-card sm:p-5">
+      <h4 className="mb-2 text-sm font-semibold tracking-[-0.01em] text-slate-900">{title}</h4>
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{text}</p>
     </section>
   );
 }
@@ -68,22 +69,60 @@ function TabButton({ selected, onClick, icon, label, count }: { selected: boolea
       aria-selected={selected}
       onClick={onClick}
       className={cn(
-        '-mb-px inline-flex items-center gap-2 border-b-2 px-1 pb-3 pt-1 text-[13.5px] font-semibold transition-colors [&_svg]:size-4',
+        '-mb-px inline-flex items-center gap-2 border-b-2 px-1 pb-2.5 pt-1 text-sm font-semibold transition-colors [&_svg]:size-4',
         selected ? 'border-navy-700 text-navy-800' : 'border-transparent text-slate-500 hover:text-slate-900',
       )}
     >
       {icon}
       {label}
       {count !== undefined && (
-        <span className={cn('rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums', selected ? 'bg-navy-50 text-navy-800' : 'bg-slate-100 text-slate-600')}>{count}</span>
+        <span className={cn('rounded-md px-1.5 py-0.5 text-2xs font-semibold tabular-nums', selected ? 'bg-navy-50 text-navy-800' : 'bg-slate-100 text-slate-600')}>{count}</span>
       )}
     </button>
   );
 }
 
 /**
- * One job's workspace, in a wide side panel: who applied, who in the database fits it, and the job itself.
- * The header carries the actions: match, LinkedIn post, interview questions, and the rest under "More".
+ * A job's page while the job is still loading: the page layout, the back link, the action buttons and the tab names are real; the title,
+ * its details and the applicants are placeholders.
+ */
+export function JobWorkspaceSkeleton({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="min-h-[calc(100vh-8rem)]" role="status" aria-busy="true" aria-label="Loading job">
+      <header className="sticky top-12 z-20 -mx-4 border-b border-surface-border bg-paper/90 px-4 pt-3 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:top-0 lg:-mx-8 lg:px-8">
+        <div className="mx-auto max-w-[1400px]">
+          <button type="button" onClick={onBack} className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 transition-colors hover:text-navy-700">
+            <ArrowLeft className="h-3.5 w-3.5" /> All jobs
+          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Bone className="h-8 w-72 max-w-full" />
+            <Bone className="h-5 w-12 rounded-full" />
+          </div>
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1">
+            <Bone className="h-3.5 w-24" /><Bone className="h-3.5 w-20" /><Bone className="h-3.5 w-24" /><Bone className="h-3.5 w-28" />
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <Button variant="primary" size="sm" icon={<Target className="h-4 w-4" />} disabled>Match candidates</Button>
+            <Button variant="secondary" size="sm" icon={<img src="/icons/linkedin.svg" alt="" className="h-4 w-4 object-contain" draggable={false} />} disabled>LinkedIn</Button>
+            <Button variant="secondary" size="sm" icon={<img src="/icons/interview.jpg" alt="" className="h-4 w-4 rounded-sm object-cover" draggable={false} />} disabled>Interview</Button>
+            <Button variant="secondary" size="sm" icon={<ImageIcon className="h-4 w-4" />} disabled>Hiring image</Button>
+          </div>
+          <div role="tablist" aria-label="Job sections" className="-mx-1 mt-4 flex items-center gap-3 overflow-x-auto px-1 pb-px sm:gap-5">
+            <TabButton selected onClick={() => undefined} icon={<Users />} label="Applicants" count={<Bone className="inline-block h-3 w-4 align-middle" />} />
+            <TabButton selected={false} onClick={() => undefined} icon={<Database />} label="Database" count={<Bone className="inline-block h-3 w-4 align-middle" />} />
+            <TabButton selected={false} onClick={() => undefined} icon={<FileText />} label="Details" />
+          </div>
+        </div>
+      </header>
+      <div className="mx-auto max-w-[1400px] py-5">
+        <CandidateRowsSkeleton label="Loading applicants" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Full-page job workspace: applicants, database matches, job details.
  */
 export default function JobWorkspace({
   job,
@@ -102,9 +141,7 @@ export default function JobWorkspace({
   startInEdit?: boolean;
   onTab: (tab: JobTab) => void;
   onClose: () => void;
-  /** The job was edited: reload the list */
   onChanged: () => void;
-  /** Match from inside the workspace: the scope, the boolean string typed in the database tab (if any) and how many people it covers */
   onMatchScope: (job: JobPostingListItem, scope: MatchScope, customQuery: string | null, expected: number) => void;
   handlers: JobHandlers;
 }) {
@@ -117,7 +154,6 @@ export default function JobWorkspace({
   const [dbEstimate, setDbEstimate] = useState(false);
   const [dbQuery, setDbQuery] = useState<string | null>(null);
 
-  // The store loads this job's applicants whenever it is selected.
   useEffect(() => {
     selectJob(job);
     setFull(null);
@@ -129,7 +165,6 @@ export default function JobWorkspace({
     setPublicUrl(`${window.location.origin}/careers/jobs/${job.public_token}`);
   }, [job.public_token]);
 
-  // The list only carries short previews; whoever may edit the job can read it whole.
   useEffect(() => {
     if (!job.can_edit) return;
     let alive = true;
@@ -142,21 +177,6 @@ export default function JobWorkspace({
       .catch(() => {});
     return () => { alive = false; };
   }, [job.job_id, job.can_edit, startInEdit]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return;
-      if (document.querySelector('[role="dialog"]')) return;     // a dialog on top closes first
-      onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = previous;
-    };
-  }, [onClose]);
 
   const applicantCount = applications.length > 0 ? applications.length : (job.application_count ?? 0);
   const databaseCount = dbTotal ?? 0;
@@ -182,52 +202,37 @@ export default function JobWorkspace({
     onMatchScope(job, scope, dbQuery, scope === 'applicants' ? applicantCount : scope === 'database' ? databaseCount : everyone);
 
   return (
-    <div className="fixed inset-0 z-[45]" role="presentation">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-slate-900/40" onClick={onClose} aria-hidden />
-      <motion.aside
-        initial={{ x: '100%' }}
-        animate={{ x: 0 }}
-        transition={{ type: 'spring', stiffness: 380, damping: 40 }}
-        role="complementary"
-        aria-label={`${job.job_title || 'Job'} workspace`}
-        className="absolute right-0 top-0 flex h-full w-full max-w-[1240px] flex-col bg-slate-50 shadow-[-24px_0_48px_-16px_rgba(16,24,40,0.25)]"
-      >
-        <header className="border-b border-surface-border bg-white px-5 pt-4 sm:px-7">
-          <div className="flex items-start justify-between gap-4">
+    <div className="animate-page-enter min-h-[calc(100vh-8rem)]" aria-label={`${job.job_title || 'Job'} workspace`}>
+      <header className="sticky top-12 z-20 -mx-4 border-b border-surface-border bg-paper/90 px-4 pt-3 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:top-0 lg:-mx-8 lg:px-8">
+        <div className="mx-auto max-w-[1400px]">
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <button
                 type="button"
                 onClick={onClose}
-                className="mb-2 inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-slate-500 transition-colors hover:text-navy-700"
+                className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 transition-colors hover:text-navy-700"
               >
                 <ArrowLeft className="h-3.5 w-3.5" /> All jobs
               </button>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h2 className="text-[21px] font-bold leading-tight tracking-[-0.025em] text-slate-900">{job.job_title || 'Untitled role'}</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-xl font-semibold leading-tight tracking-[-0.03em] text-slate-900 sm:text-2xl sm:text-[26px]">
+                  {job.job_title || 'Untitled role'}
+                </h1>
                 <span className={cn('chip', job.is_active ? 'chip-success' : 'chip-neutral')}>{job.is_active ? 'Live' : 'Inactive'}</span>
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px] text-slate-500">
-                <span className="inline-flex items-center gap-1.5"><MapPin className="h-4 w-4" />{job.job_location || 'No location'}</span>
-                <span className="inline-flex items-center gap-1.5">
-                  <Avatar name={job.posted_by_user || '-'} size="sm" className="!h-5 !w-5 !text-[8px]" />
-                  {job.posted_by_user || '-'}{job.posted_by_user && job.posted_by_user === currentUser ? ' (you)' : ''}
+              <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs text-slate-500">
+                <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{job.job_location || 'No location'}</span>
+                <span className="inline-flex items-center gap-1">
+                  <Avatar name={job.posted_by_user || '-'} size="sm" className="!h-4 !w-4 !text-[7px]" />
+                  {job.posted_by_user || '-'}{job.posted_by_user && job.posted_by_user === currentUser ? ' · you' : ''}
                 </span>
-                <span className="inline-flex items-center gap-1.5"><Calendar className="h-4 w-4" />Posted {formatPostedOn(job.upload_date)}</span>
-                {job.email_subject_id && <span className="font-mono text-[12px] text-slate-600">{job.email_subject_id}</span>}
+                <span className="inline-flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{formatPostedOn(job.upload_date)}</span>
+                {job.email_subject_id && <span className="font-mono text-2xs text-slate-600">{job.email_subject_id}</span>}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="shrink-0 rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
-            >
-              <X className="h-5 w-5" />
-            </button>
           </div>
 
-          {/* actions */}
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <div className="inline-flex">
               <Button
                 variant="primary"
@@ -235,10 +240,10 @@ export default function JobWorkspace({
                 className="rounded-r-none"
                 icon={<Target className="h-4 w-4" />}
                 disabled={dbTotal !== null && everyone === 0}
-                title="Score the applicants and the database candidates against this job and rank them, best first"
+                title="Score applicants and database candidates"
                 onClick={() => match('all')}
               >
-                {dbTotal === null ? 'Match candidates' : `Match ${dbEstimate ? 'about ' : ''}${everyone.toLocaleString()} candidate${everyone === 1 ? '' : 's'}`}
+                {dbTotal === null ? 'Match candidates' : `Match ${dbEstimate ? '~' : ''}${everyone.toLocaleString()}`}
               </Button>
               <Menu
                 align="start"
@@ -248,17 +253,30 @@ export default function JobWorkspace({
                   </Button>
                 )}
                 items={[
-                  { label: `Applicants and database matches (${everyone.toLocaleString()})`, hint: 'Everyone who applied plus everyone your search finds', icon: <Target />, disabled: everyone === 0, onSelect: () => match('all') },
+                  { label: `Applicants and database (${everyone.toLocaleString()})`, hint: 'Everyone who applied plus search matches', icon: <Target />, disabled: everyone === 0, onSelect: () => match('all') },
                   { label: `Applicants only (${applicantCount.toLocaleString()})`, icon: <Users />, disabled: applicantCount === 0, onSelect: () => match('applicants') },
-                  { label: `Database matches only (${databaseCount.toLocaleString()})`, icon: <Database />, disabled: databaseCount === 0, onSelect: () => match('database') },
+                  { label: `Database only (${databaseCount.toLocaleString()})`, icon: <Database />, disabled: databaseCount === 0, onSelect: () => match('database') },
                 ]}
               />
             </div>
-            <Button variant="secondary" size="sm" icon={<Linkedin className="h-4 w-4" />} onClick={() => handlers.onAi(job, 'linkedin')}>
-              LinkedIn post
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<img src="/icons/linkedin.svg" alt="" className="h-4 w-4 object-contain" draggable={false} />}
+              onClick={() => handlers.onAi(job, 'linkedin')}
+            >
+              LinkedIn
             </Button>
-            <Button variant="secondary" size="sm" icon={<ClipboardList className="h-4 w-4" />} onClick={() => handlers.onAi(job, 'interview')}>
-              Interview questions
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<img src="/icons/interview.jpg" alt="" className="h-4 w-4 rounded-sm object-cover" draggable={false} />}
+              onClick={() => handlers.onAi(job, 'interview')}
+            >
+              Interview
+            </Button>
+            <Button variant="secondary" size="sm" icon={<ImageIcon className="h-4 w-4" />} onClick={() => handlers.onImage(job)} title="A ready-to-post We are hiring picture">
+              Hiring image
             </Button>
             {job.can_edit && (
               <Button variant="secondary" size="sm" icon={<Edit3 className="h-4 w-4" />} onClick={startEdit} loading={loadingEdit} disabled={editing}>
@@ -272,89 +290,87 @@ export default function JobWorkspace({
                 { label: 'Open public page', icon: <ExternalLink />, onSelect: () => window.open(`/careers/jobs/${job.public_token}`, '_blank', 'noopener') },
                 { label: 'Copy application link', icon: <Copy />, onSelect: () => handlers.onCopy(publicUrl, 'Application link') },
                 !!job.email_subject_template && { label: 'Copy e-mail subject', icon: <Mail />, onSelect: () => handlers.onCopy(job.email_subject_template || '', 'E-mail subject') },
-                job.can_edit && { label: job.is_active ? 'Deactivate' : 'Activate', hint: job.is_active ? 'Stop taking applications' : 'Take applications again', icon: <Power />, separated: true, onSelect: () => handlers.onToggleStatus(job) },
+                job.can_edit && { label: job.is_active ? 'Deactivate' : 'Activate', hint: job.is_active ? 'Stop applications' : 'Take applications', icon: <Power />, separated: true, onSelect: () => handlers.onToggleStatus(job) },
                 job.can_delete && { label: 'Delete job', icon: <Trash2 />, danger: true, separated: !job.can_edit, onSelect: () => handlers.onDelete(job) },
               ]}
             />
           </div>
 
-          {/* tabs */}
           {!editing && (
-            <div role="tablist" aria-label="Job sections" className="mt-4 flex items-center gap-6">
+            <div role="tablist" aria-label="Job sections" className="-mx-1 mt-4 flex items-center gap-3 overflow-x-auto px-1 pb-px sm:gap-5">
               <TabButton selected={tab === 'applicants'} onClick={() => onTab('applicants')} icon={<Users />} label="Applicants" count={applicantCount.toLocaleString()} />
               <TabButton
                 selected={tab === 'database'}
                 onClick={() => onTab('database')}
                 icon={<Database />}
-                label="Database matches"
+                label="Database"
                 count={dbTotal === null ? '…' : `${dbEstimate ? '~' : ''}${databaseCount.toLocaleString()}`}
               />
-              <TabButton selected={tab === 'details'} onClick={() => onTab('details')} icon={<FileText />} label="Job details" />
+              <TabButton selected={tab === 'details'} onClick={() => onTab('details')} icon={<FileText />} label="Details" />
             </div>
           )}
-          {editing && <div className="h-4" />}
-        </header>
+          {editing && <div className="h-3" />}
+        </div>
+      </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7">
-          {editing && full ? (
-            <div>
-              <button
-                type="button"
-                onClick={() => setEditing(false)}
-                className="mb-3 inline-flex items-center gap-1.5 text-[13px] font-semibold text-slate-500 transition-colors hover:text-navy-600"
-              >
-                <ArrowLeft className="h-4 w-4" /> Back to the job without saving
-              </button>
-              <JobPostingForm
-                jobId={job.job_id}
-                publicToken={job.public_token === 'unknown' ? undefined : job.public_token}
-                initialData={{
-                  jobTitle: full.job_title || '',
-                  jobLocation: full.job_location || '',
-                  jobSummary: full.job_summary || '',
-                  keyResponsibilities: full.key_responsibilities || '',
-                  qualifications: full.qualifications || '',
-                }}
-                onSuccess={() => {
-                  setEditing(false);
-                  setFull(null);
-                  onChanged();
-                }}
+      <div className="mx-auto max-w-[1400px] py-5">
+        {editing && full ? (
+          <div>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 transition-colors hover:text-navy-600"
+            >
+              <ArrowLeft className="h-4 w-4" /> Back without saving
+            </button>
+            <JobPostingForm
+              jobId={job.job_id}
+              publicToken={job.public_token === 'unknown' ? undefined : job.public_token}
+              initialData={{
+                jobTitle: full.job_title || '',
+                jobLocation: full.job_location || '',
+                jobSummary: full.job_summary || '',
+                keyResponsibilities: full.key_responsibilities || '',
+                qualifications: full.qualifications || '',
+              }}
+              onSuccess={() => {
+                setEditing(false);
+                setFull(null);
+                onChanged();
+              }}
+            />
+          </div>
+        ) : (
+          <>
+            {tab === 'applicants' && <ApplicationsList />}
+
+            <div className={tab === 'database' ? '' : 'hidden'}>
+              <DatabaseCandidates
+                job={job}
+                onTotal={(total, estimate) => { setDbTotal(total); setDbEstimate(estimate); }}
+                onQuery={setDbQuery}
               />
             </div>
-          ) : (
-            <>
-              {tab === 'applicants' && <ApplicationsList />}
 
-              {/* kept mounted so its count is known for the tab label and the match button, whichever tab is open */}
-              <div className={tab === 'database' ? '' : 'hidden'}>
-                <DatabaseCandidates
-                  job={job}
-                  onTotal={(total, estimate) => { setDbTotal(total); setDbEstimate(estimate); }}
-                  onQuery={setDbQuery}
-                />
-              </div>
-
-              {tab === 'details' && (
-                <div className="space-y-5">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {publicUrl && <CopyRow label="Public application link" value={publicUrl} icon={ExternalLink} href={publicUrl} />}
-                    {job.email_subject_template && <CopyRow label="E-mail subject for applications by e-mail" value={job.email_subject_template} icon={Mail} />}
-                  </div>
-                  <TextBlock title="Summary" text={summary} />
-                  <TextBlock title="Key responsibilities" text={responsibilities} />
-                  <TextBlock title="Qualifications" text={qualifications} />
-                  {!summary && !responsibilities && !qualifications && (
-                    <p className="rounded-xl border border-dashed border-surface-border bg-white p-6 text-center text-[13px] text-slate-500">
-                      No description was saved for this job.
-                    </p>
-                  )}
+            {tab === 'details' && (
+              <div className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2">
+                  {publicUrl && <CopyRow label="Public application link" value={publicUrl} icon={ExternalLink} href={publicUrl} />}
+                  {job.email_subject_template && <CopyRow label="E-mail subject" value={job.email_subject_template} icon={Mail} />}
                 </div>
-              )}
-            </>
-          )}
-        </div>
-      </motion.aside>
+                <TextBlock title="Summary" text={summary} />
+                <TextBlock title="Key responsibilities" text={responsibilities} />
+                <TextBlock title="Qualifications" text={qualifications} />
+                {!summary && !responsibilities && !qualifications && (
+                  <p className="rounded-xl border border-dashed border-slate-200 bg-paper p-8 text-center text-sm text-slate-500">
+                    No description was saved for this job.
+                  </p>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -59,11 +59,16 @@ export default function JobAiDialog({ job, kind, onClose }: { job: JobPostingLis
       const [detail, agent] = await Promise.all([api.getJobForMatching(job.job_id), api.getAgentInfo(kind)]);
       const text = jobText(detail);
       if (!text.trim()) throw new Error('This job has no description to work from. Add a summary, responsibilities or qualifications first.');
+      const applyUrl =
+        kind === 'linkedin' && job.public_token && job.public_token !== 'unknown'
+          ? `${window.location.origin}/careers/jobs/${job.public_token}`
+          : undefined;
       const res = await api.agentChat(kind, {
         message: (agent as { default_request?: string })?.default_request || copy.fallback,
         jd_source: 'pasted',
         jd_text: text,
         jd_title: detail.job_title || job.job_title || 'Job',
+        apply_url: applyUrl,
       });
       if (mine !== run.current) return;
       const answer = res.assistant_message as AgentMessage;
@@ -75,7 +80,7 @@ export default function JobAiDialog({ job, kind, onClose }: { job: JobPostingLis
     } finally {
       if (mine === run.current) setWorking(false);
     }
-  }, [job.job_id, job.job_title, kind, key, copy.fallback]);
+  }, [job.job_id, job.job_title, job.public_token, kind, key, copy.fallback]);
 
   useEffect(() => {
     if (!remembered.has(key)) void generate();
@@ -96,23 +101,23 @@ export default function JobAiDialog({ job, kind, onClose }: { job: JobPostingLis
           {working ? (
             <div className="flex h-44 flex-col items-center justify-center gap-3 text-center" role="status">
               <Loader2 className="h-7 w-7 animate-spin text-navy-600" />
-              <p className="text-[13.5px] font-medium text-slate-800">{copy.working}</p>
-              <p className="text-[12.5px] text-slate-500">This usually takes 10 to 30 seconds. You can keep this window open.</p>
+              <p className="text-sm font-medium text-slate-800">{copy.working}</p>
+              <p className="text-xs text-slate-500">This usually takes 10 to 30 seconds. You can keep this window open.</p>
             </div>
           ) : error ? (
-            <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-[13px] text-red-800" role="alert">
+            <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{error}</span>
             </div>
           ) : usable ? (
             kind === 'linkedin' ? <LinkedInAnswer message={message} fresh={false} /> : <InterviewAnswer message={message} fresh={false} />
           ) : message ? (
-            <p className="whitespace-pre-wrap rounded-xl border border-amber-200 bg-amber-50 p-4 text-[13px] leading-relaxed text-amber-900">{message.content}</p>
+            <p className="whitespace-pre-wrap rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">{message.content}</p>
           ) : null}
         </div>
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-surface-border pt-3">
-          <Link href={copy.agentPath} className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-navy-700 hover:underline">
+          <Link href={copy.agentPath} className="inline-flex items-center gap-1.5 text-xs font-semibold text-navy-700 hover:underline">
             Refine it in the {copy.agentName} <ArrowRight className="h-3.5 w-3.5" />
           </Link>
           <div className="flex items-center gap-1.5">

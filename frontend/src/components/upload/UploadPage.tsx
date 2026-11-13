@@ -1,7 +1,7 @@
 'use client';
 import { runPool, uploadCVAndWait, UPLOAD_CONCURRENCY } from '@/lib/uploadRun';
-import React, { useCallback, useMemo } from 'react';
-import { useDropzone } from 'react-dropzone';
+import React, { useCallback, useMemo, useState } from 'react';
+import { useDropzone, type FileRejection } from 'react-dropzone';
 import {
   Upload,
   UploadCloud,
@@ -96,6 +96,18 @@ export default function UploadPage() {
   /* --------------------------------- Dropzones --------------------------------- */
   const onCVDrop = useCallback((accepted: File[]) => addMany('cv', accepted), [addMany]);
   const onJDDrop = useCallback((accepted: File[]) => addMany('jd', accepted), [addMany]);
+  // Files the drop zone refuses (too large, a kind that is not accepted, too many) are listed with the reason: they are never queued, never uploaded.
+  const [refused, setRefused] = useState<string[]>([]);
+  const onRejected = useCallback((rejections: FileRejection[]) => {
+    const reason = (r: FileRejection) => {
+      const codes = r.errors.map((e) => e.code);
+      if (codes.includes('file-too-large')) return `is ${(r.file.size / (1024 * 1024)).toFixed(1)} MB: the most is 5 MB`;
+      if (codes.includes('file-invalid-type')) return 'is not a file type that is accepted';
+      if (codes.includes('too-many-files')) return 'was not added: too many files at once';
+      return 'was not accepted';
+    };
+    setRefused(rejections.map((r) => `${r.file.name} ${reason(r)}`));
+  }, []);
   const {
     getRootProps: getCVRootProps,
     getInputProps: getCVInputProps,
@@ -103,6 +115,7 @@ export default function UploadPage() {
     isDragReject: isCVDragReject,
   } = useDropzone({
     onDrop: onCVDrop,
+    onDropRejected: onRejected,
     accept: {
       'application/pdf': ['.pdf'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
@@ -115,7 +128,7 @@ export default function UploadPage() {
       'image/*': ['.png', '.jpg', '.jpeg', '.tiff', '.bmp'],
     },
     maxFiles: 200,
-    maxSize: 10 * 1024 * 1024,
+    maxSize: 5 * 1024 * 1024,
   });
   const {
     getRootProps: getJDRootProps,
@@ -124,6 +137,7 @@ export default function UploadPage() {
     isDragReject: isJDDragReject,
   } = useDropzone({
     onDrop: onJDDrop,
+    onDropRejected: onRejected,
     accept: {
       'application/pdf': ['.pdf'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
@@ -132,7 +146,7 @@ export default function UploadPage() {
       'image/*': ['.png', '.jpg', '.jpeg', '.tiff', '.bmp'],
     },
     maxFiles: 5,
-    maxSize: 10 * 1024 * 1024,
+    maxSize: 5 * 1024 * 1024,
   });
   /* ----------------------------- Processing uploads ----------------------------- */
   const processFiles = async () => {
@@ -348,13 +362,13 @@ export default function UploadPage() {
     file: any;
     icon: React.ComponentType<{ className?: string }>;
   }) => (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-surface-border bg-white px-4 py-3 shadow-card transition-shadow duration-[var(--duration-fast)] hover:shadow-[var(--shadow-md)]">
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-surface-border bg-paper px-4 py-3 shadow-card transition-shadow duration-[var(--duration-fast)] hover:shadow-[var(--shadow-md)]">
       <div className="flex min-w-0 items-center gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-navy-50">
           <Icon className="h-4 w-4 text-navy-600" />
         </span>
         <div className="min-w-0">
-          <div className="truncate text-[13px] font-semibold text-slate-900">{file.name}</div>
+          <div className="truncate text-sm font-semibold text-slate-900">{file.name}</div>
           <div className="truncate text-xs text-slate-500">
             {getStatusText(file)}
             {file.dbId && <span className="ml-2 text-green-600">(ID: {file.dbId?.substring(0, 8)}…)</span>}
@@ -383,16 +397,30 @@ export default function UploadPage() {
         description="Add candidate CVs and job descriptions to start AI-powered matching."
       />
 
+      {refused.length > 0 && (
+        <div role="alert" className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-800">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">{refused.length === 1 ? 'A file was not added' : `${refused.length} files were not added`}</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              {refused.slice(0, 5).map((m) => <li key={m} className="break-words">{m}</li>)}
+              {refused.length > 5 && <li>and {refused.length - 5} more</li>}
+            </ul>
+          </div>
+          <button type="button" aria-label="Dismiss" onClick={() => setRefused([])} className="rounded p-0.5 text-red-500 hover:text-red-700"><X className="h-4 w-4" /></button>
+        </div>
+      )}
+
       {/* Upload Zones */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* CV Upload Zone */}
         <div className="surface-panel p-4 sm:p-5">
           <div className="mb-4 flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-navy-600 text-white shadow-sm">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-solid-soft text-white shadow-sm">
               <Users className="h-5 w-5" />
             </span>
             <div>
-              <h3 className="text-[15px] font-semibold tracking-[-0.015em] text-slate-900">Candidate CVs</h3>
+              <h3 className="text-md font-semibold tracking-[-0.015em] text-slate-900">Candidate CVs</h3>
               <p className="text-xs text-slate-500">Upload resumes for processing and matching</p>
             </div>
           </div>
@@ -402,8 +430,8 @@ export default function UploadPage() {
               <UploadCloud className="h-6 w-6 text-navy-600" />
             </div>
             <h4 className="text-sm font-semibold text-slate-900">Drop CV files here</h4>
-            <p className="mt-1 text-[13px] text-slate-500">PDF, DOCX, TXT</p>
-            <p className="mt-2 text-xs text-slate-400">Drag &amp; drop or click to browse · Max 200 files, 10MB each</p>
+            <p className="mt-1 text-sm text-slate-500">PDF, DOCX, TXT</p>
+            <p className="mt-2 text-xs text-slate-400">Drag &amp; drop or click to browse · Max 200 files, 5MB each</p>
             <div className="mt-3">
               <Button variant="secondary" size="sm" type="button">
                 Browse files
@@ -414,11 +442,11 @@ export default function UploadPage() {
         {/* JD Upload Zone */}
         <div className="surface-panel p-4 sm:p-5">
           <div className="mb-4 flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-navy-600 text-white shadow-sm">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-solid-soft text-white shadow-sm">
               <FileText className="h-5 w-5" />
             </span>
             <div>
-              <h3 className="text-[15px] font-semibold tracking-[-0.015em] text-slate-900">Job descriptions</h3>
+              <h3 className="text-md font-semibold tracking-[-0.015em] text-slate-900">Job descriptions</h3>
               <p className="text-xs text-slate-500">Upload job requirements for matching</p>
             </div>
           </div>
@@ -428,8 +456,8 @@ export default function UploadPage() {
               <UploadCloud className="h-6 w-6 text-navy-600" />
             </div>
             <h4 className="text-sm font-semibold text-slate-900">Drop JD files here</h4>
-            <p className="mt-1 text-[13px] text-slate-500">PDF, DOCX, TXT</p>
-            <p className="mt-2 text-xs text-slate-400">Drag &amp; drop or click to browse · Max 5 files, 10MB each</p>
+            <p className="mt-1 text-sm text-slate-500">PDF, DOCX, TXT</p>
+            <p className="mt-2 text-xs text-slate-400">Drag &amp; drop or click to browse · Max 5 files, 5MB each</p>
             <div className="mt-3">
               <Button variant="secondary" size="sm" type="button">
                 Browse files
@@ -444,7 +472,7 @@ export default function UploadPage() {
         <div className="mt-4 surface-panel p-4 sm:p-5">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-[15px] font-semibold tracking-[-0.015em] text-slate-900">Processing queue</h3>
+              <h3 className="text-md font-semibold tracking-[-0.015em] text-slate-900">Processing queue</h3>
               <p className="text-xs text-slate-500">
                 {completedFiles} of {totalFiles} files processed
               </p>
@@ -475,8 +503,8 @@ export default function UploadPage() {
             <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
               <div>
-                <p className="text-[13px] font-medium text-amber-800">Duplicate files detected</p>
-                <p className="text-[13px] text-amber-700">
+                <p className="text-sm font-medium text-amber-800">Duplicate files detected</p>
+                <p className="text-sm text-amber-700">
                   You have uploaded the same file multiple times. Use &quot;Remove duplicates&quot; to keep only the
                   first occurrence of each file.
                 </p>
@@ -498,19 +526,19 @@ export default function UploadPage() {
       {/* Debug Info - Remove in production */}
       {process.env.NODE_ENV === 'development' && (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <h4 className="text-[13px] font-medium text-amber-800">Debug info:</h4>
-          <p className="text-[13px] text-amber-700">
+          <h4 className="text-sm font-medium text-amber-800">Debug info:</h4>
+          <p className="text-sm text-amber-700">
             Queue items: {items.length} (JDs: {jdItems.length}, CVs: {cvItems.length})
           </p>
-          <p className="text-[13px] text-amber-700">
+          <p className="text-sm text-amber-700">
             Completed JDs with dbId: {jdItems.filter((f) => f.status === 'completed' && f.dbId).length}
           </p>
-          <p className="text-[13px] text-amber-700">
+          <p className="text-sm text-amber-700">
             Completed CVs with dbId: {cvItems.filter((f) => f.status === 'completed' && f.dbId).length}
           </p>
-          <p className="text-[13px] text-amber-700">Has duplicates: {hasDuplicates ? 'Yes' : 'No'}</p>
+          <p className="text-sm text-amber-700">Has duplicates: {hasDuplicates ? 'Yes' : 'No'}</p>
           <details className="mt-2">
-            <summary className="cursor-pointer text-[13px] font-medium text-amber-800">Queue details</summary>
+            <summary className="cursor-pointer text-sm font-medium text-amber-800">Queue details</summary>
             <pre className="mt-1 max-h-40 overflow-auto rounded bg-amber-100 p-2 text-xs">
               {JSON.stringify(items, null, 2)}
             </pre>
@@ -526,8 +554,8 @@ export default function UploadPage() {
               <CheckCircle className="h-[18px] w-[18px]" />
             </span>
             <div>
-              <h4 className="text-[13px] font-semibold text-slate-900">Documents ready</h4>
-              <p className="text-[13px] text-slate-500">
+              <h4 className="text-sm font-semibold text-slate-900">Documents ready</h4>
+              <p className="text-sm text-slate-500">
                 {hasDBData
                   ? `Database has ${cvs.length} CV(s) and ${jds.length} JD(s).`
                   : `${completedFiles} file(s) uploaded and processed`}

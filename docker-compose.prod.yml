@@ -105,7 +105,10 @@ services:
       - cv-network
     restart: unless-stopped
     deploy:
-      replicas: ${MATCH_WORKER_REPLICAS:-3}
+      # Default 2 on a 4 vCPU / 16 GB host (m6i.xlarge): serves 2 concurrent large matches while leaving a core
+      # for the API, Qdrant and Redis. Set MATCH_WORKER_REPLICAS=3 for three simultaneous heavy matches (tighter on
+      # CPU during bursts), or higher once the host has spare cores.
+      replicas: ${MATCH_WORKER_REPLICAS:-2}
       resources:
         # per process; a 15,000-CV job peaked at ~250 MiB with the settings above (two jobs ~500 MiB)
         limits:

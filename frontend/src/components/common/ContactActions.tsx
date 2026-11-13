@@ -35,7 +35,7 @@ function ProfileIcon({ url, site }: { url: string; site: 'linkedin' | 'github' }
       rel="noopener noreferrer"
       title={`Open ${name} profile`}
       aria-label={`Open ${name} profile`}
-      className={`inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors ${hover}`}
+      className={`inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-paper text-gray-500 transition-colors ${hover}`}
     >
       <Icon className="h-3.5 w-3.5" />
     </a>
@@ -51,7 +51,7 @@ function ProfileChip({ url, site }: { url: string; site: 'linkedin' | 'github' }
       target="_blank"
       rel="noopener noreferrer"
       title={`Open ${name} profile: ${url}`}
-      className={`inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 transition-colors ${hover}`}
+      className={`inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-paper px-2 py-1 text-xs text-gray-600 transition-colors ${hover}`}
     >
       <Icon className="h-3.5 w-3.5 shrink-0" />
       <span className="max-w-[140px] truncate">{handle || name}</span>
@@ -89,7 +89,7 @@ export default function ContactActions({
           <a
             href={`mailto:${email}`}
             title={`Email ${email}`}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-brand-300 hover:text-brand-600"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-paper text-gray-500 transition-colors hover:border-brand-300 hover:text-brand-600"
           >
             <Mail className="h-3.5 w-3.5" />
           </a>
@@ -99,7 +99,7 @@ export default function ContactActions({
             <a
               href={`tel:${phone}`}
               title={`Call ${phone}`}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-brand-300 hover:text-brand-600"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-paper text-gray-500 transition-colors hover:border-brand-300 hover:text-brand-600"
             >
               <Phone className="h-3.5 w-3.5" />
             </a>
@@ -108,7 +108,7 @@ export default function ContactActions({
               target="_blank"
               rel="noopener noreferrer"
               title={`WhatsApp ${phone}`}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition-colors hover:border-success-300 hover:text-success-600"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-paper text-gray-500 transition-colors hover:border-success-300 hover:text-success-600"
             >
               <WhatsApp className="h-3.5 w-3.5" />
             </a>
@@ -126,7 +126,7 @@ export default function ContactActions({
         <a
           href={`mailto:${email}`}
           title={`Email ${email}`}
-          className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 transition-colors hover:border-brand-300 hover:text-brand-600"
+          className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-paper px-2 py-1 text-xs text-gray-600 transition-colors hover:border-brand-300 hover:text-brand-600"
         >
           <Mail className="h-3.5 w-3.5 shrink-0" />
           <span className="max-w-[220px] truncate">{email}</span>
@@ -137,7 +137,7 @@ export default function ContactActions({
           <a
             href={`tel:${phone}`}
             title={`Call ${phone}`}
-            className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 transition-colors hover:border-brand-300 hover:text-brand-600"
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-paper px-2 py-1 text-xs text-gray-600 transition-colors hover:border-brand-300 hover:text-brand-600"
           >
             <Phone className="h-3.5 w-3.5 shrink-0" />
             <span>{phone}</span>
@@ -147,7 +147,7 @@ export default function ContactActions({
             target="_blank"
             rel="noopener noreferrer"
             title={`WhatsApp ${phone}`}
-            className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 transition-colors hover:border-success-300 hover:text-success-600"
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-paper px-2 py-1 text-xs text-gray-600 transition-colors hover:border-success-300 hover:text-success-600"
           >
             <WhatsApp className="h-3.5 w-3.5" />
             <span>WhatsApp</span>

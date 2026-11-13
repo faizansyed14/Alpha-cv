@@ -12,6 +12,70 @@ from app.config.settings import settings, get_otp_from_email
 
 logger = logging.getLogger(__name__)
 
+BRAND = "AlphaData Recruitment"
+# The application's own colours (frontend/src/app/globals.css): the navy of buttons and the sign-in panel, the page grey, the hairline.
+_NAVY, _INK, _TEXT, _MUTED, _CANVAS, _LINE, _TINT = "#16204B", "#0F172A", "#475569", "#94A3B8", "#F4F6FA", "#E2E7F0", "#F5F7FB"
+_FONT = "-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+
+
+def otp_email_html(otp: str, username: Optional[str] = None, minutes: int = 5) -> str:
+    """The sign-in code email. Written the way mail programs need it: tables for layout, every style inline, no pictures or web fonts
+    (most programs block remote pictures until the reader allows them, so the brand is plain text), and it reads the same in Outlook,
+    Gmail and on a phone. The code is one run of text, so a tap or double-click selects all of it."""
+    name = html.escape(str(username).strip()) if username and str(username).strip() else ""
+    code = html.escape(str(otp))
+    life = f"{minutes} minute{'s' if minutes != 1 else ''}"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Your sign-in code</title>
+</head>
+<body style="margin:0; padding:0; background-color:{_CANVAS}; -webkit-text-size-adjust:100%;">
+<div style="display:none; max-height:0; overflow:hidden; opacity:0; color:{_CANVAS}; font-size:1px; line-height:1px;">Use this code to finish signing in. It expires in {life}.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{_CANVAS}" style="background-color:{_CANVAS};">
+  <tr>
+    <td align="center" style="padding:40px 16px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;">
+        <tr>
+          <td bgcolor="{_NAVY}" style="background-color:{_NAVY}; border-radius:16px 16px 0 0; padding:22px 32px; font-family:{_FONT};">
+            <span style="font-size:17px; font-weight:600; letter-spacing:-0.2px; color:#FFFFFF;">AlphaData</span>
+            <span style="font-size:11px; font-weight:600; letter-spacing:2.4px; text-transform:uppercase; color:#A4B0CC; padding-left:10px;">Recruitment</span>
+          </td>
+        </tr>
+        <tr>
+          <td bgcolor="#FFFFFF" style="background-color:#FFFFFF; border:1px solid {_LINE}; border-top:0; border-radius:0 0 16px 16px; padding:36px 32px 32px; font-family:{_FONT};">
+            <h1 style="margin:0 0 10px; font-size:22px; line-height:28px; font-weight:600; letter-spacing:-0.4px; color:{_INK};">Your sign-in code</h1>
+            <p style="margin:0 0 26px; font-size:15px; line-height:24px; color:{_TEXT};">{f'Hi {name}, use' if name else 'Use'} this code to finish signing in.</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td align="center" bgcolor="{_TINT}" style="background-color:{_TINT}; border:1px solid #CDD4E6; border-radius:12px; padding:22px 12px;">
+                  <span style="font-family:'SF Mono', Menlo, Consolas, 'Courier New', monospace; font-size:34px; line-height:40px; font-weight:700; letter-spacing:10px; color:{_NAVY}; padding-left:10px;">{code}</span>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:22px 0 0; font-size:14px; line-height:22px; color:{_TEXT};">The code expires in <strong style="color:{_INK}; font-weight:600;">{life}</strong>. Do not share it with anyone.</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr><td style="padding:26px 0 0;"><div style="border-top:1px solid {_LINE}; font-size:0; line-height:0;">&nbsp;</div></td></tr>
+            </table>
+            <p style="margin:20px 0 0; font-size:13px; line-height:20px; color:#64748B;">Did not try to sign in? You can ignore this email. Nobody can sign in without this code.</p>
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:22px 16px 0; font-family:{_FONT}; font-size:12px; line-height:18px; color:{_MUTED};">
+            This is an automated message from {BRAND}. Please do not reply to it.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>"""
+
+
 class EmailOTPService:
     """Service for sending OTP emails via Microsoft Graph API."""
     
@@ -84,25 +148,9 @@ class EmailOTPService:
             access_token = await self.get_access_token()
             
             # Prepare email message
-            subject = "Your Login OTP Code"
-            body_html = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                    <h2 style="color: #2563eb;">Login Verification Code</h2>
-                    <p>Hello{f' {html.escape(str(username))}' if username else ''},</p>
-                    <p>You have requested a login verification code. Please use the following code to complete your login:</p>
-                    <div style="background-color: #f3f4f6; border: 2px solid #2563eb; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0;">
-                        <h1 style="color: #2563eb; font-size: 32px; margin: 0; letter-spacing: 5px;">{otp}</h1>
-                    </div>
-                    <p>This code will expire in 5 minutes.</p>
-                    <p>If you did not request this code, please ignore this email.</p>
-                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
-                    <p style="color: #6b7280; font-size: 12px;">This is an automated message from Alpha CV System. Please do not reply to this email.</p>
-                </div>
-            </body>
-            </html>
-            """
+            subject = f"Your {BRAND} sign-in code"
+            # the lifetime shown is the real one (OTP_TTL_SECONDS), not a number written into the text
+            body_html = otp_email_html(otp, username, minutes=max(1, round(settings.OTP_TTL_SECONDS / 60)))
 
             # Microsoft Graph API: do NOT set "from" when using application permission
             # (sender is the user in the URL). Some tenants drop delivery if "from" is set.

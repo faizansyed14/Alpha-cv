@@ -32,6 +32,12 @@ RULES: Dict[str, List[Tuple["re.Pattern[str]", int]]] = {
         (re.compile(r"\b(?:who\s+applied|applicants?|applications?)\b", _I), 3),
         (re.compile(r"\b(?:candidates?|cvs?|resumes?|profiles?)\b", _I), 1),
     ],
+    "tracker": [
+        (re.compile(r"\b(?:requirements?|closures?|selections?|tracker)\b", _I), 3),
+        (re.compile(r"\b(?:joined|joining|backed\s+out|back\s*outs?|backouts?|offer\s+(?:pending|released)|offers?\s+(?:out|made|sent))\b", _I), 3),
+        (re.compile(r"\b(?:analytics|performance|(?:how\s+(?:many|did\s+we)|what)\b.{0,25}\b(?:closed|closures|received))\b", _I), 3),
+        (re.compile(r"\b(?:recruitment\s+manager|sales\s+manager|account\s+manager|submission\s+deadline|cvs?\s+submitted)\b", _I), 1),
+    ],
     "interview": [
         (re.compile(r"\binterview\w*\b", _I), 3),
         (re.compile(r"\b(?:screening|technical|behaviou?ral)\s+questions?\b", _I), 3),
@@ -52,7 +58,7 @@ RULES: Dict[str, List[Tuple["re.Pattern[str]", int]]] = {
 
 _WANTS_LIST = re.compile(
     r"\b(?:list|show|see|view|display|browse|find|search|look\s+for|what|which|all|any)\b.{0,30}\b(?:jobs?|postings?|jds?|job\s+descriptions?|openings?|vacanc\w+|"
-    r"candidates?|cvs?|resumes?|people|developers?|engineers?|profiles?|applicants?)\b", _I)
+    r"candidates?|cvs?|resumes?|people|developers?|engineers?|profiles?|applicants?|requirements?|closures?|selections?)\b", _I)
 
 
 def wants_list(message: str) -> bool:

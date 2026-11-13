@@ -1,8 +1,8 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 
-export function Bone({ className }: { className?: string }) {
-  return <div aria-hidden className={cn('skeleton', className)} />;
+export function Bone({ className, style }: { className?: string; style?: React.CSSProperties }) {
+  return <div aria-hidden className={cn('skeleton', className)} style={style} />;
 }
 
 export function SkeletonRegion({
@@ -85,7 +85,7 @@ export function SkeletonTable({
         style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
       >
         {columns.map((col) => (
-          <span key={col} className="truncate text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+          <span key={col} className="truncate text-2xs font-semibold uppercase tracking-wide text-ink-muted">
             {col || ''}
           </span>
         ))}
@@ -109,7 +109,7 @@ export function SkeletonTable({
 
 export function SkeletonCandidateCard() {
   return (
-    <div className="flex gap-3 rounded-xl border border-surface-border bg-white p-4 shadow-card">
+    <div className="flex gap-3 rounded-xl border border-surface-border bg-paper p-4 shadow-card">
       <div className="flex shrink-0 flex-col items-center gap-2 pt-0.5">
         <Bone className="h-4 w-4 rounded" />
         <Bone className="h-6 w-6 rounded-full" />
@@ -138,7 +138,7 @@ export function SkeletonCandidateCard() {
 export function SkeletonFilterRail() {
   return (
     <aside className="w-full shrink-0 sm:w-60">
-      <div className="rounded-xl border border-surface-border bg-white">
+      <div className="rounded-xl border border-surface-border bg-paper">
         <div className="border-b border-surface-border px-4 py-3">
           <Bone className="h-4 w-16" />
         </div>
@@ -155,5 +155,40 @@ export function SkeletonFilterRail() {
         ))}
       </div>
     </aside>
+  );
+}
+
+/** A job description card that is still loading: the same card, avatar, title, counts and keyword chips as the real one. */
+export function SkeletonJobCard() {
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-surface-border bg-paper shadow-card">
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-br from-navy-50 via-sky-50/60 to-paper" />
+      <div className="relative flex gap-3.5 p-5">
+        <div className="flex shrink-0 flex-col items-center gap-2 pt-1">
+          <Bone className="h-4 w-4 rounded-full" />
+          <Bone className="h-3 w-3" />
+        </div>
+        <Bone className="mt-0.5 h-12 w-12 shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1">
+          <Bone className="h-5 w-2/5" />
+          <Bone className="mt-2 h-4 w-3/5" />
+          <div className="mt-3 flex gap-4"><Bone className="h-4 w-20" /><Bone className="h-4 w-28" /></div>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {[16, 20, 14, 18, 12, 16].map((w, i) => <Bone key={i} className="h-5 rounded-full" style={{ width: `${w * 4}px` }} />)}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col gap-2">
+          <Bone className="h-7 w-7 rounded-lg" /><Bone className="h-7 w-7 rounded-lg" /><Bone className="h-7 w-7 rounded-lg" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function SkeletonJobCards({ count = 4 }: { count?: number }) {
+  return (
+    <div role="status" aria-busy="true" aria-label="Loading job descriptions" className="space-y-2.5">
+      {Array.from({ length: count }).map((_, i) => <SkeletonJobCard key={i} />)}
+    </div>
   );
 }

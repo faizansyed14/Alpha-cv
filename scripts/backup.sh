@@ -67,7 +67,7 @@ if ! skipped postgres; then
   pg_list "$DIR/postgres.dump" >/dev/null || die "the database dump cannot be read back"
   REV="$(pg_query "SELECT version_num FROM alembic_version" | head -1 || true)"
   echo "schema_revision=${REV:-unknown}" >> "$MANIFEST"
-  for t in '"user"' candidate job_description job_posting job_application candidate_note saved_candidate bug_report; do
+  for t in '"user"' candidate job_description job_posting job_application candidate_note requirement bug_report; do
     n="$(pg_query "SELECT count(*) FROM $t" | head -1 || true)"
     [ -n "$n" ] && echo "rows.${t//\"/}=$n" >> "$MANIFEST"
   done

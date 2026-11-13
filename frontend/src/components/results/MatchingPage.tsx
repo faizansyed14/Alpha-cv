@@ -115,7 +115,7 @@ function ScoreRing({ score, size = 48 }: { score: number; size?: number }) {
           className="transition-[stroke-dashoffset] duration-500"
         />
       </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-[13px] font-bold tabular-nums text-slate-900">{pct}</span>
+      <span className="absolute inset-0 flex items-center justify-center text-sm font-bold tabular-nums text-slate-900">{pct}</span>
     </div>
   );
 }
@@ -367,7 +367,7 @@ export default function MatchingPage() {
         <div className="flex items-center gap-3">
           <img src="/icons/match/ai-robot.gif" alt="" aria-hidden className="h-10 w-10 shrink-0 object-contain" />
           <div>
-            <h3 className="text-[15px] font-semibold tracking-[-0.015em] text-slate-900">Quick match</h3>
+            <h3 className="text-md font-semibold tracking-[-0.015em] text-slate-900">Quick match</h3>
             <p className="text-xs text-slate-500">Score the latest CVs in a category against a job description.</p>
           </div>
         </div>
@@ -856,7 +856,7 @@ export default function MatchingPage() {
     <div className="min-h-full space-y-4">
       {matchLauncher}
 
-      <div className="rounded-2xl border border-surface-border bg-white shadow-card">
+      <div className="rounded-2xl border border-surface-border bg-paper shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
           <div className="min-w-0">
             <p className="text-xs font-semibold text-navy-600">Match results</p>
@@ -869,14 +869,14 @@ export default function MatchingPage() {
               </p>
             )}
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex w-full items-center justify-between gap-4 sm:w-auto sm:justify-end sm:gap-6">
             {[
               { label: 'Ranked', value: totalMatches.toLocaleString() },
               { label: 'Best', value: `${visibleTop}%` },
               { label: 'Average', value: `${visibleAverage}%` },
             ].map((k) => (
-              <div key={k.label} className="text-right">
-                <p className="text-xl font-bold leading-none tracking-[-0.02em] tabular-nums text-slate-900">{k.value}</p>
+              <div key={k.label} className="text-left sm:text-right">
+                <p className="text-lg font-bold leading-none tracking-[-0.02em] tabular-nums text-slate-900 sm:text-xl">{k.value}</p>
                 <p className="mt-1 text-xs text-slate-500">{k.label}</p>
               </div>
             ))}
@@ -924,7 +924,7 @@ export default function MatchingPage() {
               return (
                 <div
                   key={candidate.cv_id}
-                  className={`relative overflow-hidden rounded-2xl border bg-white transition-shadow ${isOpen ? 'border-navy-400 shadow-[0_0_0_3px_rgba(22,32,75,0.10)]' : 'border-surface-border shadow-card hover:shadow-[0_4px_12px_-4px_rgba(16,24,40,0.10)]'}`}
+                  className={`relative overflow-hidden rounded-2xl border bg-paper transition-shadow ${isOpen ? 'border-navy-400 shadow-[0_0_0_3px_rgba(22,32,75,0.10)]' : 'border-surface-border shadow-card hover:shadow-[0_4px_12px_-4px_rgba(16,24,40,0.10)]'}`}
                 >
                     {/* OUTER WRAPPER FIXED: now a <div> with role="button" */}
                     <div
@@ -938,7 +938,7 @@ export default function MatchingPage() {
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex min-w-0 items-center gap-3">
                           <span
-                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold tabular-nums ${
+                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold tabular-nums ${
                               index === 0 ? 'bg-amber-100 text-amber-700' : index < 3 ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'
                             }`}
                           >
@@ -947,20 +947,20 @@ export default function MatchingPage() {
                           <Avatar name={displayName} />
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                              <h4 className="truncate text-[14px] font-semibold tracking-[-0.01em] text-slate-900">{displayName}</h4>
+                              <h4 className="truncate text-base font-semibold tracking-[-0.01em] text-slate-900">{displayName}</h4>
                               {lastJobMatch && lastJobMatch.jdId === matchResult?.jd_id && (
                                 lastJobMatch.applicantIds.includes(candidate.cv_id)
                                   ? <span className="chip chip-brand shrink-0">Applied</span>
                                   : <span className="chip chip-neutral shrink-0" title="Found in your database by the job's boolean search">Database</span>
                               )}
                               {(notesSummary[candidate.cv_id]?.notes_count || (candidateNotes[candidate.cv_id]?.length || 0)) > 0 && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-1.5 py-0.5 text-2xs font-medium text-slate-600">
                                   <MessageSquare className="h-3 w-3" />
                                   {notesSummary[candidate.cv_id]?.notes_count ?? (candidateNotes[candidate.cv_id]?.length || 0)}
                                 </span>
                               )}
                             </div>
-                            <p className="truncate text-[13px] text-slate-500">
+                            <p className="truncate text-sm text-slate-500">
                               {title} · {yearsText}
                               {expectedSalary != null && (
                                 <span className="font-medium text-emerald-700"> · AED {expectedSalary.toLocaleString()}</span>
@@ -969,7 +969,7 @@ export default function MatchingPage() {
                           </div>
                         </div>
                         <div className="flex shrink-0 items-center gap-3">
-                          <span className={`hidden rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset sm:inline ${badge.bg} ${badge.text}`}>
+                          <span className={`hidden rounded-full px-2.5 py-0.5 text-2xs font-semibold ring-1 ring-inset sm:inline ${badge.bg} ${badge.text}`}>
                             {candidate.has_llm_analysis && candidate.llm_analysis?.match_level
                               ? candidate.llm_analysis.match_level
                               : badge.label}
@@ -982,7 +982,7 @@ export default function MatchingPage() {
                       {isOpen && (
                       <>
                       {(candidate.requirements?.length ?? 0) > 0 && (
-                        <div className="mt-3 flex flex-wrap items-center gap-1.5 pl-[84px]" onClick={(e) => e.stopPropagation()}>
+                        <div className="mt-3 flex flex-wrap items-center gap-1.5 pl-0 sm:pl-[84px]" onClick={(e) => e.stopPropagation()}>
                           {candidate.requirements!.map((r: { type: string; name: string; mandatory: boolean; status: string }) => {
                             const tone =
                               r.status === 'met'
@@ -996,7 +996,7 @@ export default function MatchingPage() {
                               <span
                                 key={`${r.type}-${r.name}`}
                                 title={`${r.mandatory ? 'Mandatory' : 'Preferred'} ${r.type}: ${note}`}
-                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${tone}`}
+                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-2xs font-medium ring-1 ring-inset ${tone}`}
                               >
                                 {r.status === 'met' ? '✓ ' : r.status === 'missing' ? '✗ ' : '? '}
                                 {r.name}
@@ -1007,7 +1007,7 @@ export default function MatchingPage() {
                         </div>
                       )}
                       {(candidate.cv_email || candidate.cv_phone || candidate.cv_linkedin || candidate.cv_github) && (
-                        <div className="mt-3 pl-[84px]" onClick={(e) => e.stopPropagation()}>
+                        <div className="mt-3 pl-0 sm:pl-[84px]" onClick={(e) => e.stopPropagation()}>
                           <ContactActions
                             email={candidate.cv_email}
                             phone={candidate.cv_phone}
@@ -1030,7 +1030,7 @@ export default function MatchingPage() {
                             return (
                               <>
                                 <div className="col-span-2 md:col-span-4 -mt-1 mb-0.5">
-                                  <span className="inline-flex items-center rounded-full bg-navy-50 px-2 py-0.5 text-[11px] font-semibold text-navy-700">
+                                  <span className="inline-flex items-center rounded-full bg-navy-50 px-2 py-0.5 text-2xs font-semibold text-navy-700">
                                     Breakdown: AI analysis
                                   </span>
                                 </div>
@@ -1054,11 +1054,11 @@ export default function MatchingPage() {
                           return (
                             <>
                               <div className="col-span-2 md:col-span-4 -mt-1 mb-0.5">
-                                <span className="inline-flex items-center rounded-full bg-navy-50 px-2 py-0.5 text-[11px] font-semibold text-navy-700">
+                                <span className="inline-flex items-center rounded-full bg-navy-50 px-2 py-0.5 text-2xs font-semibold text-navy-700">
                                   Breakdown: {b.sourceLabel}
                                 </span>
                                 {candidate?.has_llm_analysis && typeof candidate?.semantic_score === 'number' && (
-                                  <span className="ml-2 text-[11px] text-slate-500">
+                                  <span className="ml-2 text-2xs text-slate-500">
                                     Overall: {Math.round((candidate?.computed_overall ?? candidate?.overall_score ?? 0) * 100)}% • Similarity: {Math.round((candidate.semantic_score ?? 0) * 100)}%
                                   </span>
                                 )}
@@ -1293,7 +1293,7 @@ export default function MatchingPage() {
                           <div className="mt-2 space-y-6">
                             {/* AI Analysis Section (Redesigned) */}
                             {candidate.has_llm_analysis && candidate.llm_analysis && (
-                              <div className="space-y-4 rounded-2xl border border-surface-border bg-white p-4 shadow-card sm:p-5">
+                              <div className="space-y-4 rounded-2xl border border-surface-border bg-paper p-4 shadow-card sm:p-5">
                                 <div className="flex items-start justify-between gap-4 pb-3 border-b border-slate-100">
                                   <div className="flex items-center gap-3">
                                     <img src="/icons/match/ai-robot.gif" alt="" aria-hidden className="h-9 w-9 shrink-0 object-contain" />
@@ -1388,7 +1388,7 @@ export default function MatchingPage() {
                                     ].filter(([, v]) => v).map(([label, v]) => (
                                       <div key={label as string}>
                                         <h5 className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1.5">{label}</h5>
-                                        <p className="text-[13px] leading-relaxed text-slate-700">{v}</p>
+                                        <p className="text-sm leading-relaxed text-slate-700">{v}</p>
                                       </div>
                                     ))}
                                   </div>
@@ -1406,7 +1406,7 @@ export default function MatchingPage() {
                                     <h5 className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-rose-700">
                                       <AlertTriangle className="h-4 w-4" /> Points to check
                                     </h5>
-                                    <ul className="list-disc space-y-1 pl-5 text-[13px] text-rose-900">
+                                    <ul className="list-disc space-y-1 pl-5 text-sm text-rose-900">
                                       {(candidate.llm_analysis.red_flags as string[]).map((t, i) => <li key={i}>{t}</li>)}
                                     </ul>
                                   </div>
@@ -1417,7 +1417,7 @@ export default function MatchingPage() {
 
                             {/* Position Details */}
                             <div className="rounded-2xl border border-surface-border bg-slate-50/60 p-4">
-                              <h4 className="mb-3 text-[13px] font-semibold text-slate-900">Position details</h4>
+                              <h4 className="mb-3 text-sm font-semibold text-slate-900">Position details</h4>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                   <h5 className="text-sm font-medium text-slate-700">Job Description</h5>
@@ -1460,7 +1460,7 @@ export default function MatchingPage() {
                                       {candidate.skills_assignments.map((a: any, idx: number) => {
                                         const s = Number(a.score ?? 0);
                                         return (
-                                          <div key={idx} className="rounded-xl border border-surface-border bg-white p-3">
+                                          <div key={idx} className="rounded-xl border border-surface-border bg-paper p-3">
                                             <div className="text-sm text-slate-900">
                                               JD Required: <span className="font-medium">{a.jd_item}</span>
                                             </div>
@@ -1513,7 +1513,7 @@ export default function MatchingPage() {
                                       {candidate.responsibilities_assignments.map((a: any, idx: number) => {
                                         const s = Number(a.score ?? 0);
                                         return (
-                                          <div key={idx} className="rounded-xl border border-surface-border bg-white p-3">
+                                          <div key={idx} className="rounded-xl border border-surface-border bg-paper p-3">
                                             <div className="text-sm text-slate-900">
                                               JD Required: <span className="font-medium">{a.jd_item}</span>
                                             </div>
@@ -1595,7 +1595,7 @@ export default function MatchingPage() {
             <button
               type="button"
               onClick={() => setResultsLimit('all')}
-              className="w-full rounded-xl border border-dashed border-surface-strong py-2.5 text-[13px] font-semibold text-navy-600 transition-colors hover:border-navy-300 hover:bg-navy-50/50"
+              className="w-full rounded-xl border border-dashed border-surface-strong py-2.5 text-sm font-semibold text-navy-600 transition-colors hover:border-navy-300 hover:bg-navy-50/50"
             >
               Show all {totalFiltered} candidates
             </button>
@@ -1603,8 +1603,8 @@ export default function MatchingPage() {
 
           {sortedCandidates.length === 0 && (
             <div className="py-12 text-center">
-              <h3 className="text-[14px] font-semibold text-slate-800">No matches found</h3>
-              <p className="mt-1 text-[13px] text-slate-500">Adjust filters to see more candidates.</p>
+              <h3 className="text-base font-semibold text-slate-800">No matches found</h3>
+              <p className="mt-1 text-sm text-slate-500">Adjust filters to see more candidates.</p>
             </div>
           )}
 

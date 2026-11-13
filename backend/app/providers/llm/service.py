@@ -864,37 +864,37 @@ class LLMService:
         This is separate from the matching pipeline and focuses on clear, professional presentation.
         """
         try:
-            # New prompt specifically for UI display
+            # Careers-page extraction: keep role facts, strip client identity from what candidates see.
             ui_extraction_prompt = f"""
-You are a job description parser. Your ONLY job is to extract the EXACT information from the provided job description text below.
+Prepare this job description for publication on our careers page. Remove all customer names, abbreviations, contact details, and customer-specific information that could reveal their identity, including project, department, and site names. Where needed, replace customer references with "our client."
 
-DO NOT CREATE, INVENT, OR GENERATE ANY CONTENT. ONLY EXTRACT what is actually written in the text.
+For location, include only the city if explicitly provided. Remove specific offices, buildings, facilities, areas, addresses, and other location details. Do not infer or invent a city.
 
-If the text says "AI Consultant", return "AI Consultant". If it says "Senior Software Engineer", return "Senior Software Engineer". Extract exactly what is written.
+Preserve the role's responsibilities, qualifications, skills, and employment terms. Check the entire text, including headings, links, and footers, for identifying details. Return only the cleaned job description fields below — do not invent duties or requirements that are not in the source.
 
 Job Description Text:
 {content}
 
-Extract these 5 fields from the text above:
+Extract these 5 fields from the cleaned text:
 
-1. job_title: Find the exact job title mentioned in the text (e.g., "AI Consultant", "Senior AI Consultant", "Data Scientist")
-2. job_location: Find location information if mentioned, otherwise use "Location not specified"
-3. job_summary: Write 2-3 sentences summarizing what this role does based on the text
-4. key_responsibilities: List 3-5 main responsibilities mentioned in the text as bullet points
-5. qualifications: List 3-5 required skills/qualifications mentioned in the text as bullet points
+1. job_title: The exact job title from the text (with any customer name removed if it was embedded in the title)
+2. job_location: Only the city if explicitly provided; otherwise "Location not specified". Never invent a city.
+3. job_summary: 2-3 sentences summarizing what this role does, with customer identity removed (use "our client" where a customer was named)
+4. key_responsibilities: 3-5 main responsibilities as bullet points, cleaned of customer-specific names
+5. qualifications: 3-5 required skills/qualifications as bullet points, cleaned of customer-specific names
 
 Return ONLY this JSON format:
 {{
-    "job_title": "exact title from text",
-    "job_location": "location from text or 'Location not specified'",
-    "job_summary": "summary based on text content",
-    "key_responsibilities": "• responsibility from text\\n• another responsibility from text",
-    "qualifications": "• qualification from text\\n• another qualification from text"
+    "job_title": "title from text",
+    "job_location": "city only or 'Location not specified'",
+    "job_summary": "cleaned summary",
+    "key_responsibilities": "• cleaned responsibility\\n• another cleaned responsibility",
+    "qualifications": "• cleaned qualification\\n• another cleaned qualification"
 }}
 """
 
             messages = [
-                {"role": "system", "content": "You are a text extraction tool. Extract only what is written in the provided text. Do not generate or create any content."},
+                {"role": "system", "content": "You prepare job descriptions for a public careers page. Strip customer identity and keep only the role facts. Do not invent content."},
                 {"role": "user", "content": ui_extraction_prompt}
             ]
             

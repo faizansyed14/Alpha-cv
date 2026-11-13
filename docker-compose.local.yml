@@ -166,6 +166,8 @@ services:
     networks:
       - local-network
     deploy:
+      # Default 2: serves 2 concurrent large matches while leaving a core for the API, Qdrant and Redis.
+      # Set MATCH_WORKER_REPLICAS=3 for three simultaneous heavy matches, or higher once the host has spare cores.
       replicas: ${MATCH_WORKER_REPLICAS:-2}
       resources:
         limits:

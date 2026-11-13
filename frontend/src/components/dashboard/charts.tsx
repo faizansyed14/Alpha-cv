@@ -144,13 +144,13 @@ export function TrendChart({
       )}
       {hover !== null && width > 0 && (
         <div
-          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-lg border border-surface-border bg-white px-3 py-2 shadow-md"
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-lg border border-surface-border bg-paper px-3 py-2 shadow-md"
           style={{ left: Math.min(width - 70, Math.max(70, x(hover))), top: Math.max(8, y(values[hover]) - 10) }}
         >
-          <p className="text-[15px] font-semibold leading-none tabular-nums text-slate-900">
-            {values[hover]} <span className="text-[11px] font-medium text-slate-500">{unit}{values[hover] === 1 ? '' : 's'}</span>
+          <p className="text-md font-semibold leading-none tabular-nums text-slate-900">
+            {values[hover]} <span className="text-2xs font-medium text-slate-500">{unit}{values[hover] === 1 ? '' : 's'}</span>
           </p>
-          <p className="mt-1 text-[11px] text-slate-500">{longDay(days[hover])}</p>
+          <p className="mt-1 text-2xs text-slate-500">{longDay(days[hover])}</p>
         </div>
       )}
       <table className="sr-only">
@@ -162,7 +162,7 @@ export function TrendChart({
         </tbody>
       </table>
       {total === 0 && width > 0 && (
-        <p className="pointer-events-none absolute inset-x-0 top-[42%] text-center text-[12.5px] text-slate-400">No {unit}s in this period yet</p>
+        <p className="pointer-events-none absolute inset-x-0 top-[42%] text-center text-xs text-slate-400">No {unit}s in this period yet</p>
       )}
     </motion.div>
   );
@@ -212,13 +212,13 @@ export function MonthBars({ months, unit = 'job' }: { months: { key: string; lab
               aria-label={`${m.label}: ${m.count} ${unit}${m.count === 1 ? '' : 's'} posted`}
             >
               {hover === m.key && revealed && (
-                <div className="pointer-events-none absolute -top-1 z-10 -translate-y-full whitespace-nowrap rounded-lg border border-surface-border bg-white px-2.5 py-1.5 shadow-md" style={{ bottom: h + 26 }}>
-                  <span className="text-[13px] font-semibold tabular-nums text-slate-900">{m.count}</span>
-                  <span className="ml-1 text-[11px] text-slate-500">{unit}{m.count === 1 ? '' : 's'} in {m.label}</span>
+                <div className="pointer-events-none absolute -top-1 z-10 -translate-y-full whitespace-nowrap rounded-lg border border-surface-border bg-paper px-2.5 py-1.5 shadow-md" style={{ bottom: h + 26 }}>
+                  <span className="text-sm font-semibold tabular-nums text-slate-900">{m.count}</span>
+                  <span className="ml-1 text-2xs text-slate-500">{unit}{m.count === 1 ? '' : 's'} in {m.label}</span>
                 </div>
               )}
               <motion.span
-                className="mb-1 text-[11px] font-semibold tabular-nums text-slate-600"
+                className="mb-1 text-2xs font-semibold tabular-nums text-slate-600"
                 initial={{ opacity: 0 }}
                 animate={revealed ? { opacity: 1 } : { opacity: 0 }}
                 transition={{ duration: 0.25, delay: 0.12 + i * 0.06, ease }}
@@ -228,13 +228,13 @@ export function MonthBars({ months, unit = 'job' }: { months: { key: string; lab
               <motion.div
                 className={cn(
                   'w-full max-w-[24px] origin-bottom rounded-t-[4px]',
-                  m.count === 0 ? 'bg-slate-100' : hover === m.key ? 'bg-navy-600' : current ? 'bg-navy-700' : 'bg-navy-400',
+                  m.count === 0 ? 'bg-slate-100' : hover === m.key ? 'bg-solid-soft' : current ? 'bg-solid-soft' : 'bg-navy-400',
                 )}
                 initial={{ height: 0 }}
                 animate={revealed ? { height: h } : { height: 0 }}
                 transition={{ duration: 0.55, delay: i * 0.07, ease }}
               />
-              <span className={cn('mt-1.5 text-[11px]', current ? 'font-semibold text-slate-800' : 'text-slate-400')}>{m.label}</span>
+              <span className={cn('mt-1.5 text-2xs', current ? 'font-semibold text-slate-800' : 'text-slate-400')}>{m.label}</span>
             </div>
           );
         })}
@@ -253,7 +253,7 @@ export function SplitBar({ parts }: { parts: { label: string; value: number; cla
           <span key={p.label} className={cn('h-full first:rounded-l-full last:rounded-r-full', p.className)} style={{ width: `${(p.value / total) * 100}%` }} />
         ))}
       </div>
-      <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px] text-slate-600">
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-slate-600">
         {parts.map((p) => (
           <span key={p.label} className="inline-flex items-center gap-1.5">
             <span className={cn('h-2 w-2 rounded-full', p.className)} />

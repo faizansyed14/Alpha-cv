@@ -84,7 +84,7 @@ export default function MatchingFullPageAnimation({
   const ringOffset = ringC * (1 - Math.max(pureQueueWait ? 0.08 : pct / 100, 0.02));
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-surface-border bg-white shadow-card">
+    <div className="relative overflow-hidden rounded-2xl border border-surface-border bg-paper shadow-card">
       <div aria-hidden className="pointer-events-none absolute -left-24 -top-28 h-72 w-72 rounded-full bg-slate-100/80 blur-3xl" />
       <div aria-hidden className="pointer-events-none absolute -bottom-32 -right-20 h-80 w-80 rounded-full bg-slate-50 blur-3xl" />
 
@@ -118,18 +118,18 @@ export default function MatchingFullPageAnimation({
           </div>
         </div>
 
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-navy-600">
+        <p className="text-2xs font-semibold uppercase tracking-[0.14em] text-navy-600">
           {pureQueueWait ? 'In queue' : stage.label}
         </p>
         <p className="mt-2 text-5xl font-semibold tabular-nums tracking-[-0.04em] text-slate-900 sm:text-6xl">
           {pureQueueWait ? (queuePosition != null ? `#${queuePosition}` : '…') : `${displayPct}%`}
         </p>
-        <p className="mt-2 max-w-md text-[14px] text-slate-500">{detail}</p>
+        <p className="mt-2 max-w-md text-base text-slate-500">{detail}</p>
         {remaining && !pureQueueWait && (
-          <p className="mt-1 text-[12px] font-medium text-navy-700">{remaining}</p>
+          <p className="mt-1 text-xs font-medium text-navy-700">{remaining}</p>
         )}
 
-        <div className="mt-6 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-white/80 ring-1 ring-navy-100">
+        <div className="mt-6 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-paper/80 ring-1 ring-navy-100">
           <motion.div
             className="h-full rounded-full bg-gradient-to-r from-navy-800 to-navy-500"
             initial={false}
@@ -149,10 +149,10 @@ export default function MatchingFullPageAnimation({
                 className={cn(
                   'flex flex-col items-center gap-1.5 rounded-xl border px-1.5 py-2.5 transition-colors',
                   active
-                    ? 'border-navy-200 bg-white shadow-sm'
+                    ? 'border-navy-200 bg-paper shadow-sm'
                     : done
                       ? 'border-navy-100/80 bg-navy-50/50'
-                      : 'border-transparent bg-white/40',
+                      : 'border-transparent bg-paper/40',
                 )}
               >
                 <img
@@ -163,7 +163,7 @@ export default function MatchingFullPageAnimation({
                 />
                 <span
                   className={cn(
-                    'text-[11px] font-semibold',
+                    'text-2xs font-semibold',
                     active ? 'text-navy-900' : done ? 'text-navy-600' : 'text-slate-400',
                   )}
                 >
@@ -174,7 +174,7 @@ export default function MatchingFullPageAnimation({
           })}
         </div>
 
-        <p className="mt-3 text-[12px] text-slate-400">{pureQueueWait ? 'Your job will start when a worker is free' : stage.hint}</p>
+        <p className="mt-3 text-xs text-slate-400">{pureQueueWait ? 'Your job will start when a worker is free' : stage.hint}</p>
 
         {/* Live candidate + recent chips */}
         <div className="mt-6 min-h-[52px] w-full max-w-md">
@@ -185,7 +185,7 @@ export default function MatchingFullPageAnimation({
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className="rounded-xl border border-navy-100 bg-white/80 px-4 py-3 text-[13px] text-slate-600"
+                className="rounded-xl border border-navy-100 bg-paper/80 px-4 py-3 text-sm text-slate-600"
               >
                 {queueMessage}
               </motion.p>
@@ -195,10 +195,10 @@ export default function MatchingFullPageAnimation({
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className="rounded-xl border border-navy-100 bg-white/90 px-4 py-3 shadow-sm"
+                className="rounded-xl border border-navy-100 bg-paper/90 px-4 py-3 shadow-sm"
               >
-                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-navy-500">Scoring now</p>
-                <p className="mt-0.5 truncate text-[14px] font-semibold text-slate-900">{currentCandidate}</p>
+                <p className="text-2xs font-semibold uppercase tracking-[0.1em] text-navy-500">Scoring now</p>
+                <p className="mt-0.5 truncate text-base font-semibold text-slate-900">{currentCandidate}</p>
               </motion.div>
             ) : (
               <motion.p
@@ -206,7 +206,7 @@ export default function MatchingFullPageAnimation({
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="text-[13px] text-slate-500"
+                className="text-sm text-slate-500"
               >
                 {phase === 'llm_verification'
                   ? 'AI is double-checking the top matches'
@@ -222,7 +222,7 @@ export default function MatchingFullPageAnimation({
               {recentCandidates.slice(0, 4).map((c) => (
                 <span
                   key={c.cv_id}
-                  className="max-w-[9rem] truncate rounded-full border border-navy-100 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600"
+                  className="max-w-[9rem] truncate rounded-full border border-navy-100 bg-paper px-2.5 py-1 text-2xs font-medium text-slate-600"
                   title={c.cv_name}
                 >
                   {c.cv_name}
@@ -232,7 +232,7 @@ export default function MatchingFullPageAnimation({
           )}
         </div>
 
-        <p className="mt-8 text-[12px] text-slate-400">You can leave this page. Matching keeps running.</p>
+        <p className="mt-8 text-xs text-slate-400">You can leave this page. Matching keeps running.</p>
       </div>
     </div>
   );

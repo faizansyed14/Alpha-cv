@@ -37,7 +37,7 @@ export default function ErrorBanner({ error, operation }: ErrorBannerProps) {
       role="alert"
       className="flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3"
     >
-      <div className="flex items-start gap-2 text-[13px] text-red-700">
+      <div className="flex items-start gap-2 text-sm text-red-700">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
         <div>
           <strong className="font-semibold">{getOperationLabel(operation)} Error:</strong> {error}

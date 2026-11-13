@@ -9,8 +9,10 @@ Grammar (operators are upper case so a lower-case "and" inside a phrase stays a 
     not     := NOT not | atom
     atom    := "( expr )" | "quoted phrase" | word
 
-Matching is exact, against the normalised literal text of the CV: a word matches as a
-whole word and a quoted phrase as that exact phrase, ignoring case, so "Java" never matches a JavaScript-only CV.
+Matching is against the whole text of the CV (not the skills the AI picked out of it): a word matches as a whole word and a
+quoted phrase as that exact phrase, ignoring case, so "Java" never matches a JavaScript-only CV. On PostgreSQL (the database the
+app runs on) a word also matches its other English forms, so "manage" finds managed, managing and management, and "engineer" finds
+engineers and engineering; ``evaluate`` and the SQLite form (tests) are the exact-word rule.
 ``to_sql`` turns the expression into the same test as an SQL condition on the ``literal`` search text, so the database
 decides exactly; ``evaluate`` is the in-memory form of the same rule.
 """
@@ -184,13 +186,16 @@ def positive_terms(node: Node, negated: bool = False) -> List[Node]:
 def to_sql(node: Node, column, fts: bool = False):
     """The expression as an SQLAlchemy condition on a column holding the normalised text: the same rule as ``evaluate``
     (a term is a whole word or exact phrase), so no second check is needed. ``column`` is e.g. CandidateSearch.literal.
-    With ``fts`` the column is a PostgreSQL tsvector (CandidateSearch.literal_tsv) and a term is a full-text phrase match."""
+    With ``fts`` the column is a PostgreSQL tsvector (CandidateSearch.literal_tsv) and a term is a full-text phrase match in the
+    CV configuration (word forms count as the same word)."""
     from sqlalchemy import and_, func, literal, literal_column, not_, or_
+
+    from app.ingestion.search_index import FTS_CONFIG
 
     padded = literal(" ") + column + literal(" ")
     if node.kind == "term":
         if fts:
-            return column.op("@@")(func.phraseto_tsquery(literal_column("'simple'::regconfig"), node.term))
+            return column.op("@@")(func.phraseto_tsquery(literal_column(f"'{FTS_CONFIG}'::regconfig"), node.term))
         return padded.like(f"% {node.term} %")
     if node.kind == "and":
         return and_(*[to_sql(c, column, fts) for c in node.children])

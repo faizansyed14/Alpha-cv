@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowRight, Briefcase, Check, ChevronUp, Target, Users, X } from '@/components/icons';
@@ -13,19 +13,17 @@ import { cn } from '@/lib/utils';
 import { MATCH_MAX_CVS } from '@/lib/matchRun';
 
 /**
- * The match tray: a docked bar that follows the user across the workspace while they build a match. It shows the
- * selected candidates and job description, jumps to whichever half is missing, and starts the match from anywhere.
- * The close button hides it for the current selection (nothing is deselected); choosing another CV / JD brings it back.
+ * Match tray: docked only on Candidates / Job descriptions while a selection exists.
+ * Close hides it until the selection is fully cleared (then selecting again can show it).
  */
 export default function MatchTray() {
   const pathname = usePathname() || '';
   const { go } = useWorkspaceNav();
   const [listOpen, setListOpen] = useState(false);
-  const [dismissedFor, setDismissedFor] = useState<string | null>(null);
-  const { cvs, knownCVs, jds, selectedCVs, selectedJD, deselectCV, deselectAllCVs, selectJD, runMatch, matching, progressVisible } = useAppStore(
+  const [closed, setClosed] = useState(false);
+  const { cvs, jds, selectedCVs, selectedJD, deselectCV, deselectAllCVs, selectJD, runMatch, matching, progressVisible } = useAppStore(
     useShallow((s) => ({
       cvs: s.cvs,
-      knownCVs: s.knownCVs,
       jds: s.jds,
       selectedCVs: s.selectedCVs,
       selectedJD: s.selectedJD,
@@ -38,9 +36,15 @@ export default function MatchTray() {
     })),
   );
 
-  const onMatchPage = pathname.replace(/\/$/, '') === '/match';
   const onCandidates = pathname.startsWith('/candidates');
   const onJobs = pathname.startsWith('/jobs');
+  const onSelectPages = onCandidates || onJobs;
+  const hasSelection = selectedCVs.length > 0 || !!selectedJD;
+
+  // Re-arm only after a full clear — navigating away / back keeps Close permanent.
+  useEffect(() => {
+    if (!hasSelection && closed) setClosed(false);
+  }, [hasSelection, closed]);
 
   const jd = useMemo(() => (selectedJD ? jds.find((j) => j.id === selectedJD) : null), [jds, selectedJD]);
   const jdTitle = jd ? (jd.job_title && jd.job_title !== 'Not specified' ? jd.job_title : jd.filename) || 'Job description' : selectedJD ? 'Job description' : null;
@@ -50,15 +54,13 @@ export default function MatchTray() {
     () =>
       selectedCVs.map((id) => {
         const cv = cvIndex.get(id);
-        const known = knownCVs[id];
-        return { id, name: cv?.full_name || cv?.filename || known?.name || 'Candidate', title: cv?.job_title || known?.title || '' };
+        return { id, name: cv?.full_name || cv?.filename || 'Candidate', title: cv?.job_title || '' };
       }),
-    [selectedCVs, cvIndex, knownCVs],
+    [selectedCVs, cvIndex],
   );
 
-  const selectionKey = `${selectedCVs.length}|${selectedJD ?? ''}`;
   const visible =
-    !onMatchPage && !matching && !progressVisible && (selectedCVs.length > 0 || !!selectedJD) && dismissedFor !== selectionKey;
+    onSelectPages && !matching && !progressVisible && hasSelection && !closed;
   const tooMany = selectedCVs.length > MATCH_MAX_CVS;
   const ready = selectedCVs.length > 0 && !!selectedJD && !tooMany;
 
@@ -73,7 +75,7 @@ export default function MatchTray() {
 
   const close = () => {
     setListOpen(false);
-    setDismissedFor(selectionKey);
+    setClosed(true);
   };
 
   const step = (n: number, done: boolean) => (
@@ -96,13 +98,13 @@ export default function MatchTray() {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 24, opacity: 0 }}
           transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-          className="pointer-events-none fixed inset-x-0 bottom-4 z-[60] flex justify-center px-3"
+          className="pointer-events-none fixed inset-x-0 bottom-4 z-[60] flex justify-center px-3 pb-[max(0px,env(safe-area-inset-bottom))]"
         >
           <div className="pointer-events-auto relative w-full max-w-[880px]">
             {listOpen && selectedList.length > 0 && (
               <div className="absolute bottom-full left-0 mb-2 w-full max-w-sm overflow-hidden rounded-2xl border border-surface-border bg-paper shadow-[0_24px_48px_-12px_rgba(16,24,40,0.22)]">
                 <div className="flex items-center justify-between border-b border-surface-border px-4 py-2.5">
-                  <span className="text-[13px] font-semibold text-slate-900">Selected candidates ({selectedList.length.toLocaleString()})</span>
+                  <span className="text-sm font-semibold text-slate-900">Selected candidates ({selectedList.length.toLocaleString()})</span>
                   <button
                     type="button"
                     onClick={() => { deselectAllCVs(); setListOpen(false); }}
@@ -116,7 +118,7 @@ export default function MatchTray() {
                     <li key={c.id} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 hover:bg-slate-50">
                       <Avatar name={c.name} size="sm" />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-[13px] font-medium text-slate-900">{c.name}</p>
+                        <p className="truncate text-sm font-medium text-slate-900">{c.name}</p>
                         {c.title ? <p className="truncate text-xs text-slate-500">{c.title}</p> : null}
                       </div>
                       <button
@@ -144,12 +146,12 @@ export default function MatchTray() {
                   onClick={() => (selectedCVs.length > 0 ? setListOpen((v) => !v) : go('candidates'))}
                   className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-navy-50/70"
                 >
-                  <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', selectedCVs.length ? 'bg-navy-600 text-white' : 'bg-slate-100 text-slate-500')}>
+                  <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', selectedCVs.length ? 'bg-solid-soft text-white' : 'bg-slate-100 text-slate-500')}>
                     <Users className="h-[18px] w-[18px]" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">{step(1, selectedCVs.length > 0)} Candidates</span>
-                    <span className="block truncate text-[13px] font-semibold text-slate-900">
+                    <span className="flex items-center gap-1.5 text-2xs font-semibold text-slate-500">{step(1, selectedCVs.length > 0)} Candidates</span>
+                    <span className="block truncate text-sm font-semibold text-slate-900">
                       {selectedCVs.length ? `${selectedCVs.length.toLocaleString()} selected` : 'None selected'}
                     </span>
                   </span>
@@ -166,12 +168,12 @@ export default function MatchTray() {
                     className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-navy-50/70"
                     title={jdTitle ? 'Change job description' : 'Choose a job description'}
                   >
-                    <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', jdTitle ? 'bg-navy-600 text-white' : 'bg-slate-100 text-slate-500')}>
+                    <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', jdTitle ? 'bg-solid-soft text-white' : 'bg-slate-100 text-slate-500')}>
                       <Briefcase className="h-[18px] w-[18px]" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">{step(2, !!jdTitle)} Job description</span>
-                      <span className="block truncate text-[13px] font-semibold text-slate-900">{jdTitle || 'Not chosen'}</span>
+                      <span className="flex items-center gap-1.5 text-2xs font-semibold text-slate-500">{step(2, !!jdTitle)} Job description</span>
+                      <span className="block truncate text-sm font-semibold text-slate-900">{jdTitle || 'Not chosen'}</span>
                     </span>
                   </button>
                   {selectedJD && (
@@ -212,7 +214,7 @@ export default function MatchTray() {
                   onClick={close}
                   className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
                   aria-label="Close"
-                  title="Close (your selection is kept)"
+                  title="Hide tray (selection kept; stays hidden until you clear all)"
                 >
                   <X className="h-4 w-4" />
                 </button>

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
 
 from app.security.password_policy import password_problem
-from app.security.rbac_rules import ROLE_PATTERN
+from app.security.rbac_rules import LOCATIONS, LOCATION_ROLES, ROLE_PATTERN
 from typing import Optional
 
 
@@ -88,6 +88,7 @@ class UserRead(BaseModel):
     is_active: bool
     email: Optional[str] = None
     otp_mode: str = "real"
+    location: Optional[str] = None
 
 class MeRead(BaseModel):
     """What /api/auth/me tells the page about whoever is signed in. No email: nothing in the app needs it, and it should not travel
@@ -96,6 +97,7 @@ class MeRead(BaseModel):
     username: str
     role: str
     is_active: bool
+    location: Optional[str] = None
 
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=2, max_length=64)
@@ -105,14 +107,29 @@ class UserCreate(BaseModel):
     # Roles (see app/security/rbac_rules.py): user = recruiter, manager = recruitment manager, evp, account_manager = sales manager.
     # All of them have the same access; only the admin (never created here) can manage users, agents, monitoring and bug reports.
     role: str = Field(default="user", pattern=ROLE_PATTERN)
+    # Dubai or Abu Dhabi. Required for recruiters, recruitment managers and sales managers; the EVP sees every location (nothing is stored).
+    # It is chosen here, when the login is created.
+    location: Optional[str] = None
 
     _norm_email = field_validator("email", mode="before")(_blank_to_none)
+    _norm_location = field_validator("location", mode="before")(_blank_to_none)
+
+    @field_validator("location")
+    @classmethod
+    def _known_location(cls, v):
+        if v is not None and v not in LOCATIONS:
+            raise ValueError("Location must be one of: " + ", ".join(LOCATIONS))
+        return v
 
     @model_validator(mode="after")
     def _password_rules(self):
         problem = password_problem(self.password, username=self.username, email=str(self.email))
         if problem:
             raise ValueError(problem)
+        if self.role in LOCATION_ROLES and not self.location:
+            raise ValueError("Location is required for recruiters, recruitment managers and sales managers")
+        if self.role not in LOCATION_ROLES:
+            self.location = None
         return self
 
 class UserUpdate(BaseModel):
@@ -121,8 +138,19 @@ class UserUpdate(BaseModel):
     otp_mode: Optional[str] = Field(default=None, pattern="^(real|captcha)$")
     role: Optional[str] = Field(default=None, pattern=ROLE_PATTERN)
     is_active: Optional[bool] = None
+    # Only accepted for an account that has no location yet (an account made before locations existed). Once set it cannot be changed.
+    location: Optional[str] = None
 
     _norm_email = field_validator("email", mode="before")(_blank_to_none)
+    _norm_location = field_validator("location", mode="before")(_blank_to_none)
+
+    @field_validator("location")
+    @classmethod
+    def _known_location(cls, v):
+        if v is not None and v not in LOCATIONS:
+            raise ValueError("Location must be one of: " + ", ".join(LOCATIONS))
+        return v
+
     _norm_pw = field_validator("password", mode="before")(_blank_to_none)
 
     @field_validator("password")

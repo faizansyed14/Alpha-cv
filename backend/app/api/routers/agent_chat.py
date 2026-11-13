@@ -32,6 +32,8 @@ class ChatRequest(BaseModel):
     jd_id: Optional[str] = Field(None, max_length=128)
     jd_text: Optional[str] = Field(None, max_length=200_000)
     jd_title: Optional[str] = Field(None, max_length=200)
+    # public careers URL for this posting (LinkedIn agent: Apply Now line)
+    apply_url: Optional[str] = Field(None, max_length=500)
     # an optional candidate CV (agents that use one only), for the FIRST message of a conversation
     cv_source: Literal["none", "library", "uploaded"] = "none"
     cv_id: Optional[str] = Field(None, max_length=128)
@@ -117,7 +119,8 @@ def build_agent_router(agent: AgentSpec) -> APIRouter:
                 handle_turn, session, agent_id=agent.id, username=user.username, message=req.message,
                 conversation_id=req.conversation_id, jd_text=jd_text, jd_id=req.jd_id if req.jd_source == "library" else None,
                 jd_title=jd_title, jd_source=req.jd_source, cv_text=cv_text,
-                cv_id=req.cv_id if req.cv_source == "library" else None, cv_title=cv_title)
+                cv_id=req.cv_id if req.cv_source == "library" else None, cv_title=cv_title,
+                apply_url=req.apply_url)
         except AgentError as exc:
             raise HTTPException(status_code=exc.status, detail=str(exc))
         used = await asyncio.to_thread(usage.usage_for, session, user.username)

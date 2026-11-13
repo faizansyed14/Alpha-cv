@@ -216,7 +216,7 @@ export default function ReportGenerator() {
               <div className="space-y-6">
                 {/* Report Type */}
                 <div>
-                  <label className="mb-2 block text-[13px] font-medium text-gray-700">
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
                     Report Type
                   </label>
                   <div className="space-y-2">
@@ -230,7 +230,7 @@ export default function ReportGenerator() {
                           onChange={(e) => setConfig(prev => ({ ...prev, type: e.target.value as any }))}
                           className="h-4 w-4 border-gray-300 text-brand-600 focus:ring-brand-500/30"
                         />
-                        <span className="text-[13px] capitalize text-gray-700">{type} Report</span>
+                        <span className="text-sm capitalize text-gray-700">{type} Report</span>
                       </label>
                     ))}
                   </div>
@@ -238,7 +238,7 @@ export default function ReportGenerator() {
 
                 {/* Include Options */}
                 <div>
-                  <label className="mb-2 block text-[13px] font-medium text-gray-700">
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
                     Include in Report
                   </label>
                   <div className="space-y-2">
@@ -249,7 +249,7 @@ export default function ReportGenerator() {
                         onChange={(e) => setConfig(prev => ({ ...prev, includeCharts: e.target.checked }))}
                         className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500/30"
                       />
-                      <span className="text-[13px] text-gray-700">Charts &amp; Visualizations</span>
+                      <span className="text-sm text-gray-700">Charts &amp; Visualizations</span>
                     </label>
                     <label className="flex items-center gap-2">
                       <input
@@ -258,7 +258,7 @@ export default function ReportGenerator() {
                         onChange={(e) => setConfig(prev => ({ ...prev, includeAssignments: e.target.checked }))}
                         className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500/30"
                       />
-                      <span className="text-[13px] text-gray-700">Detailed Assignments</span>
+                      <span className="text-sm text-gray-700">Detailed Assignments</span>
                     </label>
                     <label className="flex items-center gap-2">
                       <input
@@ -267,20 +267,20 @@ export default function ReportGenerator() {
                         onChange={(e) => setConfig(prev => ({ ...prev, includeAlternatives: e.target.checked }))}
                         className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500/30"
                       />
-                      <span className="text-[13px] text-gray-700">Alternative Matches</span>
+                      <span className="text-sm text-gray-700">Alternative Matches</span>
                     </label>
                   </div>
                 </div>
 
                 {/* Date Range */}
                 <div>
-                  <label className="mb-2 block text-[13px] font-medium text-gray-700">
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
                     Date Range
                   </label>
                   <select
                     value={config.dateRange}
                     onChange={(e) => setConfig(prev => ({ ...prev, dateRange: e.target.value as any }))}
-                    className="h-9 w-full rounded-md border border-surface-border bg-white px-3 text-[13px] text-gray-900 shadow-card focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
+                    className="h-9 w-full rounded-md border border-surface-border bg-paper px-3 text-sm text-gray-900 shadow-card focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30"
                   >
                     <option value="all">All Time</option>
                     <option value="last_week">Last Week</option>
@@ -316,24 +316,24 @@ export default function ReportGenerator() {
             <CardContent className="pt-0">
               <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                 <div className="space-y-4">
-                  <h4 className="text-[13px] font-medium text-gray-900">Score Distribution</h4>
+                  <h4 className="text-sm font-medium text-gray-900">Score Distribution</h4>
                   <div className="space-y-3">
                     <div>
-                      <div className="mb-1 flex justify-between text-[13px] text-gray-700">
+                      <div className="mb-1 flex justify-between text-sm text-gray-700">
                         <span>Excellent (≥80%)</span>
                         <span>{matchResult?.candidates?.filter(c => c.overall_score >= 0.8).length || 0}</span>
                       </div>
                       <Progress value={totalMatches > 0 ? (matchResult?.candidates?.filter(c => c.overall_score >= 0.8).length || 0) / totalMatches * 100 : 0} />
                     </div>
                     <div>
-                      <div className="mb-1 flex justify-between text-[13px] text-gray-700">
+                      <div className="mb-1 flex justify-between text-sm text-gray-700">
                         <span>Good (60-79%)</span>
                         <span>{matchResult?.candidates?.filter(c => c.overall_score >= 0.6 && c.overall_score < 0.8).length || 0}</span>
                       </div>
                       <Progress value={totalMatches > 0 ? (matchResult?.candidates?.filter(c => c.overall_score >= 0.6 && c.overall_score < 0.8).length || 0) / totalMatches * 100 : 0} />
                     </div>
                     <div>
-                      <div className="mb-1 flex justify-between text-[13px] text-gray-700">
+                      <div className="mb-1 flex justify-between text-sm text-gray-700">
                         <span>Fair (&lt;60%)</span>
                         <span>{matchResult?.candidates?.filter(c => c.overall_score < 0.6).length || 0}</span>
                       </div>
@@ -343,13 +343,13 @@ export default function ReportGenerator() {
                 </div>
 
                 <div className="space-y-4">
-                  <h4 className="text-[13px] font-medium text-gray-900">Top Skills in Demand</h4>
+                  <h4 className="text-sm font-medium text-gray-900">Top Skills in Demand</h4>
                   <div className="space-y-2">
                     {extractTopSkills().slice(0, 5).map((skill, index) => (
                       <div key={skill.skill} className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <Badge variant="outline">#{index + 1}</Badge>
-                          <span className="text-[13px] text-gray-700">{skill.skill}</span>
+                          <span className="text-sm text-gray-700">{skill.skill}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <div className="h-2 w-16 overflow-hidden rounded-full bg-gray-100">
@@ -388,7 +388,7 @@ export default function ReportGenerator() {
                       )}
                       <div className="flex-1">
                         <div className="mb-1 flex items-center justify-between">
-                          <h4 className="text-[13px] font-medium text-gray-900">{insight.title}</h4>
+                          <h4 className="text-sm font-medium text-gray-900">{insight.title}</h4>
                           <Badge
                             variant={
                               insight.impact === 'High' ? 'danger' :
@@ -399,14 +399,14 @@ export default function ReportGenerator() {
                             {insight.impact} Impact
                           </Badge>
                         </div>
-                        <p className="text-[13px] text-gray-600">{insight.description}</p>
+                        <p className="text-sm text-gray-600">{insight.description}</p>
                       </div>
                     </div>
                   ))
                 ) : (
                   <div className="py-8 text-center text-gray-500">
                     <BarChart3 className="mx-auto mb-3 h-12 w-12 text-gray-300" />
-                    <p className="text-[13px]">No insights available yet</p>
+                    <p className="text-sm">No insights available yet</p>
                     <p className="text-xs">Upload CVs and JDs to generate AI-powered insights</p>
                   </div>
                 )}

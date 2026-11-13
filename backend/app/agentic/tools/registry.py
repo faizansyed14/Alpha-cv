@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, List
 
-from app.agentic.tools import admin, candidates, generation, handoff, insights, jobs, matching, proposals
+from app.agentic.tools import admin, candidates, generation, handoff, insights, jobs, matching, proposals, tracker, tracker_changes
 from app.agentic.tools.base import Tool
 
-ALL_TOOLS: Dict[str, Tool] = {t.name: t for module in (candidates, jobs, matching, generation, admin, insights, proposals, handoff) for t in module.TOOLS}
+ALL_TOOLS: Dict[str, Tool] = {t.name: t for module in (candidates, jobs, matching, generation, admin, insights, proposals, tracker, tracker_changes, handoff) for t in module.TOOLS}
 
 _DESTRUCTIVE = ("delete", "remove", "erase", "purge", "wipe", "drop", "destroy", "truncate", "clear")
 # tools that create or start something (and are guarded in code); every other writing tool is a propose_* tool

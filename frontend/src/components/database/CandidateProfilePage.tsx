@@ -52,13 +52,13 @@ function FactTile({
 }) {
   if (value == null || value === '' || value === '-') return null;
   return (
-    <div className="flex items-start gap-3 rounded-2xl border border-surface-border bg-white p-4 shadow-card">
+    <div className="flex items-start gap-3 rounded-2xl border border-surface-border bg-paper p-4 shadow-card">
       <span className={cn('mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', accent || 'bg-navy-50 text-navy-800')}>
         <Icon className="h-4 w-4" />
       </span>
       <div className="min-w-0">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{label}</p>
-        <p className="mt-0.5 truncate text-[14px] font-semibold text-slate-900">{value}</p>
+        <p className="text-2xs font-semibold uppercase tracking-[0.08em] text-slate-500">{label}</p>
+        <p className="mt-0.5 truncate text-base font-semibold text-slate-900">{value}</p>
       </div>
     </div>
   );
@@ -84,16 +84,16 @@ function ContactLink({
       href={href}
       {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
       className={cn(
-        'group flex min-w-0 items-center gap-3 rounded-2xl border bg-white px-4 py-3.5 shadow-card transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:shadow-[0_10px_28px_-14px_rgba(16,24,40,0.22)]',
+        'group flex min-w-0 items-center gap-3 rounded-2xl border bg-paper px-4 py-3.5 shadow-card transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:shadow-[0_10px_28px_-14px_rgba(16,24,40,0.22)]',
         tone,
       )}
     >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-700 ring-1 ring-inset ring-slate-200 transition-colors group-hover:bg-white">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-700 ring-1 ring-inset ring-slate-200 transition-colors group-hover:bg-paper">
         <Icon className="h-5 w-5" />
       </span>
       <span className="min-w-0">
-        <span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{label}</span>
-        <span className="mt-0.5 block truncate text-[13.5px] font-semibold text-slate-900">{value}</span>
+        <span className="block text-2xs font-semibold uppercase tracking-[0.08em] text-slate-500">{label}</span>
+        <span className="mt-0.5 block truncate text-sm font-semibold text-slate-900">{value}</span>
       </span>
     </a>
   );
@@ -112,23 +112,23 @@ function NumberedList({
 }) {
   const shown = items.slice(0, limit);
   return (
-    <section className="rounded-2xl border border-surface-border bg-white p-5 shadow-card sm:p-6">
+    <section className="rounded-2xl border border-surface-border bg-paper p-5 shadow-card sm:p-6">
       <div className="mb-4 flex items-center gap-2.5">
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-navy-50 text-navy-800">
           <Icon className="h-4 w-4" />
         </span>
-        <h2 className="text-[16px] font-semibold tracking-[-0.01em] text-slate-900">
+        <h2 className="text-lg font-semibold tracking-[-0.01em] text-slate-900">
           {title}
-          <span className="ml-2 text-[13px] font-medium text-slate-400">({items.length})</span>
+          <span className="ml-2 text-sm font-medium text-slate-400">({items.length})</span>
         </h2>
       </div>
       {!shown.length ? (
-        <p className="text-[13px] text-slate-400">None extracted.</p>
+        <p className="text-sm text-slate-400">None extracted.</p>
       ) : (
         <ol className="space-y-2.5">
           {shown.map((item, i) => (
-            <li key={i} className="flex gap-3 rounded-xl bg-slate-50/80 px-3 py-2.5 text-[13.5px] leading-relaxed text-slate-700">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white text-[11px] font-bold tabular-nums text-navy-800 ring-1 ring-inset ring-navy-100">
+            <li key={i} className="flex gap-3 rounded-xl bg-slate-50/80 px-3 py-2.5 text-sm leading-relaxed text-slate-700">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-paper text-2xs font-bold tabular-nums text-navy-800 ring-1 ring-inset ring-navy-100">
                 {i + 1}
               </span>
               <span className="min-w-0 whitespace-pre-wrap break-words pt-0.5">{item}</span>
@@ -137,7 +137,7 @@ function NumberedList({
         </ol>
       )}
       {items.length > limit ? (
-        <p className="mt-3 text-[12px] text-slate-400">+{items.length - limit} more not shown</p>
+        <p className="mt-3 text-xs text-slate-400">+{items.length - limit} more not shown</p>
       ) : null}
     </section>
   );
@@ -150,9 +150,7 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
   // Safe internal return path (e.g. careers applicants). Falls back to /candidates.
   const fromRaw = searchParams.get('from') || '';
   const backHref = fromRaw.startsWith('/') && !fromRaw.startsWith('//') ? fromRaw : '/candidates';
-  const backLabel = backHref.startsWith('/saved-cvs')
-    ? 'Saved CVs'
-    : backHref.startsWith('/careers/applicants')
+  const backLabel = backHref.startsWith('/careers/applicants')
     ? 'Applicants'
     : backHref.startsWith('/careers')
       ? 'Careers'
@@ -217,7 +215,7 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 text-[13px] text-slate-500">
+      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 text-sm text-slate-500">
         <Loader2 className="h-6 w-6 animate-spin text-navy-700" />
         Loading candidate…
       </div>
@@ -226,9 +224,9 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
 
   if (error || !view) {
     return (
-      <div className="mx-auto max-w-lg rounded-2xl border border-surface-border bg-white p-8 text-center shadow-card">
-        <p className="text-[15px] font-semibold text-slate-900">Candidate not found</p>
-        <p className="mt-1.5 text-[13px] text-slate-500">{error || 'This CV could not be loaded.'}</p>
+      <div className="mx-auto max-w-lg rounded-2xl border border-surface-border bg-paper p-8 text-center shadow-card">
+        <p className="text-md font-semibold text-slate-900">Candidate not found</p>
+        <p className="mt-1.5 text-sm text-slate-500">{error || 'This CV could not be loaded.'}</p>
         <Button type="button" variant="secondary" className="mt-4" onClick={() => router.push(backHref, { scroll: false })}>
           Back to {backLabel.toLowerCase()}
         </Button>
@@ -245,25 +243,25 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
         <Button type="button" variant="ghost" size="sm" icon={<ArrowLeft />} onClick={() => router.push(backHref, { scroll: false })}>
           {backLabel}
         </Button>
-        <span className="text-[12px] text-slate-300">/</span>
-        <span className="truncate text-[13px] font-medium text-slate-600">{view.name}</span>
+        <span className="text-xs text-slate-300">/</span>
+        <span className="truncate text-sm font-medium text-slate-600">{view.name}</span>
       </div>
 
       {/* Hero — compact */}
-      <header className="relative overflow-hidden rounded-2xl border border-surface-border bg-white shadow-card">
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-br from-navy-50 via-sky-50/60 to-white" />
+      <header className="relative overflow-hidden rounded-2xl border border-surface-border bg-paper shadow-card">
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-br from-navy-50 via-sky-50/60 to-paper" />
         <div className="relative flex items-start gap-3.5 px-4 py-3.5 sm:px-5 sm:py-4">
-          <Avatar name={view.name} size="md" className="ring-2 ring-white shadow-sm" />
+          <Avatar name={view.name} size="md" className="ring-2 ring-paper shadow-sm" />
           <div className="min-w-0 flex-1">
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-navy-700">{view.category}</p>
-            <h1 className="mt-0.5 text-[18px] font-bold leading-tight tracking-[-0.02em] text-slate-900 sm:text-[20px]">
+            <h1 className="mt-0.5 text-xl font-bold leading-tight tracking-[-0.02em] text-slate-900 sm:text-xl">
               {view.name}
             </h1>
-            <p className="mt-0.5 text-[13px] text-slate-600">
+            <p className="mt-0.5 text-sm text-slate-600">
               {view.title !== '-' ? view.title : 'No title listed'}
             </p>
             {view.filename ? (
-              <p className="mt-1 inline-flex max-w-full items-center gap-1 truncate text-[11px] text-slate-400">
+              <p className="mt-1 inline-flex max-w-full items-center gap-1 truncate text-2xs text-slate-400">
                 <FileText className="h-3 w-3 shrink-0" />
                 <span className="truncate">{view.filename}</span>
               </p>
@@ -275,7 +273,7 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
       {/* Contact — always visible, with icons */}
       {hasContact ? (
         <section className="space-y-3">
-          <h2 className="text-[13px] font-semibold uppercase tracking-[0.1em] text-slate-500">Contact</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-slate-500">Contact</h2>
           <div className="grid gap-3 sm:grid-cols-2">
             {view.email ? (
               <ContactLink
@@ -331,7 +329,7 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
 
       {/* Snapshot facts */}
       <section className="space-y-3">
-        <h2 className="text-[13px] font-semibold uppercase tracking-[0.1em] text-slate-500">Profile</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-slate-500">Profile</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <FactTile icon={Briefcase} label="Experience" value={view.years !== '-' ? `${view.years} years` : null} />
           <FactTile icon={Wallet} label="Expected salary" value={view.salary} accent="bg-emerald-50 text-emerald-700" />
@@ -343,19 +341,19 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
       </section>
 
       {view.certifications.length > 0 ? (
-        <section className="rounded-2xl border border-surface-border bg-white p-5 shadow-card sm:p-6">
+        <section className="rounded-2xl border border-surface-border bg-paper p-5 shadow-card sm:p-6">
           <div className="mb-4 flex items-center gap-2.5">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
               <Award className="h-4 w-4" />
             </span>
-            <h2 className="text-[16px] font-semibold tracking-[-0.01em] text-slate-900">
+            <h2 className="text-lg font-semibold tracking-[-0.01em] text-slate-900">
               Certifications
-              <span className="ml-2 text-[13px] font-medium text-slate-400">({view.certifications.length})</span>
+              <span className="ml-2 text-sm font-medium text-slate-400">({view.certifications.length})</span>
             </h2>
           </div>
           <div className="flex flex-wrap gap-2">
             {view.certifications.map((c) => (
-              <span key={c} className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[12.5px] font-medium text-amber-900">
+              <span key={c} className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">
                 {c}
               </span>
             ))}
@@ -364,21 +362,21 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
       ) : null}
 
       {view.keywords.length > 0 ? (
-        <section className="rounded-2xl border border-surface-border bg-white p-5 shadow-card sm:p-6">
+        <section className="rounded-2xl border border-surface-border bg-paper p-5 shadow-card sm:p-6">
           <div className="mb-4 flex items-center gap-2.5">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-navy-50 text-navy-800">
               <Tags className="h-4 w-4" />
             </span>
-            <h2 className="text-[16px] font-semibold tracking-[-0.01em] text-slate-900">
+            <h2 className="text-lg font-semibold tracking-[-0.01em] text-slate-900">
               Keywords
-              <span className="ml-2 text-[13px] font-medium text-slate-400">({view.keywords.length})</span>
+              <span className="ml-2 text-sm font-medium text-slate-400">({view.keywords.length})</span>
             </h2>
           </div>
           <div className="flex flex-wrap gap-2">
             {view.keywords.map((k) => (
               <span
                 key={k}
-                className="rounded-full border border-navy-100 bg-navy-50 px-3 py-1 text-[12.5px] font-medium text-navy-900"
+                className="rounded-full border border-navy-100 bg-navy-50 px-3 py-1 text-xs font-medium text-navy-900"
               >
                 {k}
               </span>
@@ -391,7 +389,7 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
       <NumberedList title="Responsibilities" icon={Briefcase} items={view.responsibilities} />
 
       <section className="space-y-3">
-        <h2 className="text-[13px] font-semibold uppercase tracking-[0.1em] text-slate-500">Original CV</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-[0.1em] text-slate-500">Original CV</h2>
         <CvDocumentViewer cvId={cvId} filename={view.filename} />
       </section>
     </div>

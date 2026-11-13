@@ -17,6 +17,7 @@ import { PageHeader } from '@/components/ui/page';
 import { StatCard } from '@/components/ui/stat-card';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table';
 import { useAppStore } from '@/stores/appStore';
+import { Bone } from '@/components/skeletons';
 
 interface ServiceStatus {
   name: string;
@@ -186,7 +187,7 @@ export default function SystemPanel() {
       />
 
       {/* Overall system status */}
-      <div className="rounded-xl border border-surface-border bg-white p-5 shadow-card">
+      <div className="rounded-xl border border-surface-border bg-paper p-5 shadow-card">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-success-50 text-success-600">
@@ -195,7 +196,7 @@ export default function SystemPanel() {
             <div>
               <div className="flex items-center gap-2">
                 {getStatusIcon(systemHealth?.status || 'unknown')}
-                <span className="text-[13px] font-semibold capitalize text-gray-900">
+                <span className="text-sm font-semibold capitalize text-gray-900">
                   {systemHealth?.status || 'Unknown'}
                 </span>
               </div>
@@ -265,24 +266,28 @@ export default function SystemPanel() {
 
       {/* Service details */}
       {selectedService && serviceDetails && (
-        <div className="mt-4 rounded-xl border border-surface-border bg-white p-5 shadow-card">
+        <div className="mt-4 rounded-xl border border-surface-border bg-paper p-5 shadow-card">
           <div className="mb-4 flex items-center gap-2">
             <Settings className="h-4 w-4 text-gray-500" />
-            <h3 className="text-[13px] font-semibold text-gray-900">{selectedService} details</h3>
+            <h3 className="text-sm font-semibold text-gray-900">{selectedService} details</h3>
           </div>
           {loadingDetails ? (
-            <div className="flex items-center justify-center py-8 text-[13px] text-gray-500">
-              <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
-              <span>Loading details...</span>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2" role="status" aria-label="Loading details">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="rounded-md border border-surface-border bg-[var(--app-bg-soft)] p-3">
+                  <Bone className="mb-2 h-3 w-24" />
+                  <Bone className="h-4 w-40" />
+                </div>
+              ))}
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {Object.entries(serviceDetails).map(([key, value]) => (
                 <div key={key} className="rounded-md border border-surface-border bg-[var(--app-bg-soft)] p-3">
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide capitalize text-gray-500">
+                  <div className="mb-1 text-2xs font-semibold uppercase tracking-wide capitalize text-gray-500">
                     {key.replace(/_/g, ' ')}
                   </div>
-                  <div className="font-mono text-[13px] text-gray-900">
+                  <div className="font-mono text-sm text-gray-900">
                     {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
                   </div>
                 </div>

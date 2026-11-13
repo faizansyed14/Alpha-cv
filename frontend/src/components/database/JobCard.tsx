@@ -67,7 +67,7 @@ export default function JobCard({
         if ((e.target as HTMLElement).closest('button, a, input, label, textarea')) return;
         onOpenDetails();
       }}
-      className={`group relative overflow-hidden rounded-2xl border bg-white transition-[border-color,box-shadow] duration-150 ${
+      className={`group relative overflow-hidden rounded-2xl border bg-paper transition-[border-color,box-shadow] duration-150 ${
         selected
           ? 'border-navy-300 shadow-[0_0_0_3px_rgba(22,32,75,0.12)]'
           : 'border-surface-border shadow-card hover:border-navy-300 hover:shadow-[0_6px_16px_-6px_rgba(16,24,40,0.10)]'
@@ -75,7 +75,7 @@ export default function JobCard({
     >
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-br from-navy-50 via-sky-50/60 to-white"
+        className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-br from-navy-50 via-sky-50/60 to-paper"
       />
 
       <div className="relative flex cursor-pointer gap-3.5 p-5">
@@ -87,35 +87,35 @@ export default function JobCard({
             className="h-4 w-4 cursor-pointer accent-navy-600"
             aria-label={selected ? 'Deselect job' : 'Select job for match'}
           />
-          <span className="text-[11px] font-medium tabular-nums text-slate-400">{index}</span>
+          <span className="text-2xs font-medium tabular-nums text-slate-400">{index}</span>
         </div>
 
-        <Avatar name={d.title} size="lg" className="mt-0.5 ring-4 ring-white shadow-md" />
+        <Avatar name={d.title} size="lg" className="mt-0.5 ring-4 ring-paper shadow-md" />
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <button
               type="button"
               onClick={onOpenDetails}
-              className="max-w-full truncate text-left text-[15px] font-semibold tracking-[-0.01em] text-slate-900 hover:text-navy-600"
+              className="max-w-full truncate text-left text-md font-semibold tracking-[-0.01em] text-slate-900 hover:text-navy-600"
               title={d.title}
             >
               {d.title}
             </button>
             {selected ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-navy-600 px-2 py-0.5 text-[11px] font-semibold text-white">
+              <span className="inline-flex items-center gap-1 rounded-full bg-solid-soft px-2 py-0.5 text-2xs font-semibold text-white">
                 <Check className="h-3 w-3" /> Selected for match
               </span>
             ) : null}
           </div>
 
-          <p className="mt-0.5 truncate text-[13px] text-slate-500">
+          <p className="mt-0.5 truncate text-sm text-slate-500">
             {d.filename || 'No filename'}
             {years != null ? <span className="text-slate-400"> · {years} yrs experience</span> : null}
             <span className="text-slate-400"> · Uploaded {d.uploadDate}</span>
           </p>
 
-          <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[12px] text-slate-700">
+          <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-slate-700">
             <span className="inline-flex items-center gap-1.5">
               <Briefcase className="h-4 w-4 text-slate-400" />
               {d.skillsCount || skills.length} skills
@@ -133,7 +133,7 @@ export default function JobCard({
               {visibleKeywords.map((kw, i) => (
                 <span
                   key={i}
-                  className="max-w-[220px] truncate rounded-full border border-surface-border bg-white px-2.5 py-0.5 text-[11.5px] font-medium text-slate-700 shadow-sm"
+                  className="max-w-[220px] truncate rounded-full border border-surface-border bg-paper px-2.5 py-0.5 text-2xs font-medium text-slate-700 shadow-sm"
                   title={kw}
                 >
                   {kw}
@@ -143,7 +143,7 @@ export default function JobCard({
                 <button
                   type="button"
                   onClick={() => setShowAllKeywords((v) => !v)}
-                  className="rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-navy-600 hover:bg-navy-50"
+                  className="rounded-md px-1.5 py-0.5 text-2xs font-semibold text-navy-600 hover:bg-navy-50"
                 >
                   {showAllKeywords ? 'Show less' : `+${hiddenKeywordsCount} more`}
                 </button>
@@ -152,7 +152,7 @@ export default function JobCard({
                 <button
                   type="button"
                   onClick={() => setShowSkills((v) => !v)}
-                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-navy-600 hover:bg-navy-50"
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-semibold text-navy-600 hover:bg-navy-50"
                 >
                   <Tags className="h-3 w-3" />
                   {showSkills ? 'Hide skills' : `Skills (${skills.length})`}
@@ -162,7 +162,7 @@ export default function JobCard({
           )}
 
           {showSkills && skills.length > 0 && (
-            <ol className="mt-2 space-y-1.5 rounded-lg bg-navy-50/60 px-3 py-2.5 text-[12px] leading-relaxed text-navy-900">
+            <ol className="mt-2 space-y-1.5 rounded-lg bg-navy-50/60 px-3 py-2.5 text-xs leading-relaxed text-navy-900">
               {skills.map((sk, i) => (
                 <li key={i} className="flex gap-2">
                   <span className="w-5 shrink-0 tabular-nums font-semibold text-navy-500">{i + 1}.</span>

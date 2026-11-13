@@ -35,7 +35,7 @@ export default function AgenticPage() {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sideOpen, setSideOpen] = useState(false);
+  const [sideOpen, setSideOpen] = useState(true);
   const [drawer, setDrawer] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -160,12 +160,12 @@ export default function AgenticPage() {
       <div className="flex items-center gap-2.5 px-4 pb-2 pt-4">
         <img src="/alphadatalogo.svg" alt="" className="h-8 w-8 rounded-lg object-contain" />
         <div className="leading-tight">
-          <p className="text-[15px] font-bold tracking-[-0.02em] text-slate-900">Alpha<span className="text-navy-600">CV</span></p>
-          <p className="text-[11px] font-medium text-slate-500">Agentic mode</p>
+          <p className="text-md font-bold tracking-[-0.02em] text-slate-900">Alpha<span className="text-navy-600">CV</span></p>
+          <p className="text-2xs font-medium text-slate-500">Agentic mode</p>
         </div>
       </div>
       <div className="p-2.5">
-        <button type="button" onClick={newChat} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-slate-800 transition-colors hover:bg-white/70">
+        <button type="button" onClick={newChat} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-slate-800 transition-colors hover:bg-paper/70">
           <Plus className="h-4 w-4" /> New chat
         </button>
       </div>
@@ -179,15 +179,15 @@ export default function AgenticPage() {
       <GradientBackdrop calm={!showWelcome} />
       {docPreview.node}
 
-      <motion.aside className="hidden shrink-0 overflow-hidden border-r border-white/60 bg-white/45 backdrop-blur-xl lg:block"
+      <motion.aside className="hidden shrink-0 overflow-hidden border-r border-slate-200/70 bg-paper/45 backdrop-blur-xl lg:block"
         initial={false} animate={{ width: sideOpen ? 250 : 0 }} transition={{ duration: 0.24, ease }}>
         {sidebar}
       </motion.aside>
       <AnimatePresence>
         {drawer && (
           <div className="fixed inset-0 z-50 lg:hidden">
-            <motion.div className="absolute inset-0 bg-slate-900/40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDrawer(false)} />
-            <motion.aside className="absolute inset-y-0 left-0 bg-white shadow-2xl" initial={{ x: -260 }} animate={{ x: 0 }} exit={{ x: -260 }} transition={{ duration: 0.26, ease }}>
+            <motion.div className="absolute inset-0 bg-scrim/40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDrawer(false)} />
+            <motion.aside className="absolute inset-y-0 left-0 bg-paper shadow-2xl" initial={{ x: -260 }} animate={{ x: 0 }} exit={{ x: -260 }} transition={{ duration: 0.26, ease }}>
               <button type="button" onClick={() => setDrawer(false)} aria-label="Close" className="absolute right-1 top-3 rounded-lg p-2 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button>
               {sidebar}
             </motion.aside>
@@ -197,10 +197,10 @@ export default function AgenticPage() {
 
       <section className="relative flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-1 px-2 sm:px-3">
-          <button type="button" aria-label="Chats" onClick={() => setDrawer(true)} className="rounded-lg p-2 text-slate-600 hover:bg-white/60 lg:hidden"><PanelLeft className="h-5 w-5" /></button>
-          <button type="button" aria-label={sideOpen ? 'Hide chats' : 'Show chats'} onClick={() => setSideOpen((o) => !o)} className="hidden rounded-lg p-2 text-slate-600 hover:bg-white/60 lg:block"><PanelLeft className="h-5 w-5" /></button>
-          <p className="ml-1 flex-1 truncate text-[15px] font-semibold text-slate-900">Agentic mode</p>
-          <ModeToggle className="mr-1 bg-white/70 backdrop-blur" />
+          <button type="button" aria-label="Chats" onClick={() => setDrawer(true)} className="rounded-lg p-2 text-slate-600 hover:bg-paper/60 lg:hidden"><PanelLeft className="h-5 w-5" /></button>
+          <button type="button" aria-label={sideOpen ? 'Hide chats' : 'Show chats'} onClick={() => setSideOpen((o) => !o)} className="hidden rounded-lg p-2 text-slate-600 hover:bg-paper/60 lg:block"><PanelLeft className="h-5 w-5" /></button>
+          <p className="ml-1 flex-1 truncate text-md font-semibold text-slate-900">Agentic mode</p>
+          <ModeToggle className="mr-1 bg-paper/70 backdrop-blur" />
           <UsageMenu usage={usage} onOpen={() => void api.getAgentUsage().then(setUsage).catch(() => undefined)}
             onRequestReset={async (reason) => { setUsage(await api.requestAgentReset(reason)); }} />
         </header>
@@ -214,9 +214,9 @@ export default function AgenticPage() {
                 <motion.div key={m.id ?? `t${i}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, ease }}>
                   {m.role === 'user' ? (
                     <div className="flex justify-end">
-                      <div className="max-w-[85%] rounded-3xl bg-navy-900 px-4 py-2.5 text-[14.5px] leading-relaxed text-white shadow-sm sm:max-w-[560px]">
+                      <div className="max-w-[85%] rounded-3xl bg-solid px-4 py-2.5 text-base leading-relaxed text-white shadow-sm sm:max-w-[560px]">
                         {m.meta?.attachment?.filename ? (
-                          <div className="mb-1.5 inline-flex max-w-full items-center gap-1.5 rounded-lg bg-white/15 px-2 py-1 text-[12px]"><FileText className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{m.meta.attachment.filename}</span></div>
+                          <div className="mb-1.5 inline-flex max-w-full items-center gap-1.5 rounded-lg bg-white/15 px-2 py-1 text-xs"><FileText className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{m.meta.attachment.filename}</span></div>
                         ) : null}
                         <div className="whitespace-pre-wrap">{m.content}</div>
                       </div>
@@ -224,8 +224,8 @@ export default function AgenticPage() {
                   ) : (
                     <div className="space-y-3">
                       {m.content && (
-                        <div className={cn('inline-block max-w-full whitespace-pre-wrap rounded-2xl px-4 py-3 text-[14.5px] leading-relaxed',
-                          m.status === 'error' ? 'border border-rose-200 bg-rose-50 text-rose-800' : 'border border-white/80 bg-white/85 text-slate-900 shadow-sm backdrop-blur')}>
+                        <div className={cn('inline-block max-w-full whitespace-pre-wrap rounded-2xl px-4 py-3 text-base leading-relaxed',
+                          m.status === 'error' ? 'border border-rose-200 bg-rose-50 text-rose-800' : 'border border-slate-200/70 bg-paper/85 text-slate-900 shadow-sm backdrop-blur')}>
                           {m.content}
                         </div>
                       )}
@@ -238,11 +238,11 @@ export default function AgenticPage() {
                         <div className="flex flex-wrap gap-2">
                           {m.meta!.suggestions!.map((s) => (
                             <button key={s} type="button" disabled={sending} onClick={() => void send(s)}
-                              className="rounded-full border border-white/80 bg-white/85 px-3.5 py-1.5 text-[12.5px] text-slate-700 shadow-sm backdrop-blur transition-colors hover:bg-white disabled:opacity-50">{s}</button>
+                              className="rounded-full border border-slate-200/70 bg-paper/85 px-3.5 py-1.5 text-xs text-slate-700 shadow-sm backdrop-blur transition-colors hover:bg-paper disabled:opacity-50">{s}</button>
                           ))}
                         </div>
                       )}
-                      <div className="flex items-center gap-3"><TraceStrip meta={m.meta} />{m.tokens ? <span className="mt-2 text-[11px] tabular-nums text-slate-400">{m.tokens.toLocaleString()} tokens</span> : null}</div>
+                      <div className="flex items-center gap-3"><TraceStrip meta={m.meta} />{m.tokens ? <span className="mt-2 text-2xs tabular-nums text-slate-400">{m.tokens.toLocaleString()} tokens</span> : null}</div>
                     </div>
                   )}
                 </motion.div>
@@ -257,7 +257,7 @@ export default function AgenticPage() {
             <AnimatePresence>
               {error && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                  <div className="mb-2 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-[12.5px] font-medium text-rose-700">
+                  <div className="mb-2 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-xs font-medium text-rose-700">
                     <AlertCircle className="h-4 w-4 shrink-0" /><span className="flex-1">{error}</span>
                     <button type="button" aria-label="Dismiss" onClick={() => setError(null)} className="rounded p-0.5 hover:bg-rose-100"><X className="h-3.5 w-3.5" /></button>
                   </div>
@@ -276,7 +276,7 @@ export default function AgenticPage() {
               )}
               placeholder={showWelcome ? 'Ask me to post a job, find candidates, match, or write something...' : 'Ask for the next step...'}
               locked={outOfTokens ? 'All of today’s tokens are used. See Usage at the top right.' : undefined} />
-            <p className="mt-2 text-center text-[11px] text-slate-500">AI can make mistakes. Check results before you act on them. I never delete anything, and I only change something after you confirm it.</p>
+            <p className="mt-2 text-center text-2xs text-slate-500">AI can make mistakes. Check results before you act on them. I never delete anything, and I only change something after you confirm it.</p>
           </div>
         </div>
       </section>

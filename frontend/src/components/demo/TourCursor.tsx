@@ -156,7 +156,7 @@ export default function TourCursor({
             <motion.div
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
-              className="absolute left-7 top-5 whitespace-nowrap rounded-lg border border-navy-200 bg-navy-900 px-2.5 py-1 text-[11px] font-semibold text-white shadow-lg"
+              className="absolute left-7 top-5 whitespace-nowrap rounded-lg border border-navy-200 bg-solid px-2.5 py-1 text-2xs font-semibold text-white shadow-lg"
             >
               {clicking ? `Click ${label}` : `Go to ${label}`}
             </motion.div>

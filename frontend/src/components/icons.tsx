@@ -11,7 +11,7 @@
 import * as React from 'react';
 import {
   ArrowLeft as PhArrowLeft, ArrowRight as PhArrowRight, ArrowUp as PhArrowUp, SidebarSimple, ArrowSquareOut, ArrowsClockwise, Briefcase as PhBriefcase,
-  BookmarkSimple, Brain as PhBrain, Bug as PhBug, Buildings, CalendarBlank, CalendarDots, CaretDown, CaretLeft, CaretRight, CaretUp, CaretUpDown, ChartBar, ChatCircle,
+  Brain as PhBrain, Bug as PhBug, Buildings, CalendarBlank, CalendarDots, CaretDown, CaretLeft, CaretRight, CaretUp, CaretUpDown, ChartBar, ChatCircle,
   ChatText, Check as PhCheck, CheckCircle as PhCheckCircle, CircleNotch, ClipboardText, Clock as PhClock, Code as PhCode, CodeBlock,
   DotsThree, Copy as PhCopy, Cpu as PhCpu, CloudArrowUp, CurrencyDollar, Database as PhDatabase, DotsSixVertical, DownloadSimple, Envelope, Eye as PhEye,
   EyeSlash, FileArrowDown, FileMagnifyingGlass, FileText as PhFileText, FileX, FloppyDisk, Flag as PhFlag, Funnel, GearSix,
@@ -21,6 +21,7 @@ import {
   Power as PhPower, Pulse, Shield as PhShield, ShieldCheck as PhShieldCheck, ShareNetwork, SignOut, SlidersHorizontal as PhSliders,
   Sparkle, SquaresFour, Tag as PhTag, Target as PhTarget, Timer as PhTimer, Translate, Trash, TrendDown, TrendUp, Trophy as PhTrophy, UploadSimple,
   User as PhUser, UserCircle, Users as PhUsers, Wallet as PhWallet, Warning, WarningCircle, X as PhX, XCircle as PhXCircle,
+  CaretDoubleLeft, CaretDoubleRight, ImageSquare,
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 
@@ -132,7 +133,6 @@ export const Calendar = make(CalendarBlank, SKY, 'Calendar');
 export const CalendarDays = make(CalendarDots, SKY, 'CalendarDays');
 export const Clock = make(PhClock, SKY, 'Clock');
 export const Bug = make(PhBug, RED, 'Bug');
-export const Bookmark = make(BookmarkSimple, SKY, 'Bookmark');
 export const Timer = make(PhTimer, SKY, 'Timer');
 export const Hourglass = make(PhHourglass, AMBER, 'Hourglass');
 
@@ -221,3 +221,8 @@ export const Menu = make(List, null, 'Menu', 'bold');
 export const ZoomIn = make(MagnifyingGlassPlus, null, 'ZoomIn');
 export const ZoomOut = make(MagnifyingGlassMinus, null, 'ZoomOut');
 export const PanelLeft = make(SidebarSimple, null, 'PanelLeft');
+
+// ---- collapse control
+export const ChevronsLeft = make(CaretDoubleLeft, null, 'ChevronsLeft', 'bold');
+export const ChevronsRight = make(CaretDoubleRight, null, 'ChevronsRight', 'bold');
+export const ImageIcon = make(ImageSquare, VIOLET, 'ImageIcon');

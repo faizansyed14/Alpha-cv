@@ -196,6 +196,8 @@ export interface CVListResponse {
   total_is_estimate?: boolean;
   limit?: number;
   offset?: number;
+  /** Send it back as `cursor` to get the next page; null on the last page. */
+  next_cursor?: string | null;
 }
 
 export interface JDListResponse {
@@ -419,6 +421,8 @@ export interface UserProfile {
   username: string;
   role: Role;
   is_active: boolean;
+  /** Dubai or Abu Dhabi; empty for the EVP and the admin, who see every location */
+  location?: string | null;
 }
 
 export interface AdminUser {
@@ -428,6 +432,7 @@ export interface AdminUser {
   is_active: boolean;
   email?: string;
   otp_mode?: 'real' | 'captcha';
+  location?: string | null;
 }
 
 export interface UserPresence {
@@ -449,6 +454,8 @@ export interface CreateUserRequest {
   email: string;   // what the person signs in with
   role: Role;
   otp_mode?: 'real' | 'captcha';
+  /** Required for recruiters, recruitment managers and sales managers; chosen once, here */
+  location?: string;
 }
 
 export interface UpdateUserRequest {
@@ -457,6 +464,241 @@ export interface UpdateUserRequest {
   role?: Role;
   is_active?: boolean;
   otp_mode?: 'real' | 'captcha';
+  /** Only for an account that has no location yet; it cannot be changed afterwards */
+  location?: string;
+}
+
+// ----- Requirements tracker
+export type RequirementStatus = 'open' | 'submitted' | 'hold' | 'closed' | 'canceled';
+
+export interface Requirement {
+  id: string;
+  /** Which team's it is (Dubai or Abu Dhabi). Nobody types it and the page does not show it; empty until a recruiter is assigned to a requirement the EVP or admin added. */
+  location: string | null;
+  requirement_date: string;          // yyyy-mm-dd
+  position: string;
+  client: string;
+  /** Where the job is, and the salary, as typed (both optional) */
+  job_location: string | null;
+  salary: string | null;
+  /** How long the job lasts: nothing chosen, full time, or a fixed number of days, months or years (which may or may not be extended) */
+  duration_type: 'full_time' | 'fixed' | null;
+  duration_value: number | null;
+  duration_unit: 'days' | 'months' | 'years' | null;
+  duration_extendable: boolean | null;
+  jd_id: string | null;
+  jd_filename: string | null;
+  /** Not sent to recruiters */
+  sales_comments: string | null;
+  rm_comments: string | null;
+  recruiter_comments: string | null;
+  cv_submission_date: string | null;
+  /** What the recruiter has submitted: the day, and how many CVs */
+  cvs_submitted_date: string | null;
+  cvs_submitted_count: number | null;
+  /** The lead recruiter: the first of the recruiters, credited when the requirement is closed */
+  recruiter: { id: string; username: string } | null;
+  /** Every recruiter assigned, the lead first, each with their own CVs submitted (a recruiter sees only their own numbers) */
+  recruiters: Array<{ id: string; username: string; cvs_submitted_date: string | null; cvs_submitted_count: number | null }>;
+  /** The recruitment manager and the sales manager the requirement is assigned to (null: nobody chosen) */
+  manager: { id: string; username: string } | null;
+  sales_manager: { id: string; username: string } | null;
+  status: RequirementStatus;
+  /** The job posted in Careers from this requirement's job description */
+  job_id: string | null;
+  /** Set while the requirement is closed: when, by whom, and how many days after the requirement date */
+  closed_at: string | null;
+  closed_by: string | null;
+  days_to_close: number | null;
+  created_by: string;
+  created_at: string;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+export interface ClosuresPage {
+  items: Requirement[];
+  total: number;
+  /** The years that have closures, newest first (for the Year dropdown, whatever the filters are) */
+  years: number[];
+  summary: { closed: number; closed_this_month: number; avg_days: number | null };
+}
+
+export type AnalyticsView = 'monthly' | 'yearly';
+
+export interface RecruiterPerformance {
+  id: string | null;
+  username: string;
+  location: string | null;
+  closed: number;
+  avg_days: number | null;
+  /** CVs this recruiter submitted in the period */
+  cvs_submitted: number;
+  open: number;
+  submitted: number;
+  hold: number;
+  canceled: number;
+  last_closed: string | null;
+}
+
+/** One location's numbers, for the EVP and the admin looking at Dubai and Abu Dhabi side by side */
+export interface LocationPerformance {
+  location: string | null;
+  recruiters: number;
+  received: number;
+  closed: number;
+  previous_closed: number;
+  avg_days: number | null;
+  cvs_submitted: number;
+  active: number;
+  open: number;
+  submitted: number;
+  hold: number;
+  canceled: number;
+  overdue: number;
+}
+
+export interface TrackerAnalytics {
+  view: AnalyticsView;
+  year: number;
+  /** 1 to 12 in the monthly view, null in the yearly one */
+  month: number | null;
+  /** "March 2026" or "2026" */
+  label: string;
+  /** The one location asked for (EVP and admin only); null for everything they can see */
+  location: string | null;
+  /** "own" for a recruiter (their numbers only), "team" for everyone else */
+  scope: 'own' | 'team';
+  summary: {
+    /** Requirements that came in during the period, and in the one before */
+    received: number;
+    previous_received: number;
+    closed: number;
+    previous_closed: number;
+    /** The month or year it is compared with: "February 2026" or "2025" */
+    previous_label: string;
+    avg_days: number | null;
+    median_days: number | null;
+    cvs_submitted: number;
+    active: { open: number; submitted: number; hold: number };
+    active_total: number;
+    canceled: number;
+    /** Open or on-hold requirements whose submission deadline has passed */
+    overdue: number;
+  };
+  /** Received and closed per day of the month (monthly) or per month of the year (yearly) */
+  series: Array<{ key: string; label: string; closed: number; received: number }>;
+  years: number[];
+  /** Dubai and Abu Dhabi side by side: only for the EVP and the admin looking at both */
+  locations: LocationPerformance[];
+  recruiters: RecruiterPerformance[];
+  clients: Array<{ client: string; closed: number; avg_days: number | null }>;
+  /** The latest closures in the period: what, for whom and who closed it */
+  closures: Array<{ position: string; client: string; recruiter: string; location: string | null; closed_at: string; days: number }>;
+}
+
+/** The status counts, and `cvs_submitted`: the CVs submitted added up over every requirement these filters match */
+export interface RequirementStats { total: number; open: number; submitted: number; hold: number; closed: number; canceled: number; cvs_submitted: number }
+export interface RequirementPage { items: Requirement[]; total: number; stats: RequirementStats }
+export interface RequirementEvent { at: string; actor: string; action: 'created' | 'changed'; field: string | null; old: string | null; new: string | null }
+export interface RequirementDetail extends Requirement { history: RequirementEvent[] }
+
+export interface TrackerOptions {
+  statuses: RequirementStatus[];
+  locations: string[];
+  /** True for the EVP and the admin: they see both locations and get a Location dropdown */
+  all_locations: boolean;
+  can_create: boolean;
+  /** Which fields this person may change (the others are shown as plain text) */
+  editable: Record<'requirement_date' | 'position' | 'client' | 'job_location' | 'salary' | 'duration' | 'cv_submission_date' | 'cvs_submitted' | 'recruiter' | 'recruitment_manager' | 'sales_manager' | 'jd' | 'sales_comments' | 'rm_comments' | 'recruiter_comments' | 'status', boolean>;
+  /** The recruiters that can be assigned: those of the person's own location (every recruiter for the EVP and the admin) */
+  recruiters: Array<{ id: string; username: string; location: string }>;
+  /** The recruitment managers and the sales managers that can be chosen (the same location rule) */
+  managers: Array<{ id: string; username: string; location: string }>;
+  sales_managers: Array<{ id: string; username: string; location: string }>;
+}
+
+// Selections and joining: what became of a closed requirement (managers, EVP and admin only)
+export type SelectionStatus = 'offer_pending' | 'offer_released' | 'joined' | 'backed_out';
+
+export interface Selection {
+  id: string;
+  /** The requirement it came from (made when that requirement was closed) */
+  requirement_id: string | null;
+  date: string;
+  candidate_name: string | null;
+  position: string;
+  client: string;
+  status: SelectionStatus;
+  recruiters: Array<{ id: string; username: string }>;
+  /** Shown as the Account Manager */
+  sales_manager: { id: string; username: string } | null;
+  manager: { id: string; username: string } | null;
+  comments: string | null;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+export interface SelectionStats { total: number; offer_pending: number; offer_released: number; joined: number; backed_out: number }
+
+export interface SelectionPage { items: Selection[]; total: number; stats: SelectionStats }
+
+export interface SelectionOptions {
+  statuses: SelectionStatus[];
+  locations: string[];
+  all_locations: boolean;
+  editable: Record<'selection_date' | 'candidate_name' | 'status' | 'comments', boolean>;
+  recruiters: Array<{ id: string; username: string; location: string }>;
+}
+
+export interface SelectionFilters {
+  q?: string;
+  status?: SelectionStatus | '';
+  location?: string;
+  recruiter_id?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+export interface SelectionInput { selection_date?: string; candidate_name?: string | null; status?: SelectionStatus; comments?: string | null }
+
+export interface RequirementFilters {
+  status?: RequirementStatus | '';
+  q?: string;
+  /** Dubai or Abu Dhabi: only the EVP and the admin can choose (everyone else is held to their own) */
+  location?: string;
+  recruiter_id?: string;
+  /** A recruitment manager or sales manager id, or 'none' for requirements with nobody chosen */
+  manager_id?: string;
+  sales_manager_id?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+/** What the sales manager (or a manager) fills in. Only the fields that are present are changed on an update; null clears one. */
+export interface RequirementInput {
+  requirement_date?: string;
+  position?: string;
+  client?: string;
+  job_location?: string | null;
+  salary?: string | null;
+  duration_type?: 'full_time' | 'fixed' | null;
+  duration_value?: number | null;
+  duration_unit?: 'days' | 'months' | 'years' | null;
+  duration_extendable?: boolean | null;
+  jd_id?: string | null;
+  sales_comments?: string | null;
+  rm_comments?: string | null;
+  recruiter_comments?: string | null;
+  cv_submission_date?: string | null;
+  /** The recruiters, the first is the lead. Sending the list replaces it. */
+  recruiter_ids?: string[];
+  /** The recruitment manager and the sales manager (null clears) */
+  manager_id?: string | null;
+  sales_manager_id?: string | null;
+  /** What each recruiter has submitted: only the fields present are changed */
+  cvs_submissions?: Array<{ recruiter_id: string; date?: string | null; count?: number | null }>;
+  status?: RequirementStatus;
 }
 
 // Careers types
@@ -821,6 +1063,8 @@ export interface AgentChatRequest {
   jd_id?: string | null;
   jd_text?: string | null;
   jd_title?: string | null;
+  /** Public careers URL for this posting (LinkedIn Apply Now line). */
+  apply_url?: string | null;
   cv_source?: 'none' | 'library' | 'uploaded';
   cv_id?: string | null;
   cv_text?: string | null;

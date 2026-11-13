@@ -69,10 +69,14 @@ def prepare_cv(agent, cv_text: Optional[str]) -> str:
     return mask_pii(sanitize_untrusted(cv_text, settings.AGENT_MAX_CV_CHARS)).strip()
 
 
-def build_messages(agent, jd_text: str, history: List[Any], request: str, cv_text: str = "") -> List[Dict[str, str]]:
-    """System prompt, the job text (and CV, if any) in their own blocks, the last answered turns, then the new request."""
+def build_messages(agent, jd_text: str, history: List[Any], request: str, cv_text: str = "",
+                   apply_url: str = "") -> List[Dict[str, str]]:
+    """System prompt, the job text (and CV / apply URL, if any) in their own blocks, the last answered turns, then the new request."""
     jd_block = f"<job_description>\n{sanitize_untrusted(jd_text, settings.AGENT_MAX_JD_CHARS)}\n</job_description>"
     intro = "Here is the job description for this whole conversation:\n" + jd_block
+    url = (apply_url or "").strip()
+    if url:
+        intro += f"\n\n<apply_url>\n{sanitize_untrusted(url, 500)}\n</apply_url>"
     system = agent.system_prompt
     if cv_text:
         intro += "\n\nHere is the candidate's CV:\n<candidate_cv>\n" + cv_text + "\n</candidate_cv>"
@@ -96,7 +100,8 @@ def _call_model(agent, messages: List[Dict[str, str]], max_tokens: int):
 
 def handle_turn(session: Session, *, agent_id: str, username: str, message: str, conversation_id: Optional[str],
                 jd_text: Optional[str], jd_id: Optional[str], jd_title: Optional[str], jd_source: str,
-                cv_text: Optional[str] = None, cv_id: Optional[str] = None, cv_title: Optional[str] = None):
+                cv_text: Optional[str] = None, cv_id: Optional[str] = None, cv_title: Optional[str] = None,
+                apply_url: Optional[str] = None):
     """Run one turn: a TurnResult, or a Refusal when the message was refused before any conversation existed."""
     agent = get_agent(agent_id)
     if agent is None:
@@ -136,17 +141,20 @@ def handle_turn(session: Session, *, agent_id: str, username: str, message: str,
     if not usage.begin_request(username):
         raise AgentError("Your previous request is still being answered. Please wait for it to finish.", 429)
     try:
-        return _answer(session, agent, username, message, conv, jd_text, jd_id, jd_title, jd_source, cv_text, cv_id, cv_title)
+        return _answer(session, agent, username, message, conv, jd_text, jd_id, jd_title, jd_source, cv_text, cv_id, cv_title,
+                       apply_url=apply_url)
     finally:
         usage.end_request(username)
 
 
-def _answer(session, agent, username, message, conv, jd_text, jd_id, jd_title, jd_source, cv_text=None, cv_id=None, cv_title=None):
+def _answer(session, agent, username, message, conv, jd_text, jd_id, jd_title, jd_source, cv_text=None, cv_id=None, cv_title=None,
+            apply_url=None):
     # ---- 4. prompt (history is the last answered turn only: every earlier turn would be paid for again)
     job_text = conv.jd_text if conv is not None else sanitize_untrusted(jd_text or "", settings.AGENT_MAX_JD_CHARS).strip()
     history = store.recent_exchange(session, conv.id, settings.AGENT_HISTORY_TURNS) if conv is not None else []
     cv = (conv.cv_text or "") if conv is not None else prepare_cv(agent, cv_text)
-    messages = build_messages(agent, job_text, history, message, cv)
+    url = (apply_url or "").strip() if agent.id == "linkedin" else ""
+    messages = build_messages(agent, job_text, history, message, cv, apply_url=url)
     max_tokens, why_not = usage.plan_call(session, username, messages)
     if why_not:
         raise AgentError(why_not, 429)
@@ -190,6 +198,13 @@ def _answer(session, agent, username, message, conv, jd_text, jd_id, jd_title, j
     if not parsed.in_scope:
         a = store.append_message(session, conv.id, "assistant", parsed.refusal, status="blocked", blocked_reason="off_topic_model", **spent)
         return TurnResult(conv, user_row, a)
+
+    if url and agent.id == "linkedin" and parsed.meta.get("type") == "linkedin":
+        from app.agents.linkedin.parser import ensure_apply_url
+        post = ensure_apply_url(str(parsed.meta.get("post") or ""), url)
+        tags = list(parsed.meta.get("hashtags") or [])
+        parsed.meta = {**parsed.meta, "post": post, "chars": len(post)}
+        parsed.content = post + ("\n\n" + " ".join(tags) if tags else "")
 
     meta = dict(parsed.meta)
     if parsed.warnings:

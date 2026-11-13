@@ -1,11 +1,11 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { CareersSkeleton } from '@/components/skeletons';
+import { CareersListSkeleton } from '@/components/careers/CareersRouteSkeleton';
 
 const CareersPage = dynamic(
   () => import('@/components/careers').then((m) => ({ default: m.CareersPage })),
-  { loading: () => <CareersSkeleton /> },
+  { loading: () => <CareersListSkeleton /> },
 );
 
 export default function CareersManageRoute() {

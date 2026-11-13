@@ -15,6 +15,7 @@ from pathlib import Path
 
 # Document processing libraries
 import fitz  # PyMuPDF for PDF
+from app.config.settings import settings
 import docx  # python-docx for DOCX
 from PIL import Image
 
@@ -35,7 +36,7 @@ class ParsingService:
     # Supported file extensions
     SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.rtf', '.odt', '.html', '.htm', '.txt',
                             '.png', '.jpg', '.jpeg', '.tiff', '.bmp']
-    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+    MAX_FILE_SIZE = settings.max_file_size_bytes     # the same limit as the upload endpoints (MAX_FILE_SIZE_MB)
     
     def __init__(self):
         """Initialize the parsing service."""

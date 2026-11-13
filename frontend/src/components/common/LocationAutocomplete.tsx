@@ -143,14 +143,14 @@ export default function LocationAutocomplete({
       </div>
 
       {isOpen && suggestions.length > 0 && (
-        <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-surface-border bg-white py-1 shadow-[var(--shadow-md)]">
+        <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-surface-border bg-paper py-1 shadow-[var(--shadow-md)]">
           {suggestions.map((s, i) => (
             <li key={`${s.city}-${s.country}-${i}`}>
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => selectSuggestion(s)}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] ${
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${
                   i === highlightedIndex ? 'bg-brand-50 text-brand-700' : 'text-slate-700 hover:bg-slate-50'
                 }`}
               >

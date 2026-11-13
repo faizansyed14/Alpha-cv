@@ -36,9 +36,9 @@ export default function FilterSidebar({ groups, selected, onToggle, onClearAll, 
 
   return (
     <aside className={`w-full shrink-0 sm:w-60 ${className || ''}`}>
-      <div className="overflow-hidden rounded-2xl border border-surface-border bg-white shadow-card sm:sticky sm:top-4">
+      <div className="overflow-hidden rounded-2xl border border-surface-border bg-paper shadow-card sm:sticky sm:top-4">
         <div className="flex items-center justify-between border-b border-surface-border px-4 py-3">
-          <h3 className="flex items-center gap-2 text-[13px] font-semibold text-slate-900">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
             <SlidersHorizontal className="h-4 w-4 text-navy-600" />
             Filters
           </h3>
@@ -63,10 +63,10 @@ export default function FilterSidebar({ groups, selected, onToggle, onClearAll, 
                   onClick={() => toggleGroupCollapse(group.key)}
                   className="flex w-full items-center justify-between text-left"
                 >
-                  <span className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-800">
+                  <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
                     {group.label}
                     {selectedInGroup.length > 0 && (
-                      <span className="rounded-full bg-navy-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      <span className="rounded-full bg-solid-soft px-1.5 py-0.5 text-[10px] font-semibold text-white">
                         {selectedInGroup.length}
                       </span>
                     )}
@@ -80,12 +80,12 @@ export default function FilterSidebar({ groups, selected, onToggle, onClearAll, 
                 {!isCollapsed && (
                   <div className="mt-2 max-h-56 space-y-1 overflow-y-auto pr-1">
                     {group.options.length === 0 ? (
-                      <p className="py-1 text-[12px] text-slate-400">No options</p>
+                      <p className="py-1 text-xs text-slate-400">No options</p>
                     ) : (
                       group.options.map((opt) => (
                         <label
                           key={opt.value}
-                          className="flex cursor-pointer items-center justify-between gap-2 rounded-md px-1.5 py-1 text-[13px] text-slate-700 hover:bg-slate-50"
+                          className="flex cursor-pointer items-center justify-between gap-2 rounded-md px-1.5 py-1 text-sm text-slate-700 hover:bg-slate-50"
                         >
                           <span className="flex min-w-0 items-center gap-2">
                             <input
@@ -96,7 +96,7 @@ export default function FilterSidebar({ groups, selected, onToggle, onClearAll, 
                             />
                             <span className="truncate">{opt.label}</span>
                           </span>
-                          <span className="shrink-0 rounded bg-slate-100 px-1.5 text-[11px] font-medium tabular-nums text-slate-500">{opt.count}</span>
+                          <span className="shrink-0 rounded bg-slate-100 px-1.5 text-2xs font-medium tabular-nums text-slate-500">{opt.count}</span>
                         </label>
                       ))
                     )}

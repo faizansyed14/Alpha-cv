@@ -123,11 +123,11 @@ export default function DatabaseCandidates({
   return (
     <div className="space-y-4">
       {/* the search that produced this list */}
-      <section className="rounded-2xl border border-surface-border bg-white p-4 shadow-card">
+      <section className="rounded-2xl border border-surface-border bg-paper p-4 shadow-card">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Search className="h-4 w-4 text-navy-700" />
-            <h3 className="text-[13px] font-semibold text-slate-900">Boolean search</h3>
+            <h3 className="text-sm font-semibold text-slate-900">Boolean search</h3>
             <span className="chip chip-neutral">
               {source === 'custom' ? 'Edited for this view' : source === 'generated' ? 'Built from the job title' : 'From the job'}
             </span>
@@ -174,11 +174,11 @@ export default function DatabaseCandidates({
               maxLength={4000}
               autoFocus
               spellCheck={false}
-              className="field-input !h-auto w-full resize-y py-2 font-mono text-[12.5px] leading-relaxed"
+              className="field-input !h-auto w-full resize-y py-2 font-mono text-xs leading-relaxed"
               placeholder='("Cloud Engineer") AND ("Azure" OR "Terraform") NOT intern'
             />
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-[12px] text-slate-500">
+              <p className="text-xs text-slate-500">
                 Use AND, OR, NOT in capitals, quotes for exact phrases and brackets to group. This changes the list here only, not the job.
               </p>
               <div className="flex items-center gap-1.5">
@@ -188,14 +188,14 @@ export default function DatabaseCandidates({
             </div>
           </form>
         ) : (
-          <pre className="mt-3 max-h-28 overflow-auto whitespace-pre-wrap rounded-lg border border-surface-border bg-slate-50 px-3 py-2 font-mono text-[12.5px] leading-relaxed text-slate-800">
+          <pre className="mt-3 max-h-28 overflow-auto whitespace-pre-wrap rounded-lg border border-surface-border bg-slate-50 px-3 py-2 font-mono text-xs leading-relaxed text-slate-800">
             {searched || (loading ? 'Searching…' : 'No search string')}
           </pre>
         )}
       </section>
 
       {error ? (
-        <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-[13px] text-red-800" role="alert">
+        <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <p className="font-medium">{error}</p>
@@ -205,7 +205,7 @@ export default function DatabaseCandidates({
           </div>
         </div>
       ) : loading ? (
-        <CandidateRowsSkeleton label="Searching the database" />
+        <CandidateRowsSkeleton label="Searching the database" variant="database" />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={Database}
@@ -217,14 +217,14 @@ export default function DatabaseCandidates({
         />
       ) : (
         <>
-          <p className="text-[13px] text-slate-600">
+          <p className="text-sm text-slate-600">
             <span className="font-semibold text-slate-900 tabular-nums">{estimate ? 'About ' : ''}{shownTotal.toLocaleString()}</span>{' '}
             candidate{shownTotal === 1 ? '' : 's'} in your database fit{shownTotal === 1 ? 's' : ''} this search, newest CV first.
             {excluded > 0 && <span className="text-slate-500"> The {excluded} applicant{excluded === 1 ? '' : 's'} of this job are listed under Applicants, not here.</span>}
           </p>
 
-          <div className="overflow-x-auto rounded-2xl border border-surface-border bg-white shadow-card">
-            <table className="w-full min-w-[860px] table-fixed border-collapse text-[13px]">
+          <div className="overflow-x-auto rounded-2xl border border-surface-border bg-paper shadow-card">
+            <table className="w-full min-w-[860px] table-fixed border-collapse text-sm">
               <colgroup>
                 <col className="w-[23%]" />
                 <col className="w-[22%]" />
@@ -251,7 +251,7 @@ export default function DatabaseCandidates({
                         <Avatar name={c.full_name} />
                         <div className="min-w-0">
                           <div className="break-words font-semibold leading-tight text-slate-900">{c.full_name || 'Unnamed candidate'}</div>
-                          <div className="mt-0.5 line-clamp-2 text-[12px] leading-tight text-slate-500">{c.job_title || dash}</div>
+                          <div className="mt-0.5 line-clamp-2 text-xs leading-tight text-slate-500">{c.job_title || dash}</div>
                           {c.applied_job_title && (
                             <span className="chip chip-neutral mt-1.5" title={`Applied earlier to: ${c.applied_job_title}`}>Applied to another job</span>
                           )}
@@ -271,7 +271,7 @@ export default function DatabaseCandidates({
                         <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
                         <span className="break-words">{c.location || dash}</span>
                       </div>
-                      <div className="mt-1 flex items-start gap-1 text-[12px] text-slate-500">
+                      <div className="mt-1 flex items-start gap-1 text-xs text-slate-500">
                         <Globe className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
                         <span className="break-words">{c.nationality || dash}</span>
                       </div>
@@ -281,7 +281,7 @@ export default function DatabaseCandidates({
                         <Briefcase className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                         {c.years_of_experience != null && c.years_of_experience !== '' ? `${c.years_of_experience} yrs` : dash}
                       </div>
-                      <div className="mt-1 flex items-start gap-1 text-[12px] text-slate-500">
+                      <div className="mt-1 flex items-start gap-1 text-xs text-slate-500">
                         <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
                         <span className="break-words">{c.notice_period ? `Notice: ${c.notice_period}` : dash}</span>
                       </div>
@@ -290,7 +290,7 @@ export default function DatabaseCandidates({
                       {c.email ? (
                         <a href={`mailto:${c.email}`} className="block break-all text-slate-800 hover:text-navy-700 hover:underline">{c.email}</a>
                       ) : dash}
-                      {c.phone && <div className="mt-0.5 text-[12px] text-slate-500">{c.phone}</div>}
+                      {c.phone && <div className="mt-0.5 text-xs text-slate-500">{c.phone}</div>}
                       <ContactActions email={c.email} phone={c.phone} linkedin={c.linkedin_url} github={c.github_url} variant="icons" className="mt-1.5" />
                     </td>
                     <td className="px-3 py-3">
@@ -298,14 +298,14 @@ export default function DatabaseCandidates({
                         <button
                           type="button"
                           onClick={() => router.push(`/candidates/${c.id}?from=${encodeURIComponent((pathname || '/careers') + window.location.search)}`)}
-                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-navy-900 px-2.5 text-[12px] font-semibold text-white transition-colors hover:bg-navy-800"
+                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-solid px-2.5 text-xs font-semibold text-white transition-colors hover:bg-solid-hover"
                         >
                           <Eye className="h-3.5 w-3.5" /> Profile
                         </button>
                         <button
                           type="button"
                           onClick={() => preview.open(c.id, c.filename, c.full_name)}
-                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-surface-border bg-white px-2.5 text-[12px] font-medium text-slate-700 transition-colors hover:border-navy-200 hover:bg-navy-50 hover:text-navy-700"
+                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-surface-border bg-paper px-2.5 text-xs font-medium text-slate-700 transition-colors hover:border-navy-200 hover:bg-navy-50 hover:text-navy-700"
                         >
                           <FileText className="h-3.5 w-3.5" /> CV
                         </button>
@@ -317,7 +317,7 @@ export default function DatabaseCandidates({
             </table>
           </div>
 
-          <p className="text-center text-[12.5px] text-slate-500 tabular-nums">
+          <p className="text-center text-xs text-slate-500 tabular-nums">
             Showing {rows.length.toLocaleString()} of {estimate ? 'about ' : ''}{shownTotal.toLocaleString()}
           </p>
           <InfiniteScrollSentinel hasMore={!!cursor} loading={loadingMore} itemCount={rows.length} onLoadMore={loadMore} />

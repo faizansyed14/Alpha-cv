@@ -8,15 +8,14 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from sqlalchemy import and_, delete, exists, func, literal, literal_column, not_, or_, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, exists, func, literal, literal_column, not_, or_, select, update
 from sqlmodel import Session
 
 from app.ingestion import boolean_query as bq
 from app.ingestion.categories import normalize_category
 from app.ingestion.profile_links import normalize_github, normalize_linkedin
-from app.ingestion.search_index import build_search_documents, experience_years, matched_terms, normalize
-from app.models.talent import Candidate, CandidateNote, CandidateSearch, JobApplication, JobDescription, JobPosting, SavedCandidate
+from app.ingestion.search_index import FTS_CONFIG, build_search_documents, experience_years, matched_terms, normalize
+from app.models.talent import Candidate, CandidateNote, CandidateSearch, JobApplication, JobDescription, JobPosting
 from app.store import arrays
 
 logger = logging.getLogger(__name__)
@@ -78,16 +77,49 @@ def clean_list(values: Iterable[Any], size: int, unique_ci: bool = True) -> List
     return out
 
 
-def forget_cached_counts() -> None:
-    """The category counts and the list totals are cached for a few seconds; a saved or deleted candidate makes them stale at once."""
-    try:
-        from app.providers.cache.memory import get_cache_service
+COUNTS_KEY, COUNTS_NS = "category_counts", "cv_data"
+COUNTS_TTL_SECONDS = 60   # only a safety net: every save and delete forgets the counts at once
 
-        cache = get_cache_service()
-        cache.delete("categories", namespace="cv_data")
-        cache.delete("cv_total:", namespace="cv_data")
+
+def forget_cached_counts() -> None:
+    """The exact number of candidates per category is kept in Redis, shared by every process (API workers, the background worker); a
+    saved or deleted candidate makes it stale at once, for all of them."""
+    try:
+        from app.providers.cache.redis import get_redis_cache
+
+        get_redis_cache().delete(COUNTS_KEY, namespace=COUNTS_NS)
     except Exception:  # noqa: BLE001 - a cache is never a reason to fail a save
         pass
+
+
+class BadCursor(ValueError):
+    """The ``cursor`` of a list call is not one this API handed out."""
+
+
+def page_cursor(uploaded_at: datetime, cid: str) -> str:
+    """Where a page ended: the upload time and id of its last row. The next page starts right after it."""
+    return f"{uploaded_at.isoformat()}|{cid}"
+
+
+def parse_page_cursor(cursor: Optional[str]) -> Optional[Tuple[datetime, str]]:
+    if not cursor:
+        return None
+    ts, sep, last_id = str(cursor).partition("|")
+    try:
+        when = datetime.fromisoformat(ts)
+    except ValueError as exc:
+        raise BadCursor("unreadable cursor") from exc
+    if not sep or not last_id or len(last_id) > 64:
+        raise BadCursor("unreadable cursor")
+    return when, last_id
+
+
+def older_than(after: Tuple[datetime, str]):
+    """Rows that come after ``after`` in the newest-first order. The first test repeats what the second implies on purpose: it is the part
+    PostgreSQL can use to START the index scan at that row, so page 5,000 costs the same as page 1 (an OFFSET walks past every skipped row)."""
+    when, last_id = after
+    return and_(Candidate.uploaded_at <= when,
+                or_(Candidate.uploaded_at < when, and_(Candidate.uploaded_at == when, Candidate.id < last_id)))
 
 
 class CandidateStore:
@@ -175,9 +207,10 @@ class CandidateStore:
         s.add(row)
         if self._fts:
             s.flush()
-            simple = literal_column("'simple'::regconfig")
+            simple = literal_column("'simple'::regconfig")                 # names and places: exactly as written
+            words = literal_column(f"'{FTS_CONFIG}'::regconfig")           # the CV's words: their other forms count too
             s.execute(update(CandidateSearch).where(CandidateSearch.candidate_id == cid).values(
-                literal_tsv=func.to_tsvector(simple, docs["literal"]), extra_tsv=func.to_tsvector(simple, docs["extra"]),
+                literal_tsv=func.to_tsvector(words, docs["literal"]), extra_tsv=func.to_tsvector(words, docs["extra"]),
                 location_tsv=func.to_tsvector(simple, docs["location"]), nationality_tsv=func.to_tsvector(simple, docs["nationality"])))
 
     def merge_candidate_facts(self, cid: str, facts: Dict[str, Any]) -> bool:
@@ -365,6 +398,44 @@ class CandidateStore:
         with Session(self.engine) as s:
             return list(s.execute(q).scalars())
 
+    def list_candidate_page(self, limit: int, categories: Optional[Sequence[str]] = None,
+                            after: Optional[Tuple[datetime, str]] = None) -> Tuple[List[str], Optional[str]]:
+        """One page of ids, newest upload first, and the cursor of the next page (None on the last one). The page starts right after
+        ``after`` through the (uploaded_at, id) index, so its cost does not depend on how deep into the list it is."""
+        limit = max(1, limit)
+        q = select(Candidate.id, Candidate.uploaded_at).order_by(Candidate.uploaded_at.desc(), Candidate.id.desc()).limit(limit + 1)
+        clause = self._category_clause(categories)
+        if clause is not None:
+            q = q.where(clause)
+        if after is not None:
+            q = q.where(older_than(after))
+        with Session(self.engine) as s:
+            rows = list(s.execute(q))
+        page = rows[:limit]
+        return [r[0] for r in page], (page_cursor(page[-1][1], page[-1][0]) if len(rows) > limit else None)
+
+    def cached_category_counts(self) -> Dict[str, int]:
+        """The exact number of candidates in every category (their sum is the exact size of the database). Counted by one pass over the
+        category index and then shared through Redis until a candidate is saved or deleted, so opening a list or moving from one category
+        to another never counts rows again."""
+        cache = None
+        try:
+            from app.providers.cache.redis import get_redis_cache
+
+            cache = get_redis_cache()
+            hit = cache.get(COUNTS_KEY, namespace=COUNTS_NS)
+            if isinstance(hit, dict):
+                return {str(k): int(v) for k, v in hit.items()}
+        except Exception:  # noqa: BLE001 - without the cache the database is asked
+            cache = None
+        counts = self.category_counts()
+        if cache is not None:
+            try:
+                cache.set(COUNTS_KEY, counts, ttl_seconds=COUNTS_TTL_SECONDS, namespace=COUNTS_NS)
+            except Exception:  # noqa: BLE001
+                pass
+        return counts
+
     def count_candidates(self, categories: Optional[Sequence[str]] = None) -> int:
         q = select(func.count()).select_from(Candidate)
         clause = self._category_clause(categories)
@@ -405,7 +476,8 @@ class CandidateStore:
     def _word_match(self, field: str, term: str):
         """The CV's search text ``field`` (text | literal | location | nationality) holds ``term`` as a whole word or an exact phrase."""
         if self._fts:
-            query = func.phraseto_tsquery(literal_column("'simple'::regconfig"), term)
+            config = FTS_CONFIG if field in ("text", "literal") else "simple"          # words of the CV: word forms; places: as written
+            query = func.phraseto_tsquery(literal_column(f"'{config}'::regconfig"), term)
             if field == "text":      # the CV's own words or what the AI added
                 return or_(CandidateSearch.literal_tsv.op("@@")(query), CandidateSearch.extra_tsv.op("@@")(query))
             return getattr(CandidateSearch, f"{field}_tsv").op("@@")(query)
@@ -510,7 +582,7 @@ class CandidateStore:
             while tier < len(tiers) and len(found) < limit:
                 conds = self._tier_conditions(tiers[tier], terms, filters)
                 if after:
-                    conds.append(or_(Candidate.uploaded_at < after[0], and_(Candidate.uploaded_at == after[0], Candidate.id < after[1])))
+                    conds.append(older_than(after))
                 evidence = ([self._word_match("text", t).label(f"m{i}") for i, t in enumerate(terms)] if self._fts
                             else [CandidateSearch.text])
                 q = (select(Candidate.id, Candidate.uploaded_at, *evidence)
@@ -569,77 +641,25 @@ class CandidateStore:
             ids = list(s.execute(base.order_by(Candidate.uploaded_at.desc(), Candidate.id.desc()).offset(offset).limit(limit)).scalars())
         return ids, total, estimate
 
-    # ------------------------------------------------------------------ saved CVs (each recruiter's own list)
-    SAVE_AT_ONCE = 500
-
-    def save_candidates(self, username: str, ids: Sequence[str]) -> int:
-        """Add CVs to this person's saved list (ids that do not exist, or are already saved, are skipped). Returns how many were added."""
-        wanted = list(dict.fromkeys(str(i) for i in ids if i))[: self.SAVE_AT_ONCE]
-        if not wanted:
-            return 0
-        owner = username[:128]
-        with Session(self.engine) as s:
-            real = {i for part in chunks(wanted) for i in s.execute(select(Candidate.id).where(Candidate.id.in_(part))).scalars()}
-            have = {i for part in chunks(list(real)) for i in s.execute(select(SavedCandidate.candidate_id).where(
-                SavedCandidate.username == owner, SavedCandidate.candidate_id.in_(part))).scalars()}
-            new = [i for i in wanted if i in real and i not in have]
-            s.add_all([SavedCandidate(username=owner, candidate_id=i) for i in new])
-            try:
-                s.commit()
-            except IntegrityError:                    # the same CV saved twice at the same moment: keep what is not there yet
-                s.rollback()
-                added = 0
-                for i in new:
-                    if s.get(SavedCandidate, (owner, i)) is None:
-                        s.add(SavedCandidate(username=owner, candidate_id=i))
-                        try:
-                            s.commit()
-                            added += 1
-                        except IntegrityError:
-                            s.rollback()
-                return added
-            return len(new)
-
-    def unsave_candidates(self, username: str, ids: Sequence[str]) -> int:
-        """Remove CVs from this person's saved list (the CVs themselves stay). Returns how many were removed."""
-        wanted = list(dict.fromkeys(str(i) for i in ids if i))[: self.SAVE_AT_ONCE]
-        removed = 0
-        with Session(self.engine) as s:
-            for part in chunks(wanted):
-                removed += int(s.execute(delete(SavedCandidate).where(
-                    SavedCandidate.username == username[:128], SavedCandidate.candidate_id.in_(part))).rowcount or 0)
-            s.commit()
-        return removed
-
-    def saved_candidate_ids(self, username: str, limit: int = 5000) -> List[str]:
-        """The ids this person saved, newest first (what the cards use to show the bookmark)."""
-        with Session(self.engine) as s:
-            return list(s.execute(select(SavedCandidate.candidate_id).where(SavedCandidate.username == username[:128])
-                                  .order_by(SavedCandidate.saved_at.desc(), SavedCandidate.candidate_id).limit(limit)).scalars())
-
-    def list_saved_ids(self, username: str, offset: int, limit: int) -> Tuple[List[str], int]:
-        """One page of this person's saved CV ids, the one saved last first, and how many are saved in all."""
-        mine = SavedCandidate.username == username[:128]
-        with Session(self.engine) as s:
-            total = int(s.execute(select(func.count()).select_from(SavedCandidate).where(mine)).scalar() or 0)
-            ids = list(s.execute(select(SavedCandidate.candidate_id).where(mine).order_by(
-                SavedCandidate.saved_at.desc(), SavedCandidate.candidate_id).offset(max(0, offset)).limit(max(0, limit))).scalars())
-        return ids, total
-
-    def search_saved_ids(self, username: str, words: List[str], offset: int, limit: int) -> Tuple[List[str], int]:
-        """The same search box as on the Candidates page (every word typed must be in the CV), over this person's saved CVs only."""
+    def search_candidate_page(self, words: List[str], limit: int, categories: Optional[Sequence[str]] = None,
+                              after: Optional[Tuple[datetime, str]] = None,
+                              with_total: bool = True) -> Tuple[List[str], Optional[int], bool, Optional[str]]:
+        """The basic search box, paged by cursor: one page of ids (newest first), the total (counted up to COUNT_CAP, only when asked: the
+        first page asks, the following ones do not count again), whether the true total is larger, and the cursor of the next page."""
+        limit = max(1, limit)
         terms = [t for t in dict.fromkeys(normalize(w) for w in words) if t]
         with Session(self.engine) as s:
             self._limit_search_time(s)
             conds = self._tier_conditions("full", terms, dict(experience_min=None, experience_max=None, locations=None, nationalities=None,
                                                               languages=None, bool_node=None, added_after=None, added_before=None,
-                                                              categories=None))
-            base = (select(Candidate.id).join(CandidateSearch, CandidateSearch.candidate_id == Candidate.id)
-                    .join(SavedCandidate, SavedCandidate.candidate_id == Candidate.id)
-                    .where(SavedCandidate.username == username[:128], *conds))
-            total, _estimate = self._capped_count(s, base)
-            ids = list(s.execute(base.order_by(SavedCandidate.saved_at.desc(), Candidate.id).offset(max(0, offset)).limit(max(0, limit))).scalars())
-        return ids, total
+                                                              categories=categories))
+            joined = select(Candidate.id, Candidate.uploaded_at).join(CandidateSearch, CandidateSearch.candidate_id == Candidate.id)
+            total, estimate = self._capped_count(s, joined.where(*conds)) if with_total else (None, False)
+            if after is not None:
+                conds = conds + [older_than(after)]
+            rows = list(s.execute(joined.where(*conds).order_by(Candidate.uploaded_at.desc(), Candidate.id.desc()).limit(limit + 1)))
+        page = rows[:limit]
+        return [r[0] for r in page], total, estimate, (page_cursor(page[-1][1], page[-1][0]) if len(rows) > limit else None)
 
     # ------------------------------------------------------------------ notes
     @staticmethod
