@@ -37,7 +37,7 @@ alembic==1.20.1
 openpyxl==3.1.5
 passlib[argon2,bcrypt]==1.7.4
 PyJWT==2.15.1  # auth-critical CVE fixes
-cryptography==46.0.3  # encrypts the authenticator-app secrets stored in the database
+cryptography==50.0.2  # encrypts the authenticator-app secrets stored in the database
 pyotp==2.10.0  # authenticator-app (TOTP) second factor
 qrcode==8.2  # the QR code shown when an authenticator app is set up (SVG, no image library needed)
 psutil==5.9.5
