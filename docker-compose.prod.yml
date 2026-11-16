@@ -251,7 +251,6 @@ services:
       - QDRANT__SERVICE__MAX_REQUEST_SIZE_MB=512
       # Optional: require an API key (set QDRANT_API_KEY in .env.prod to enable). The variable is passed ONLY when it has a value: Qdrant
       # treats an empty API key as a key that must be sent, so passing an empty one made every request without a key fail.
-      - ${QDRANT_API_KEY:+QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}}
     deploy:
       resources:
         limits:
