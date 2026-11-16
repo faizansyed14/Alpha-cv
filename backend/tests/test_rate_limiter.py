@@ -195,19 +195,20 @@ class TestProductionRateLimiter:
         
         # Add old requests (older than 1 hour)
         old_time = time.time() - 3700  # 1 hour + 100 seconds ago
-        limiter.ip_requests[client_ip].append(old_time)
-        limiter.ip_requests[client_ip].append(old_time)
-        
+        key = (client_ip, "general")
+        limiter.ip_requests[key].append(old_time)
+        limiter.ip_requests[key].append(old_time)
+
         # Add recent request
         recent_time = time.time() - 100  # 100 seconds ago
-        limiter.ip_requests[client_ip].append(recent_time)
-        
+        limiter.ip_requests[key].append(recent_time)
+
         # Cleanup
-        limiter._cleanup_old_requests(client_ip, window_seconds=3600)
-        
+        limiter._cleanup_old_requests(client_ip, "general", window_seconds=3600)
+
         # Only recent request should remain
-        assert len(limiter.ip_requests[client_ip]) == 1
-        assert limiter.ip_requests[client_ip][0] == recent_time
+        assert len(limiter.ip_requests[key]) == 1
+        assert limiter.ip_requests[key][0] == recent_time
     
     def test_ip_reputation_update(self, limiter):
         """Test IP reputation system"""
@@ -278,7 +279,7 @@ class TestProductionRateLimiter:
         
         # Record request
         limiter.record_request(client_ip, endpoint)
-        assert len(limiter.ip_requests[client_ip]) == 1
+        assert len(limiter.ip_requests[(client_ip, endpoint)]) == 1
         assert limiter.ip_concurrent[client_ip] == 1
         
         # Finish request
@@ -288,17 +289,34 @@ class TestProductionRateLimiter:
     def test_periodic_cleanup(self, limiter):
         """Test periodic cleanup"""
         # Add some test data
-        limiter.ip_requests["192.168.1.107"].append(time.time() - 3700)  # Old
-        limiter.ip_requests["192.168.1.108"].append(time.time() - 100)    # Recent
+        limiter.ip_requests[("192.168.1.107", "general")].append(time.time() - 3700)  # Old
+        limiter.ip_requests[("192.168.1.108", "general")].append(time.time() - 100)    # Recent
         limiter.ip_reputation["192.168.1.109"] = 0.5  # Inactive IP
-        
+
         # Run cleanup
         limiter._periodic_cleanup()
-        
-        # Old requests should be cleaned
-        assert len(limiter.ip_requests["192.168.1.107"]) == 0
+
+        # Old requests should be cleaned (the empty window is dropped)
+        assert ("192.168.1.107", "general") not in limiter.ip_requests
         # Recent requests should remain
-        assert len(limiter.ip_requests["192.168.1.108"]) > 0
+        assert len(limiter.ip_requests[("192.168.1.108", "general")]) > 0
+
+    def test_matching_polls_do_not_use_up_the_general_budget(self, limiter):
+        """Each (IP, endpoint class) has its own window: a recruiter's progress polls leave the general limit untouched."""
+        ip = "192.168.1.120"
+        for _ in range(limiter.rate_limits["general"].requests_per_hour):
+            limiter.record_request(ip, "matching")
+            limiter.finish_request(ip, "matching")
+        assert limiter.is_rate_limited(ip, "general")[0] is False
+        assert len(limiter.ip_requests[(ip, "general")]) == 0
+
+    def test_matching_endpoints_are_classified_and_have_a_high_limit(self, limiter):
+        for path, method in [("/api/match", "POST"), ("/api/matching-progress/abc", "GET"),
+                             ("/api/match/jobs/abc", "GET"), ("/api/agentic/match-status/abc", "GET")]:
+            assert limiter._classify_endpoint(path, method) == "matching", path
+        assert limiter._classify_endpoint("/api/cv/list", "GET") == "general"
+        assert limiter.rate_limits["matching"].requests_per_hour >= 30000
+        assert limiter.rate_limits["matching"].concurrent_limit == 50
     
     def test_get_stats(self, limiter):
         """Test statistics retrieval"""
@@ -392,6 +410,46 @@ class TestRateLimitMiddleware:
         # Should have bypass header
         assert hasattr(response, 'headers')
     
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("role, bypassed", [("admin", True), ("evp", True), ("manager", True),
+                                                ("user", False), ("account_manager", False)])
+    async def test_middleware_bypasses_staff_roles_only(self, mock_request, mock_call_next, role, bypassed):
+        from app.security.auth import create_access_token
+        mock_request.headers = {"authorization": f"Bearer {create_access_token('someone', role)}"}
+        response = await rate_limit_middleware(mock_request, mock_call_next)
+        assert response.status_code == 200
+        assert (response.headers.get("X-RateLimit-Bypassed") == "true") is bypassed
+
+    @pytest.mark.asyncio
+    async def test_middleware_bypasses_a_whitelisted_ip_only(self, mock_request, mock_call_next, monkeypatch):
+        from app.api.middleware import rate_limiter as module
+        monkeypatch.setattr(module.settings, "RATE_LIMIT_WHITELIST_IPS", "203.0.113.7", raising=False)
+        monkeypatch.setattr(module, "_WHITELIST_NETS", module._whitelisted_networks())
+        mock_request.client.host = "203.0.113.7"
+        response = await rate_limit_middleware(mock_request, mock_call_next)
+        assert response.headers.get("X-RateLimit-Bypass-Reason") == "whitelisted IP"
+        mock_request.client.host = "203.0.113.8"                         # a neighbour address is not trusted
+        response = await rate_limit_middleware(mock_request, mock_call_next)
+        assert response.headers.get("X-RateLimit-Bypassed") is None
+
+    @pytest.mark.asyncio
+    async def test_nobody_is_whitelisted_when_the_setting_is_empty(self, mock_request, mock_call_next, monkeypatch):
+        from app.api.middleware import rate_limiter as module
+        monkeypatch.setattr(module.settings, "RATE_LIMIT_WHITELIST_IPS", "", raising=False)
+        monkeypatch.setattr(module, "_WHITELIST_NETS", module._whitelisted_networks())
+        assert module._WHITELIST_NETS == []
+        response = await rate_limit_middleware(mock_request, mock_call_next)
+        assert response.headers.get("X-RateLimit-Bypassed") is None
+
+    @pytest.mark.asyncio
+    async def test_middleware_bypasses_ips_from_the_environment_setting(self, mock_request, mock_call_next, monkeypatch):
+        from app.api.middleware import rate_limiter as module
+        monkeypatch.setattr(module.settings, "RATE_LIMIT_WHITELIST_IPS", "198.51.100.0/24, not-an-ip", raising=False)
+        monkeypatch.setattr(module, "_WHITELIST_NETS", module._whitelisted_networks())
+        mock_request.client.host = "198.51.100.77"
+        response = await rate_limit_middleware(mock_request, mock_call_next)
+        assert response.headers.get("X-RateLimit-Bypass-Reason") == "whitelisted IP"
+
     @pytest.mark.asyncio
     async def test_middleware_handles_invalid_token(self, mock_request, mock_call_next):
         """Test middleware handles invalid tokens gracefully"""

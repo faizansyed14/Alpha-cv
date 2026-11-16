@@ -323,6 +323,8 @@ class Settings(BaseSettings):
     # Peers allowed to set X-Forwarded-For / X-Real-IP (nginx, the Docker network, a cloud load balancer). Forwarding
     # headers from anyone else are ignored, so a client cannot choose its own IP for rate limiting / login throttling.
     ALLOWED_PROXY_IPS: str = "127.0.0.0/8,::1/128,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
+    # Client IPs (or CIDR ranges, comma-separated) that skip rate limiting entirely, e.g. the office address. Added to the built-in office IP.
+    RATE_LIMIT_WHITELIST_IPS: str = ""
 
     # ---- Queues / workers ----
     # Route public careers applications through the Redis queue consumed by the
