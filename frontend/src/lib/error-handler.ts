@@ -39,7 +39,8 @@ export class ApiErrorHandler {
         break;
       case 403:
         message = 'Access denied';
-        detail = 'You do not have permission to perform this action.';
+        // The server says why (for example "The admin's email and password are set in the .env file"); that is more useful than a generic line.
+        detail = (typeof data?.detail === 'string' && data.detail) || 'You do not have permission to perform this action.';
         break;
       case 404:
         message = 'Resource not found';

@@ -218,6 +218,12 @@ export default function AdminUsersPage() {
       // Drop empty-string fields so the API's EmailStr / validators don't 422;
       // an omitted field means "leave unchanged".
       const payload: UpdateUserRequest = { ...editForm };
+      if (editUser.role === 'admin') {
+        // The admin's email and password come from the server's .env file; only the MFA can be changed here. (A browser that autofills a
+        // saved login into these boxes must not turn that into a change the server refuses.)
+        delete payload.email;
+        delete payload.password;
+      }
       if (typeof payload.email === 'string' && !payload.email.trim()) delete payload.email;
       else if (typeof payload.email === 'string') payload.email = payload.email.trim();
       if (typeof payload.password === 'string' && !payload.password.trim()) delete payload.password;
@@ -696,6 +702,8 @@ export default function AdminUsersPage() {
                     value={editForm.email !== undefined ? editForm.email : (editUser.email || '')}
                     onChange={(e) => setEditForm({...editForm, email: e.target.value})}
                     placeholder="user@example.com"
+                    autoComplete="off"
+                    disabled={editUser.role === 'admin'}
                     required
                   />
                   {(editForm.otp_mode || editUser.otp_mode) === 'captcha' && (
@@ -717,7 +725,9 @@ export default function AdminUsersPage() {
                     type="password"
                     value={editForm.password || ''}
                     onChange={(e) => setEditForm({...editForm, password: e.target.value})}
-                    placeholder="Leave blank to keep current password"
+                    placeholder={editUser.role === 'admin' ? 'Set in the server .env file' : 'Leave blank to keep current password'}
+                    autoComplete="new-password"
+                    disabled={editUser.role === 'admin'}
                   />
                 </div>
                 {editUser.role === 'admin' ? (
