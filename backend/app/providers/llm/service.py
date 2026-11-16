@@ -48,6 +48,7 @@ ROLE FAMILY: Identify the role family such as (Engineering/Management/Sales/Fina
 CATEGORY: Classify the candidate's primary domain as EXACTLY one of (<<CATEGORIES>>). Copy the name exactly as written; never invent a new category. Choose by the candidate's main function: accountants, auditors and finance staff are "Finance & Accounting"; sales and account managers "Sales & Business Development"; HR "Human Resources & Administration"; nurses and doctors "Healthcare & Life Sciences"; and so on. Only IT roles get an IT category. Use "Other" only when nothing fits. Base this on their primary skills, experience, and job titles.
 Exactly 20 SEARCH KEYWORDS: short, precise keyword tags (1-3 words each, e.g. "Python", "AWS", "Financial Modeling", "Salesforce CRM", "Project Management") that a recruiter would type into a search box to find this exact candidate. These are NOT the same as the skill phrases above: a skill phrase can be a longer descriptive sentence fragment, a keyword must be the bare searchable term itself (the specific technology, tool, certification, methodology, or domain expertise named in the CV, not a paraphrase, not a generic word like "communication" or "teamwork" unless the CV gives no more specific skills at all). Pick the 20 terms that most precisely and distinctively describe THIS candidate, ranked by how central they are to their profile. This field is used to power exact-match candidate search, so precision matters more than creativity: only use terms that actually appear (or are unambiguously implied, e.g. "AWS" implying "Amazon Web Services") in the CV. If fewer than 20 genuinely distinct, specific keywords exist, leave the remaining slots as "" rather than inventing or repeating ones.
 GENDER: Infer only when the CV explicitly states gender/sex OR uses unambiguous gendered pronouns referring to the candidate (he/him/his → "Male", she/her/hers → "Female"), or an explicit label like "Gender: Male". If unclear, ambiguous, or not mentioned, return null. NEVER invent gender from the name alone.
+NATIONALITY: The candidate's nationality, ONLY when the CV states it: a labelled field ("Nationality: Indian", "Citizenship: British", "Nationality - Egyptian") or a plain statement such as "a Jordanian national" or "holds Canadian citizenship". Return it as the COUNTRY NAME in English, not the adjective ("Indian" → "India", "British" → "United Kingdom", "Emirati" → "United Arab Emirates", "Filipino" → "Philippines"). If the CV lists more than one nationality, return the first one. Do NOT infer it from the candidate's name, the phone number's country code, the current city or country of residence, the universities, the employers or the languages spoken. A visa or residency status (e.g. "UAE Residence Visa", "Employment Visa", "Iqama") is NOT a nationality. If the CV does not state it, return null.
 CERTIFICATIONS: Professional certifications and licences the candidate holds, ONLY if the CV states them (e.g. a Certifications/Licences section, or "ACCA qualified", "PMP certified"). Give each as its full official name with the acronym in parentheses, e.g. "Association of Chartered Certified Accountants (ACCA)", "Project Management Professional (PMP)", "Amazon Web Services Certified Developer Associate". Do NOT list degrees, university courses, training attendance or skills. Return a de-duplicated array (max 20); return [] if none are stated.
 LANGUAGES: Extract spoken/written languages ONLY if the CV explicitly lists them (e.g. Languages, Language proficiency, Mother tongue sections, or phrases like "Fluent in English and Arabic"). Return a de-duplicated array of language names (e.g. ["English", "Arabic"]). If none are mentioned, return []. Do not invent languages from location or nationality.
 General Rules:
@@ -76,6 +77,7 @@ Output Format:
   "role_family": string | null,
   "category": string | null,
   "gender": "Male" | "Female" | null,
+  "nationality": string | null,
   "languages": ["English", "..."] | [],
   "certifications": ["Project Management Professional (PMP)", "..."] | [],
   "skills_sentences": [
@@ -186,7 +188,7 @@ CV_JSON_SCHEMA: Dict[str, Any] = {
         "required": [
             "doc_type", "name", "job_title", "years_of_experience",
             "skills_sentences", "responsibility_sentences", "keywords", "contact_info",
-            "gender", "languages", "certifications"
+            "gender", "nationality", "languages", "certifications"
         ],
         "properties": {
             "doc_type": {"type": "string", "const": "resume"},
@@ -195,6 +197,7 @@ CV_JSON_SCHEMA: Dict[str, Any] = {
             "years_of_experience": {"type": ["number", "integer", "null"]},
             "category": {"type": ["string", "null"], "enum": CATEGORIES + [None]},
             "gender": {"type": ["string", "null"]},
+            "nationality": {"type": ["string", "null"]},
             "languages": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -735,6 +738,19 @@ class LLMService:
                 break
         return out
 
+    # what a model writes when the CV does not say: never stored as a nationality
+    _NO_NATIONALITY = {"", "null", "none", "n/a", "na", "nil", "unknown", "not specified", "not stated", "not mentioned",
+                       "not provided", "unspecified", "-", "--"}
+
+    def _clean_nationality(self, raw: Any) -> Optional[str]:
+        """One short place name from the model's answer, or None when it is empty, a placeholder, or not a plain name."""
+        if not isinstance(raw, str):
+            return None
+        value = re.sub(r"\s+", " ", raw).strip().strip(".,;:")
+        if value.lower() in self._NO_NATIONALITY or len(value) > 64 or not re.search(r"[A-Za-z]", value):
+            return None
+        return value
+
     def _validate_cv_response(self, data: Dict[str, Any], *, source_text: str) -> Dict[str, Any]:
         skills_src = data.get("skills_sentences") or data.get("skills") or []
         resp_src = data.get("responsibility_sentences") or data.get("responsibilities") or []
@@ -790,6 +806,7 @@ class LLMService:
             "years_of_experience": data.get("years_of_experience"),
             "category": normalize_category(data.get("category")),
             "gender": gender,
+            "nationality": self._clean_nationality(data.get("nationality")),
             "languages": languages,
             "certifications": certifications,
             "skills_sentences": skills,

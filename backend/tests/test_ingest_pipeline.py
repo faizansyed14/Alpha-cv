@@ -84,6 +84,20 @@ def test_upload_is_parsed_standardised_embedded_and_stored(world, tmp_path):
     assert world.store.applications_for_job(world.job) == []                       # an upload applies to nothing
 
 
+def test_an_upload_stores_the_nationality_the_cv_states_and_it_is_searchable(world, tmp_path):
+    world.llm.standardize_cv.return_value = {**world.llm.standardize_cv.return_value, "nationality": "India", "location": "Dubai"}
+    result = ingest_cv(CVSubmission(source=SOURCE_UPLOAD, filename="cv.pdf", file_path=_file(tmp_path), cv_id=uid(60)))
+    assert _row(world.store, result.cv_id)["nationality"] == "India"
+    assert result.cv_id in world.store.search_candidates(nationalities=["India"], limit=10)["ids"]
+    assert result.cv_id not in world.store.search_candidates(nationalities=["Nepal"], limit=10)["ids"]
+
+
+def test_an_upload_whose_cv_has_no_nationality_stores_none(world, tmp_path):
+    world.llm.standardize_cv.return_value = {**world.llm.standardize_cv.return_value, "nationality": None}
+    result = ingest_cv(CVSubmission(source=SOURCE_UPLOAD, filename="cv.pdf", file_path=_file(tmp_path), cv_id=uid(61)))
+    assert not _row(world.store, result.cv_id)["nationality"]
+
+
 def test_job_page_facts_are_joined_into_the_record_and_win_over_the_llm(world, tmp_path):
     ingest_cv(CVSubmission(
         source=SOURCE_JOB_PAGE, filename="cv.pdf", file_path=_file(tmp_path), cv_id=uid(1),
