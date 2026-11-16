@@ -79,6 +79,13 @@ class RateLimiterConfig:
                 "priority": 3,
                 "description": "General API endpoints - power user ready"
             },
+            "matching": {
+                "requests_per_hour": 30000 * base_multiplier,  # progress polls ~1/sec per recruiter, several recruiters per office IP
+                "concurrent_limit": 50,
+                "burst_allowance": 100,
+                "priority": 5,
+                "description": "Match jobs and progress polling"
+            },
             "static": {
                 "requests_per_hour": 2000 * base_multiplier,
                 "concurrent_limit": 100,

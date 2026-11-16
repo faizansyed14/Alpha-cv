@@ -52,6 +52,31 @@ def _is_trusted_proxy(ip: str) -> bool:
     addr = _parse_ip(ip)
     return addr is not None and any(addr in net for net in _TRUSTED_NETS)
 
+
+# Staff roles that are never rate limited (a bulk upload or a big match by one of them must not be cut off).
+BYPASS_ROLES = frozenset({"admin", "evp", "manager"})
+
+def _whitelisted_networks():
+    """Trusted client IPs / CIDR ranges from RATE_LIMIT_WHITELIST_IPS (comma-separated, set in the env file, e.g. the office address)."""
+    nets = []
+    for raw in (getattr(settings, "RATE_LIMIT_WHITELIST_IPS", "") or "").split(","):
+        raw = raw.strip()
+        if raw:
+            try:
+                nets.append(ipaddress.ip_network(raw, strict=False))
+            except ValueError:
+                logger.warning(f"Ignoring invalid RATE_LIMIT_WHITELIST_IPS entry: {raw}")
+    return nets
+
+
+_WHITELIST_NETS = _whitelisted_networks()
+
+
+def _is_whitelisted_ip(ip: str) -> bool:
+    addr = _parse_ip(ip)
+    return addr is not None and any(addr in net for net in _WHITELIST_NETS)
+
+
 @dataclass
 class RateLimit:
     """Rate limit configuration"""
@@ -75,7 +100,8 @@ class ProductionRateLimiter:
         self.is_production = self.config.IS_PRODUCTION
         
         # Core tracking structures
-        self.ip_requests: Dict[str, deque] = defaultdict(deque)
+        # one sliding window per (client IP, endpoint class), so matching polls never use up the general budget
+        self.ip_requests: Dict[Tuple[str, str], deque] = defaultdict(deque)
         self.ip_concurrent: Dict[str, int] = defaultdict(int)
         self.ip_reputation: Dict[str, float] = defaultdict(lambda: 1.0)  # 1.0 = good, 0.1 = bad
         
@@ -169,6 +195,13 @@ class ProductionRateLimiter:
         if any(x in path_lower for x in ["/auth", "/login", "/logout", "/token"]):
             return "auth"
         
+        # Matching: starting a match and polling its progress (~1 request/second per open page)
+        if (
+            path_lower.rstrip("/") == "/api/match"
+            or any(x in path_lower for x in ["/matching-progress", "/match/jobs", "/match-status"])
+        ):
+            return "matching"
+
         # Admin endpoints
         if "/admin" in path_lower:
             return "admin"
@@ -191,12 +224,12 @@ class ProductionRateLimiter:
         
         return "general"
     
-    def _cleanup_old_requests(self, client_ip: str, window_seconds: int = 3600):
-        """Remove requests older than the window"""
+    def _cleanup_old_requests(self, client_ip: str, endpoint: str, window_seconds: int = 3600):
+        """Remove requests older than the window for one (IP, endpoint class)"""
         now = time.time()
         cutoff = now - window_seconds
-        
-        client_requests = self.ip_requests[client_ip]
+
+        client_requests = self.ip_requests[(client_ip, endpoint)]
         while client_requests and client_requests[0] < cutoff:
             client_requests.popleft()
     
@@ -254,15 +287,15 @@ class ProductionRateLimiter:
         rate_limit = self.rate_limits.get(endpoint, self.rate_limits["general"])
         
         # Clean old requests for this IP
-        self._cleanup_old_requests(client_ip)
-        
+        self._cleanup_old_requests(client_ip, endpoint)
+
         # Apply reputation-based adjustments
         reputation = self.ip_reputation[client_ip]
         adjusted_limit = int(rate_limit.requests_per_hour * reputation)
         adjusted_concurrent = max(1, int(rate_limit.concurrent_limit * reputation))
         
         # Check hourly request limit
-        client_requests = self.ip_requests[client_ip]
+        client_requests = self.ip_requests[(client_ip, endpoint)]
         if len(client_requests) >= adjusted_limit:
             self._update_ip_reputation(client_ip, "bad")
             return True, f"Hourly limit exceeded: {adjusted_limit} requests/hour", 3600
@@ -290,7 +323,7 @@ class ProductionRateLimiter:
         now = time.time()
         
         # Track request timing
-        self.ip_requests[client_ip].append(now)
+        self.ip_requests[(client_ip, endpoint)].append(now)
         
         # Track concurrent requests
         self.ip_concurrent[client_ip] += 1
@@ -315,15 +348,15 @@ class ProductionRateLimiter:
     def _periodic_cleanup(self):
         """Periodic cleanup to prevent memory bloat"""
         # Clean up old request records
-        for client_ip in list(self.ip_requests.keys()):
-            self._cleanup_old_requests(client_ip)
-            
+        for client_ip, endpoint in list(self.ip_requests.keys()):
+            self._cleanup_old_requests(client_ip, endpoint)
+
             # Remove empty deques
-            if not self.ip_requests[client_ip]:
-                del self.ip_requests[client_ip]
-        
+            if not self.ip_requests[(client_ip, endpoint)]:
+                del self.ip_requests[(client_ip, endpoint)]
+
         # Clean up reputation for inactive IPs
-        active_ips = set(self.ip_requests.keys())
+        active_ips = {ip for ip, _ in self.ip_requests.keys()}
         for ip in list(self.ip_reputation.keys()):
             if ip not in active_ips:
                 del self.ip_reputation[ip]
@@ -333,14 +366,15 @@ class ProductionRateLimiter:
             if self.ip_concurrent[ip] == 0:
                 del self.ip_concurrent[ip]
         
-        logger.info(f"Cleanup complete. Tracking {len(self.ip_requests)} active IPs")
+        logger.info(f"Cleanup complete. Tracking {len(active_ips)} active IPs ({len(self.ip_requests)} windows)")
     
     def get_stats(self) -> Dict:
         """Get rate limiter statistics for monitoring"""
         return {
             "total_requests": self.request_count,
             "total_rejections": self.rejection_count,
-            "active_ips": len(self.ip_requests),
+            "active_ips": len({ip for ip, _ in self.ip_requests.keys()}),
+            "active_windows": len(self.ip_requests),
             "global_concurrent": self.global_concurrent,
             "max_global_concurrent": self.max_global_concurrent,
             "circuit_breaker_trips": self.circuit_breaker_trips,
@@ -369,11 +403,11 @@ async def rate_limit_middleware(request: Request, call_next):
             user_role = decoded_token.get("role")
             username = decoded_token.get("sub")
             
-            # Bypass for admin users
-            if user_role == "admin":
+            # Bypass for staff roles (admin, evp, manager)
+            if user_role in BYPASS_ROLES:
                 bypass_rate_limit = True
-                bypass_reason = f"admin user ({username})"
-                logger.info(f"Rate limit bypassed for admin user '{username}' from {client_ip}")
+                bypass_reason = f"{user_role} user ({username})"
+                logger.debug(f"Rate limit bypassed for {user_role} user '{username}' from {client_ip}")
             
             # Bypass for the dev-only LOCAL_AUTH user (development only)
             elif (
@@ -390,6 +424,11 @@ async def rate_limit_middleware(request: Request, call_next):
             # Token invalid, continue with rate limiting
             logger.debug(f"Token validation failed: {e}")
     
+    # Method 1b: trusted office IP / RATE_LIMIT_WHITELIST_IPS
+    if not bypass_rate_limit and _is_whitelisted_ip(client_ip):
+        bypass_rate_limit = True
+        bypass_reason = "whitelisted IP"
+
     # Method 2: Development Environment Bypass
     if not rate_limiter.is_production and client_ip in ["127.0.0.1", "::1", "localhost"]:
         bypass_rate_limit = True
@@ -473,7 +512,7 @@ async def rate_limit_middleware(request: Request, call_next):
         # Add rate limit headers to successful responses
         if hasattr(response, 'headers'):
             response.headers["X-RateLimit-Limit"] = str(rate_limiter.rate_limits[endpoint].requests_per_hour)
-            current_requests = len(rate_limiter.ip_requests[client_ip])
+            current_requests = len(rate_limiter.ip_requests[(client_ip, endpoint)])
             remaining = max(0, rate_limiter.rate_limits[endpoint].requests_per_hour - current_requests)
             response.headers["X-RateLimit-Remaining"] = str(remaining)
         
