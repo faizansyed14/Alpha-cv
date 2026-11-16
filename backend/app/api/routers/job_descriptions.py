@@ -177,6 +177,8 @@ async def upload_jd(
         })
         if not store.store_embeddings("jd", jd_id, doc_embeddings):
             store.delete_job_description(jd_id)
+            if persisted_path:
+                _delete_stored_jd(jd_id, persisted_path)                       # no row owns the file any more
             raise HTTPException(status_code=500, detail="The job description's embeddings could not be saved")
 
         logger.info(f"JD processed and stored: {jd_id}")
@@ -201,6 +203,17 @@ async def upload_jd(
     except Exception as e:
         logger.error(f"JD upload failed: {e}")
         raise HTTPException(status_code=500, detail="JD processing failed. Please try again or contact support.")
+
+
+def _delete_stored_jd(jd_id: str, stored_path: str) -> None:
+    """Remove a JD's original from storage (S3 or local). Only a file named for this id is touched; a failure is logged, never raised."""
+    stem, ext = os.path.splitext(os.path.basename(stored_path))
+    if stem != jd_id:
+        return
+    try:
+        get_storage_service().delete_file(jd_id, "jd", ext)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Could not delete the stored file of JD {jd_id}: {exc}")
 
 
 def _invalidate_jd_list_cache():
@@ -298,9 +311,12 @@ async def preview_jd(jd_id: str, page: int = Query(1, ge=1), scale: float = Quer
 async def delete_jd(jd_id: str, _: User = Depends(require_core_app)) -> JSONResponse:
     """Delete a JD: its rows (skills, responsibilities, requirements) and its vectors in Qdrant. Job postings made from it stay."""
     try:
+        stored = await asyncio.to_thread(get_store().jd_document, jd_id)      # read before the row is gone: it knows where the file is
         filename = await asyncio.to_thread(get_store().delete_job_description, jd_id)
         if filename is None:
             raise HTTPException(status_code=404, detail=f"JD not found: {jd_id}")
+        if stored and stored.get("file_path"):
+            await asyncio.to_thread(_delete_stored_jd, jd_id, stored["file_path"])
         _invalidate_jd_list_cache()
         return JSONResponse({"status": "success", "message": f"Job Description '{filename}' deleted successfully", "deleted_jd_id": jd_id})
 

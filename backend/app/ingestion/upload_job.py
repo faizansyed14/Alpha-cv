@@ -12,12 +12,22 @@ import logging
 import time
 from typing import Any, Dict
 
-from app.ingestion.pipeline import SOURCE_UPLOAD, CVSubmission, IngestError, ingest_cv
+from app.ingestion.pipeline import SOURCE_UPLOAD, CVSubmission, IngestError, discard_orphan_original, ingest_cv
 from app.jobs.public_cv_queue import set_public_job_status
 
 logger = logging.getLogger(__name__)
 
 KIND_CV_UPLOAD = "cv_upload"
+
+
+def _drop_unused_original(cv_id: str, persisted_path: Any) -> None:
+    """A failed upload leaves no candidate, so the original the route saved to storage is removed (a duplicate is handled by the pipeline)."""
+    from app.store import get_store
+
+    try:
+        discard_orphan_original(get_store(), cv_id, persisted_path)
+    except Exception as exc:  # noqa: BLE001 - cleanup never changes how the upload is reported
+        logger.warning(f"Could not clean up after failed upload {cv_id}: {exc}")
 
 
 async def process_cv_upload(job: Dict[str, Any]) -> None:
@@ -37,10 +47,12 @@ async def process_cv_upload(job: Dict[str, Any]) -> None:
     except IngestError as exc:
         set_public_job_status(cv_id, status="failed", finished_at=time.time(), error=str(exc), current_step=str(exc))
         logger.warning(f"Queued upload {cv_id} rejected: {exc}")
+        await asyncio.to_thread(_drop_unused_original, cv_id, job.get("persisted_path"))
         return
     except Exception as exc:  # noqa: BLE001 - one bad file must not stop the worker
         set_public_job_status(cv_id, status="failed", finished_at=time.time(), error=str(exc), current_step=str(exc))
         logger.error(f"Queued upload {cv_id} failed: {exc}")
+        await asyncio.to_thread(_drop_unused_original, cv_id, job.get("persisted_path"))
         return
 
     set_public_job_status(cv_id, status="completed", finished_at=time.time(), progress_percent=100,
