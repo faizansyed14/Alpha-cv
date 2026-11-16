@@ -222,7 +222,7 @@ def _candidate_facts(sub: CVSubmission, standardized: Dict[str, Any], pii: Dict[
         "name": standardized.get("name"),
         "email": (pii.get("email") or [None])[0] or contact.get("email"),
         "phone": (pii.get("phone") or [None])[0] or contact.get("phone"),
-        "linkedin_url": pick_linkedin(pii.get("linkedin") or [], standardized.get("name"), (pii.get("email") or [None])[0] or contact.get("email")),
+        "linkedin_url": pick_linkedin(pii.get("linkedin") or []),
         "github_url": pick_github(pii.get("github") or [], pii.get("github_repo_only") or [], standardized.get("name"),
                                   (pii.get("email") or [None])[0] or contact.get("email")),
         "nationality": standardized.get("nationality"),
@@ -341,7 +341,7 @@ def _ingest(sub: CVSubmission, step: Progress) -> IngestResult:
     if pii.get("phone"):
         contact["phone"] = standardized["phone"] = pii["phone"][0]
     own_email = (pii.get("email") or [None])[0] or contact.get("email")
-    own_linkedin = pick_linkedin(pii.get("linkedin") or [], name, own_email)
+    own_linkedin = pick_linkedin(pii.get("linkedin") or [])
     own_github = pick_github(pii.get("github") or [], pii.get("github_repo_only") or [], name, own_email)
     if own_linkedin:
         contact["linkedin"] = standardized["linkedin_url"] = own_linkedin

@@ -27,6 +27,9 @@ export async function runPool<T>(items: T[], limit: number, worker: (item: T) =>
 }
 
 export interface CVProgress {
+  /** The candidate the file ended up in (an existing one when the same file was uploaded before) */
+  cv_id?: string;
+  merged?: boolean;
   status: string;
   progress_percent?: number;
   current_step?: string;
@@ -48,7 +51,10 @@ export async function uploadCVAndWait(
   while (Date.now() < deadline) {
     await sleep(pollMs);
     const p: CVProgress = await api.getCVUploadProgress(cvId);
-    if (p.status === 'completed') return response;
+    if (p.status === 'completed') {
+      // the same file uploaded before is joined into the candidate that already exists: report THAT id, not the new one nothing is stored under
+      return { ...response, cv_id: p.cv_id || (response as { cv_id?: string }).cv_id, merged: !!p.merged } as UploadResponse;
+    }
     if (p.status === 'failed') throw new Error(p.current_step || 'Processing failed');
     if (p.status === 'not_found') {
       if (++notFound > 15) throw new Error('The upload was lost. Please upload the file again.');

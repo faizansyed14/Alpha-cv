@@ -334,3 +334,28 @@ def test_the_same_file_submitted_at_the_same_moment_by_two_workers_becomes_one_c
     assert world.store.count_candidates() == 1 and not world.store.candidate_exists(uid(41))
     assert world.store.candidate_detail(first.cv_id)["nationality"] == "Indian"
     assert [a["id"] for a in world.store.applications_for_job(world.job)] == [first.cv_id]
+
+
+def test_the_upload_progress_names_the_existing_candidate_when_the_same_file_was_uploaded_before(monkeypatch):
+    """A queued upload of a file that is already stored makes no new record: the page must be told which candidate it joined, not shown the
+    new id the upload was given (nothing is stored under it)."""
+    import json
+
+    from app.api.routers import cvs as cv_routes
+    from app.jobs import public_cv_queue
+
+    def status_of(cv_id):
+        return asyncio.run(cv_routes.get_cv_upload_progress(cv_id, None))
+
+    monkeypatch.setattr(public_cv_queue, "get_public_job_status",
+                        lambda cv_id: {"status": "completed", "cv_id": "the-existing-candidate", "merged": True})
+    again = json.loads(status_of("the-new-upload-id").body)
+    assert again["cv_id"] == "the-existing-candidate" and again["merged"] is True and again["status"] == "completed"
+
+    monkeypatch.setattr(public_cv_queue, "get_public_job_status", lambda cv_id: {"status": "completed", "cv_id": cv_id, "merged": False})
+    fresh = json.loads(status_of("a-brand-new-cv").body)
+    assert fresh["cv_id"] == "a-brand-new-cv" and fresh["merged"] is False
+
+    monkeypatch.setattr(public_cv_queue, "get_public_job_status", lambda cv_id: None)
+    unknown = json.loads(status_of("never-seen").body)
+    assert unknown["status"] == "not_found" and unknown["cv_id"] == "never-seen" and unknown["merged"] is False

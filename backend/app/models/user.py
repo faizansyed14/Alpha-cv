@@ -40,6 +40,10 @@ class User(SQLModel, table=True):
     totp_secret: Optional[str] = Field(default=None)
     totp_enrolled: bool = Field(default=False)
     totp_last_step: Optional[int] = Field(default=None)
+    # The login notice (app/api/routers/notices.py): the id of the notice this person acknowledged with the thumbs-up, and when. There is one
+    # notice at a time and a new id whenever its text changes, so a stale id simply means "has not acknowledged the current notice".
+    notice_ack_id: Optional[str] = Field(default=None)
+    notice_ack_at: Optional[datetime] = Field(default=None)
     # Role is plain text. "admin" is the only role with extra powers (users, agents, monitoring, bug reports, agent usage);
     # every other role (see app/security/rbac_rules.py) has exactly the same access.
     role: str = Field(default="user")

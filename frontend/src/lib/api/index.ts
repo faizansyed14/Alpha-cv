@@ -26,6 +26,8 @@ export const api = {
   getAdminNotice: () => RequestRetryHandler.withRetry(() => apiClient.getAdminNotice()),
   setNotice: (message: string, active: boolean) => RequestRetryHandler.withRetry(() => apiClient.setNotice(message, active)),
   clearNotice: () => RequestRetryHandler.withRetry(() => apiClient.clearNotice()),
+  acknowledgeNotice: (noticeId: string) => RequestRetryHandler.withRetry(() => apiClient.acknowledgeNotice(noticeId)),
+  getNoticeAcknowledgements: () => RequestRetryHandler.withRetry(() => apiClient.getNoticeAcknowledgements()),
   getCVDetails: (cvId: string) => RequestRetryHandler.withRetry(() => apiClient.getCVDetails(cvId)),
   deleteCV: (cvId: string) => RequestRetryHandler.withRetry(() => apiClient.deleteCV(cvId)),
 

@@ -127,7 +127,7 @@ export default function UploadPage() {
       'text/plain': ['.txt'],
       'image/*': ['.png', '.jpg', '.jpeg', '.tiff', '.bmp'],
     },
-    maxFiles: 200,
+    maxFiles: 500,
     maxSize: 5 * 1024 * 1024,
   });
   const {
@@ -196,16 +196,25 @@ export default function UploadPage() {
           dbId = response.jd_id;
         }
 
+        const alreadyThere = !!(response as { merged?: boolean } | undefined)?.merged;
         update(f.id, {
           status: 'completed',
           step: undefined,
-          extractedData: {
-            name: 'CV Processed',
-            jobTitle: 'Data extracted successfully',
-            years: 'Processing complete',
-            skills: ['CV uploaded'],
-            responsibilities: ['Data available in database'],
-          },
+          extractedData: alreadyThere
+            ? {
+                name: 'Already in the database',
+                jobTitle: 'The same file was uploaded before',
+                years: 'no new record was made',
+                skills: ['CV already stored'],
+                responsibilities: ['The existing candidate is used'],
+              }
+            : {
+                name: 'CV Processed',
+                jobTitle: 'Data extracted successfully',
+                years: 'Processing complete',
+                skills: ['CV uploaded'],
+                responsibilities: ['Data available in database'],
+              },
           dbId: dbId, // Store the database ID
         });
       } catch (err: any) {
@@ -431,7 +440,7 @@ export default function UploadPage() {
             </div>
             <h4 className="text-sm font-semibold text-slate-900">Drop CV files here</h4>
             <p className="mt-1 text-sm text-slate-500">PDF, DOCX, TXT</p>
-            <p className="mt-2 text-xs text-slate-400">Drag &amp; drop or click to browse · Max 200 files, 5MB each</p>
+            <p className="mt-2 text-xs text-slate-400">Drag &amp; drop or click to browse · Max 500 files, 5MB each</p>
             <div className="mt-3">
               <Button variant="secondary" size="sm" type="button">
                 Browse files

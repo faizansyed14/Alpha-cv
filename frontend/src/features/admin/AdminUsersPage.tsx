@@ -13,6 +13,7 @@ import { LOCATIONS, needsLocation } from '@/lib/locations';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table';
 import { AlertCircle, X, Power, Trash2, Pencil, Users as UsersIcon, Plus, Megaphone, Eye, EyeOff } from '@/components/icons';
 import { Bone } from '@/components/skeletons';
+import NoticeAcknowledgements from './NoticeAcknowledgements';
 function roleBadgeVariant(role?: string) {
   switch (role) {
     case 'admin':
@@ -84,6 +85,8 @@ export default function AdminUsersPage() {
   const [noticeActive, setNoticeActive] = useState(false);
   const [noticeSaving, setNoticeSaving] = useState(false);
   const [noticeStatus, setNoticeStatus] = useState<string | null>(null);
+  // changes whenever the notice is saved, hidden or removed, so the "who clicked OK" box below reloads
+  const [noticeVersion, setNoticeVersion] = useState(0);
 
   const fetchUsers = async () => {
     if (!token) return;
@@ -147,6 +150,7 @@ export default function AdminUsersPage() {
       const res = await api.setNotice(noticeMessage.trim(), active);
       setNoticeActive(!!res?.notice?.active);
       setNoticeStatus(active ? 'Notice is now showing to all users.' : 'Notice saved (hidden).');
+      setNoticeVersion((v) => v + 1);
     } catch (err: any) {
       setNoticeStatus(err?.message || 'Failed to save notice');
     } finally {
@@ -162,6 +166,7 @@ export default function AdminUsersPage() {
       setNoticeActive(false);
       setNoticeMessage('');
       setNoticeStatus('Notice removed for all users.');
+      setNoticeVersion((v) => v + 1);
     } catch (err: any) {
       setNoticeStatus(err?.message || 'Failed to remove notice');
     } finally {
@@ -467,8 +472,9 @@ export default function AdminUsersPage() {
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-gray-900">Login notice for all users</p>
                 <p className="mt-0.5 text-sm text-gray-500">
-                  This message pops up for every non-admin user when they log in. They can dismiss it
-                  with the X; you can show or remove it at any time. Admins don&apos;t see the popup.
+                  This message pops up for every non-admin user when they log in. They can click the thumbs-up
+                  (&quot;OK, got it&quot;) and it never shows to them again, or close it with Later / the X and it comes back at
+                  their next sign-in. You can show, edit or remove it at any time. Admins don&apos;t see the popup.
                 </p>
                 <div className="mt-3 flex items-center gap-2">
                   <span className="text-sm text-gray-600">Status:</span>
@@ -517,6 +523,9 @@ export default function AdminUsersPage() {
               </div>
             </div>
           </div>
+
+          {/* who has clicked OK on the current notice */}
+          <NoticeAcknowledgements refreshKey={noticeVersion} />
 
         </div>
 
