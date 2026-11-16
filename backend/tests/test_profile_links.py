@@ -174,15 +174,24 @@ def test_a_real_profile_after_a_label_or_bracket_is_still_found():
     assert links["github"] == ["https://github.com/omarsedeek"]
 
 
-def test_the_candidate_is_chosen_among_several_linkedin_profiles_by_their_name_not_by_position():
+def test_a_linkedin_profile_is_taken_only_when_the_cv_has_exactly_one_and_never_by_the_name():
     from app.ingestion.profile_links import pick_linkedin
 
-    links = ["https://www.linkedin.com/in/sara-ali-123", "https://www.linkedin.com/in/omar-sedeek"]      # a recommender is written first
-    assert pick_linkedin(links, "Omar Sedeek", "omar.s@example.com") == "https://www.linkedin.com/in/omar-sedeek"
-    assert pick_linkedin(links, None, "omarsedeek@example.com") == "https://www.linkedin.com/in/omar-sedeek"       # the e-mail will do
-    assert pick_linkedin(links, "Someone Else") == links[0]                                      # nothing resembles them: the first written
-    assert pick_linkedin(links[:1], "Omar Sedeek") == links[0]                                   # one link is taken as theirs
-    assert pick_linkedin([], "Omar Sedeek") is None
+    one = "https://www.linkedin.com/in/omar-sedeek"
+    assert pick_linkedin([one]) == one                                            # the one profile link the CV contains
+    assert pick_linkedin([one, one.upper().replace("HTTPS", "https")]) == one     # the same link written twice is still one link
+    assert pick_linkedin(["https://www.linkedin.com/in/sara-ali-123", one]) is None   # two people's links (a referee's): none is taken
+    assert pick_linkedin([]) is None                                              # nothing in the CV: nothing is looked up
+    assert pick_linkedin([None, ""]) is None
+    # a name that happens to match a link does not make it chosen from several, and none is built from a name
+    import inspect
+    assert list(inspect.signature(pick_linkedin).parameters) == ["links"]
+
+
+def test_a_cv_without_a_linkedin_link_gets_none_whatever_its_name_is():
+    text = "Omar Sedeek\nSenior Python Developer\nomar.sedeek@example.com | +971 50 123 4567\nWorked with LinkedIn Learning courses."
+    links = find_profile_links(text)
+    assert links["linkedin"] == []
 
 
 def test_a_github_account_that_is_only_a_repository_of_someone_else_is_not_the_candidate():

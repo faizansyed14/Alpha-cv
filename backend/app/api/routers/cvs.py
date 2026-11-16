@@ -99,7 +99,10 @@ async def get_cv_upload_progress(cv_id: str, _: User = Depends(require_core_app)
             if queued:
                 progress = {**queued, "current_step": queued.get("current_step") or queued.get("error") or ""}
         return JSONResponse({
-            "cv_id": cv_id,
+            # The record the file ended up in. For a file that was already in the database this is the EXISTING candidate, not the new id the
+            # upload was given (nothing is stored under that one), and "merged" says so.
+            "cv_id": progress.get("cv_id") or cv_id,
+            "merged": bool(progress.get("merged")),
             "status": progress.get("status", "not_found"),
             "progress_percent": progress.get("progress_percent", 0),
             "current_step": progress.get("current_step", ""),

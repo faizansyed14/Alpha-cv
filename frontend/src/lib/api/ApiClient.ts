@@ -49,6 +49,7 @@ import {
   BugStatus,
   BugSeverity,
   NoticeData,
+  NoticeAcknowledgements,
   UsersPresenceResponse,
   CVAdvancedSearchParams,
   CVAdvancedSearchResponse,
@@ -149,6 +150,16 @@ export class ApiClient {
   }
   async clearNotice(): Promise<{ notice: NoticeData | null }> {
     const response = await this.client.delete('/api/admin/notice');
+    return response.data;
+  }
+  /** The thumbs-up: this person has read the notice (it is then never shown to them again). */
+  async acknowledgeNotice(noticeId: string): Promise<{ acknowledged: boolean }> {
+    const response = await this.client.post('/api/notice/acknowledge', { notice_id: noticeId });
+    return response.data;
+  }
+  /** Admin: who has clicked OK on the current notice and who has not. */
+  async getNoticeAcknowledgements(): Promise<NoticeAcknowledgements> {
+    const response = await this.client.get('/api/admin/notice/acknowledgements', { params: { _t: Date.now() } });
     return response.data;
   }
 

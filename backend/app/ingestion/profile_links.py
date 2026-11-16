@@ -10,8 +10,11 @@ A LinkedIn link is a person's profile (``/in/`` or ``/pub/``); company pages are
 
 What is NOT taken as the candidate's: a link that sits inside another address (a Google redirect, an archive link), the template
 words people forget to replace (``linkedin.com/in/yourname``), and a GitHub account that is only ever mentioned as somebody's
-repository (``github.com/pallets/flask`` in a list of tools). When a CV has several profile links, ``pick_linkedin`` and
-``pick_github`` choose the one that looks like the candidate's (its name matches theirs), not simply the first written.
+repository (``github.com/pallets/flask`` in a list of tools).
+
+A LinkedIn profile is taken ONLY from a link the CV itself contains, and only when it is the one LinkedIn profile link in it: the
+candidate's name is never used to look one up or to choose between several (a CV with two or more profile links, one of which may be a
+referee's, gets none). A GitHub account is chosen by ``pick_github``: the one that looks like the candidate's (its name matches theirs).
 """
 from __future__ import annotations
 
@@ -141,15 +144,11 @@ def _affinity(slug: str, words: List[str], local: str) -> int:
     return score
 
 
-def pick_linkedin(links: Iterable[str], name: Optional[str] = None, email: Optional[str] = None) -> Optional[str]:
-    """The candidate's own LinkedIn profile among those found: the one whose address resembles their name or e-mail, else the first
-    written (a CV opens with its owner's details; a recommender or referee comes later)."""
-    found = [u for u in links if u]
-    if not found:
-        return None
-    words, local = _identity(name, email)
-    best = max(range(len(found)), key=lambda i: (_affinity(found[i].rsplit("/", 1)[-1], words, local), -i))
-    return found[best]
+def pick_linkedin(links: Iterable[str]) -> Optional[str]:
+    """The candidate's LinkedIn profile: the one profile link the CV contains. With none there is nothing to take, and with two or more
+    (one may be a referee's or a recommender's) none is taken: the candidate's name is never used to look a profile up or to choose one."""
+    found = _first_seen(u for u in links if u)
+    return found[0] if len(found) == 1 else None
 
 
 def pick_github(accounts: Iterable[str], repo_only: Iterable[str] = (), name: Optional[str] = None, email: Optional[str] = None) -> Optional[str]:

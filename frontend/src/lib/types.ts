@@ -108,6 +108,24 @@ export interface NoticeData {
   updated_by?: string | null;
 }
 
+/** One person on the admin's "who clicked OK" list for the current notice. */
+export interface NoticeAckUser {
+  id: string;
+  username: string;
+  email?: string | null;
+  role: string;
+  location?: string | null;
+  acknowledged: boolean;
+  /** UTC time of the thumbs-up (ISO, ends in Z); null until they click it */
+  acknowledged_at: string | null;
+}
+
+export interface NoticeAcknowledgements {
+  notice: NoticeData | null;
+  summary: { total: number; acknowledged: number; pending: number };
+  users: NoticeAckUser[];
+}
+
 export interface CVDataResponse {
   id: string;
   filename: string;
@@ -215,6 +233,8 @@ export interface UploadResponse {
   message: string;
   cv_id?: string;
   jd_id?: string;
+  /** The file was already in the database: its details were joined into that candidate and no new record was made */
+  merged?: boolean;
   filename: string;
   standardized_data: any;
   processing_stats: {

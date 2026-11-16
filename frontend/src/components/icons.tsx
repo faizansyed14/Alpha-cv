@@ -19,7 +19,7 @@ import {
   MagicWand, MagnifyingGlass, MagnifyingGlassMinus, MagnifyingGlassPlus, MapPin as PhMapPin, Medal, Megaphone as PhMegaphone,
   PaperPlaneTilt, PencilSimple, PencilSimpleLine, Phone as PhPhone, Play as PhPlay, PlayCircle as PhPlayCircle, Plus as PhPlus,
   Power as PhPower, Pulse, Shield as PhShield, ShieldCheck as PhShieldCheck, ShareNetwork, SignOut, SlidersHorizontal as PhSliders,
-  Sparkle, SquaresFour, Tag as PhTag, Target as PhTarget, Timer as PhTimer, Translate, Trash, TrendDown, TrendUp, Trophy as PhTrophy, UploadSimple,
+  Sparkle, SquaresFour, Tag as PhTag, Target as PhTarget, ThumbsUp as PhThumbsUp, Timer as PhTimer, Translate, Trash, TrendDown, TrendUp, Trophy as PhTrophy, UploadSimple,
   User as PhUser, UserCircle, Users as PhUsers, Wallet as PhWallet, Warning, WarningCircle, X as PhX, XCircle as PhXCircle,
   CaretDoubleLeft, CaretDoubleRight, ImageSquare,
   type Icon as PhosphorIcon,
@@ -167,6 +167,7 @@ export const GithubLine = make(GithubLogo, BLUE, 'GithubLine');
 // ---- status & feedback
 export const Check = make(PhCheck, GREEN, 'Check', 'bold');
 export const CheckCircle = make(PhCheckCircle, GREEN, 'CheckCircle');
+export const ThumbsUp = make(PhThumbsUp, GREEN, 'ThumbsUp');
 export const CheckCircle2 = make(PhCheckCircle, GREEN, 'CheckCircle2');
 export const XCircle = make(PhXCircle, RED, 'XCircle');
 export const AlertCircle = make(WarningCircle, RED, 'AlertCircle');
