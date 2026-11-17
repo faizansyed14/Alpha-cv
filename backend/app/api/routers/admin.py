@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from typing import List
+from typing import List, Literal, Optional
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlmodel import Session, select
 from app.db.database import get_session
@@ -100,6 +101,32 @@ def database_health(_: User = Depends(require_admin)):
     from app.services.db_health import storage_report
 
     return storage_report(engine)
+
+
+class UnlockRequest(BaseModel):
+    kind: Literal["ip", "username_ip", "account"]
+    username: Optional[str] = Field(None, max_length=320)
+    ip: Optional[str] = Field(None, max_length=64)
+
+
+@router.get("/security/lockouts")
+def sign_in_lockouts(admin: User = Depends(require_admin)) -> dict:
+    """Who is failing to sign in right now: addresses and accounts with failed attempts, and which of them have reached the limit (blocked)."""
+    from app.security import login_guard
+
+    return login_guard.current_blocks()
+
+
+@router.post("/security/lockouts/unlock")
+def unlock_sign_in(data: UnlockRequest, admin: User = Depends(require_admin)) -> dict:
+    """Lift one block (clear one failed-attempt counter), for example for a colleague who mistyped a password five times."""
+    from app.security import login_guard
+
+    if not login_guard.unlock(data.kind, data.username, data.ip):
+        raise HTTPException(status_code=400, detail="Say which address or account to unlock.")
+    security_event("login_unlocked", by=admin.username, scope=data.kind,
+                   account=mask_email(data.username) if data.username else None, ip=data.ip)
+    return {"unlocked": True}
 
 
 @router.get("/users", response_model=List[UserRead])

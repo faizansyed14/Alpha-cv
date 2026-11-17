@@ -5,6 +5,18 @@ import { getToken, setToken, clearToken } from '@/lib/auth';
 import { UserProfile } from '@/lib/types';
 import { logger } from '@/lib/logger';
 
+/**
+ * The text the sign-in screen shows for a failed call. The http client turns every error into `{ status, message, detail }`, so for a 429 the
+ * `message` is only "Too many requests"; the `detail` says which limit it was ("An OTP was recently sent. Please wait 42s", "Too many failed
+ * attempts. Please try again later."), and that is what the person needs.
+ */
+function loginError(error: any, fallback: string): string {
+  const server = error?.response?.data?.detail;
+  if (typeof server === 'string' && server) return server;
+  if (error?.status === 429 && typeof error.detail === 'string' && error.detail) return error.detail;
+  return error?.message || fallback;
+}
+
 interface AuthState {
   token: string | null;
   user: UserProfile | null;
@@ -91,7 +103,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       logger.info('Login successful');
       return { success: true, role: user.role };
     } catch (error: any) {
-      const errorMessage = error.message || 'Login failed';
+      const errorMessage = loginError(error, 'Login failed');
       logger.error('Login failed:', error);
       set({ loading: false, error: errorMessage });
       return { success: false, error: errorMessage };
@@ -112,7 +124,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         throw new Error('Password verification failed');
       }
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || error.message || 'Invalid credentials';
+      const errorMessage = loginError(error, 'Invalid credentials');
       logger.error('Password verification failed:', error);
       set({ loading: false, error: errorMessage });
       return { success: false, error: errorMessage };
@@ -133,7 +145,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         throw new Error('Failed to send OTP');
       }
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || error.message || 'Failed to send OTP';
+      const errorMessage = loginError(error, 'Failed to send OTP');
       logger.error('Send OTP failed:', error);
       set({ loading: false, error: errorMessage });
       return { success: false, error: errorMessage };
@@ -163,7 +175,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       logger.info('OTP verification successful');
       return { success: true, role: user.role };
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || error.message || 'OTP verification failed';
+      const errorMessage = loginError(error, 'OTP verification failed');
       logger.error('OTP verification failed:', error);
       set({ loading: false, error: errorMessage });
       return { success: false, error: errorMessage };
@@ -177,7 +189,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       set({ loading: false, error: null });
       return { success: true, captcha_id: response.captcha_id, image: response.image };
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || error.message || 'Failed to load CAPTCHA';
+      const errorMessage = loginError(error, 'Failed to load CAPTCHA');
       logger.error('Get CAPTCHA failed:', error);
       set({ loading: false, error: errorMessage });
       return { success: false, error: errorMessage };
@@ -194,7 +206,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       logger.info('CAPTCHA verification successful');
       return { success: true, role: user.role };
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || error.message || 'CAPTCHA verification failed';
+      const errorMessage = loginError(error, 'CAPTCHA verification failed');
       logger.error('CAPTCHA verification failed:', error);
       set({ loading: false, error: errorMessage });
       return { success: false, error: errorMessage };
@@ -208,7 +220,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       set({ loading: false, error: null });
       return { success: true, qr: response.qr, secret: response.secret };
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || error.message || 'Failed to start the authenticator setup';
+      const errorMessage = loginError(error, 'Failed to start the authenticator setup');
       logger.error('Authenticator setup failed:', error);
       set({ loading: false, error: errorMessage });
       return { success: false, error: errorMessage };
@@ -225,7 +237,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       logger.info('Authenticator verification successful');
       return { success: true, role: user.role };
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || error.message || 'Authenticator verification failed';
+      const errorMessage = loginError(error, 'Authenticator verification failed');
       logger.error('Authenticator verification failed:', error);
       set({ loading: false, error: errorMessage });
       return { success: false, error: errorMessage };

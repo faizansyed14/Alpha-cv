@@ -22,12 +22,12 @@ interface FilePreviewModalProps {
     blob?: Blob | null;
 }
 
-type Kind = 'pdf' | 'word' | 'legacy' | 'rtf' | 'text';
+export type Kind = 'pdf' | 'word' | 'legacy' | 'rtf' | 'text';
 
 /** Look at the first bytes so we render by *content*, not by a filename that is often a candidate's name with a
  *  guessed extension. Nothing is mounted until this is known: pointing a PDF frame at a Word file makes the
  *  browser download it instead of showing it. */
-async function sniff(blob: Blob): Promise<Kind> {
+export async function sniff(blob: Blob): Promise<Kind> {
     const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
     const ascii = Array.from(head).map((b) => String.fromCharCode(b)).join('');
     if (ascii.startsWith('%PDF-')) return 'pdf';
@@ -52,7 +52,7 @@ function Spinner({ label = 'Loading document…' }: { label?: string }) {
  * A Word file drawn as real pages, the way the Al-ain viewer does it (@extend-ai/react-docx). If that library cannot
  * read the file, docx-preview and then mammoth are tried before giving up (the caller then shows the server-drawn pages).
  */
-function WordPreview({ blob, zoom, onFail }: { blob: Blob; zoom: number; onFail: () => void }) {
+export function WordPreview({ blob, zoom, onFail }: { blob: Blob; zoom: number; onFail: () => void }) {
     const [lib, setLib] = useState<typeof import('@extend-ai/react-docx') | null>(null);
     const [buffer, setBuffer] = useState<ArrayBuffer | null>(null);
     const [stage, setStage] = useState<'viewer' | 'docx-preview' | 'mammoth'>('viewer');

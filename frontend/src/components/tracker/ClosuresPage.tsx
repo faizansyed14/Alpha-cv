@@ -271,7 +271,6 @@ export default function ClosuresPage() {
                         <div className="min-w-0">
                           <p className="truncate font-medium text-slate-900">{who}</p>
                           {r.closed_by && r.closed_by !== who && <p className="text-2xs text-slate-400">Marked closed by {r.closed_by}</p>}
-                          {r.recruiters.length > 1 && <p className="truncate text-2xs text-slate-400" title={r.recruiters.map((x) => x.username).join(', ')}>With {r.recruiters.filter((x) => x.id !== r.recruiter?.id).map((x) => x.username).join(', ')}</p>}
                         </div>
                       </div>
                     </TD>

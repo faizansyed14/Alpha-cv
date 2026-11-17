@@ -77,6 +77,49 @@ def record_failure(username: str, ip: str = "") -> None:
         logger.debug(f"login failure not recorded (cache): {e}")
 
 
+def _limits() -> dict:
+    return {"ip": settings.LOGIN_MAX_FAILED_ATTEMPTS_PER_IP, "username_ip": settings.LOGIN_MAX_FAILED_ATTEMPTS,
+            "account": settings.LOGIN_MAX_FAILED_ATTEMPTS_PER_ACCOUNT}
+
+
+def current_blocks() -> dict:
+    """What the admin screen shows: every failure counter that is alive, with whether it has reached its limit (so the sign-in is being
+    refused) and how many seconds until it expires. ``kind``: ``ip`` = one address, across all accounts; ``username_ip`` = one account from one
+    address; ``account`` = one account from any address."""
+    limits = _limits()
+    items = []
+    for key, value, left in get_redis_cache().entries(_NS):
+        attempts = int(value.get("attempts", 0)) if isinstance(value, dict) else 0
+        if key.startswith("failed_login_ip:"):
+            kind, username, ip = "ip", None, key[len("failed_login_ip:"):]
+        elif key.startswith("failed_login_account:"):
+            kind, username, ip = "account", key[len("failed_login_account:"):], None
+        elif key.startswith("failed_login:"):
+            username, _, ip = key[len("failed_login:"):].rpartition("|")
+            kind = "username_ip"
+        else:
+            continue
+        items.append({"kind": kind, "username": username, "ip": ip, "attempts": attempts, "limit": limits[kind],
+                      "blocked": attempts >= limits[kind], "seconds_left": left})
+    items.sort(key=lambda i: (not i["blocked"], -i["attempts"], i["kind"]))
+    return {"lockout_seconds": settings.LOGIN_LOCKOUT_SECONDS, "limits": limits, "items": items}
+
+
+def unlock(kind: str, username: Optional[str] = None, ip: Optional[str] = None) -> bool:
+    """Clear one failure counter. True when the arguments name a counter this module keeps (it need not exist any more)."""
+    cache = get_redis_cache()
+    if kind == "ip" and ip:
+        key = _ip_total_key(ip)
+    elif kind == "account" and username:
+        key = _account_key(username)
+    elif kind == "username_ip" and username and ip:
+        key = _ip_key(username, ip)
+    else:
+        return False
+    cache.delete(key, namespace=_NS)
+    return True
+
+
 def reset(username: str, ip: str = "") -> None:
     """Clear this client's failure counter after a successful authentication."""
     try:

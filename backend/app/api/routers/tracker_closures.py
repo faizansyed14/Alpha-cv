@@ -1,6 +1,7 @@
 """Closures and analytics for the requirements tracker.
 
-A requirement that is closed leaves the requirements lists and appears here, credited to the recruiter it was assigned to.
+A requirement that is closed leaves the requirements lists and appears here, credited to ONE recruiter: the one who closed it (or the lead, when
+a manager closed it). The other recruiters on it no longer see it.
 * A recruiter sees their own closures and their own analytics.
 * The sales manager, recruitment manager, EVP and admin see every recruiter's closures and performance (a manager or sales manager only
   for their own location; the EVP and the admin for both).
@@ -16,7 +17,7 @@ from sqlmodel import Session, select
 
 from app.api.deps import require_core_app
 from app.api.routers.tracker import (
-    Filters, MAX_EXPORT_ROWS, _conditions, _cvs_summary, _duration_text, _filters, _is_recruiter, _links_for, _names, _recruiters_text, _scope_location, _who,
+    Filters, MAX_EXPORT_ROWS, _conditions, _cvs_summary, _duration_text, _filters, _is_recruiter, _links_for, _names, _scope_location, _who,
     _views, _xlsx,
 )
 from app.db.database import get_session
@@ -95,7 +96,7 @@ def export_closures(f: Filters = Depends(_filters), user: User = Depends(require
                 ("Closed on", 18), ("Days to close", 14), ("Closed by", 18)]
     data: List[List[Any]] = []
     for n, r in enumerate(rows, start=1):
-        values: List[Any] = [n, r.position, r.client, _recruiters_text(r, links.get(r.id, []), names), _who(names, r.manager_id), _who(names, r.sales_manager_id),
+        values: List[Any] = [n, r.position, r.client, _who(names, r.recruiter_id), _who(names, r.manager_id), _who(names, r.sales_manager_id),
                              r.requirement_date, r.cv_submission_date, *_cvs_summary(links.get(r.id, []), user), "Closed"]
         if not recruiter_view:
             values.append(r.sales_comments or "")

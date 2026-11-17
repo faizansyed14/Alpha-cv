@@ -189,7 +189,12 @@ _HEADER_WORDS = re.compile(
     r"education|skills|declaration|personal|details|page|career|work|employment|references?|nationality|date|birth|"
     r"manager|engineer|developer|analyst|consultant|officer|executive|specialist|director|designer|accountant|"
     r"administrator|coordinator|supervisor|assistant|intern|lead|senior|junior|dubai|abu|dhabi|sharjah|ajman|riyadh|"
-    r"doha|kuwait|muscat|manama|cairo|mumbai|delhi|bangalore|chennai|hyderabad|karachi|lahore|london|uae|india)\b", re.I)
+    r"doha|kuwait|muscat|manama|cairo|mumbai|delhi|bangalore|chennai|hyderabad|karachi|lahore|london|uae|india|"
+    # section headings and tool names that sit on their own line in sidebars ("SOFTWARE SKILL", "ADOBE PHOTOSHOP") and are not people
+    r"software|skill|language|languages|hobbies|interests?|projects?|achievements?|certifications?|certificates?|training|strengths?|"
+    r"tools|technical|technologies|technology|portfolio|information|qualifications?|about|adobe|microsoft|office|graphic|degree|"
+    r"school|college|university|institute|academy|company|limited|ltd|pvt|llc|reference|declaration|internship|trainee|"
+    r"photoshop|illustrator|indesign|premiere|animate|excel|word|powerpoint|english|arabic|hindi|malayalam|tamil|urdu)\b", re.I)
 _NAME_WORD = re.compile(r"^[A-Za-z][A-Za-z'.\-]*$")
 
 
@@ -232,10 +237,46 @@ def name_from_email(address: Optional[str]) -> Optional[str]:
     return " ".join(p.capitalize() for p in parts[:3])
 
 
+def _letters(value: str) -> str:
+    return re.sub(r"[^a-z]", "", value.lower())
+
+
+def name_from_email_match(raw_text: str, email: Optional[str]) -> Optional[str]:
+    """A line anywhere in the document that spells the e-mail's local part ("thasbeerkn7@..." and a line "THASBEERKN"; "john.smith@..."
+    and "JOHN SMITH"). Two-column CVs put the name in a sidebar, far from the top, where no header rule can find it, but the address
+    gives it away. Only a line of 1-4 alphabetic words that matches the whole local part (digits ignored) counts."""
+    if not email or "@" not in email or not raw_text:
+        return None
+    local = _letters(email.split("@", 1)[0])
+    if len(local) < 5:
+        return None
+    for line in raw_text.splitlines():
+        line = line.strip(" \t|-_*#•·")
+        words = line.split()
+        if not 1 <= len(words) <= 4 or not all(_NAME_WORD.match(w) for w in words):
+            continue
+        if _letters(line) == local and not _HEADER_WORDS.search(line):
+            return " ".join(w.title() if w.isupper() or w.islower() else w for w in words)
+    return None
+
+
+def _single_word_name(llm_name: Optional[str], raw_text: str) -> Optional[str]:
+    """A one-word name from the model (some CVs show only that, "THASBEERKN"), accepted only when the document really contains it."""
+    if not isinstance(llm_name, str):
+        return None
+    v = " ".join(llm_name.split())
+    if " " in v or len(v) < 3 or not _NAME_WORD.match(v) or v.lower() in _NOT_A_NAME or _HEADER_WORDS.search(v):
+        return None
+    if not re.search(rf"\b{re.escape(v)}\b", raw_text or "", re.I):
+        return None
+    return v.title() if v.isupper() or v.islower() else v
+
+
 def resolve_name(llm_name: Optional[str], raw_text: str, email: Optional[str]) -> Optional[str]:
-    """The LLM's name when it is a real one; otherwise the document header, then the e-mail's local part."""
+    """The LLM's name when it is a real one; then a one-word name it found in the text, a line that spells the e-mail address, the
+    document header, and last the e-mail's local part."""
     if looks_like_a_name(llm_name):
         return " ".join(llm_name.split())
-    return name_from_header(raw_text or "") or name_from_email(email) or (
+    return _single_word_name(llm_name, raw_text) or name_from_email_match(raw_text or "", email) or name_from_header(raw_text or "") or name_from_email(email) or (
         " ".join(llm_name.split()) if isinstance(llm_name, str) and llm_name.strip() and "[" not in llm_name
         and llm_name.strip().lower() not in _NOT_A_NAME else None)

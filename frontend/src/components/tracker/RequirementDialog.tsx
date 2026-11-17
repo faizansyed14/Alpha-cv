@@ -264,7 +264,7 @@ export default function RequirementDialog({ requirement, options, previewOpen, o
                 )}
               </div>
             </Field>
-            <Field label="Assigned recruiters" hint={recruiterOptions.length === 0 ? 'No recruiters to assign yet' : 'Tick everyone who works on it. The first is the lead.'}>
+            <Field label="Assigned recruiters" hint={recruiterOptions.length === 0 ? 'No recruiters to assign yet' : 'Tick everyone who works on it. When one of them closes it, it is credited to that recruiter alone.'}>
               <RecruitersSelect inline value={recruiterIds} options={recruiterOptions} onChange={setRecruiterIds} className="h-9 w-full text-sm" />
             </Field>
             <Field label="Recruitment manager" hint={ed.recruitment_manager ? 'Which recruitment manager looks after it' : 'Chosen by a manager, the sales manager, the EVP or the admin'}>
@@ -287,13 +287,12 @@ export default function RequirementDialog({ requirement, options, previewOpen, o
                   <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">Nobody is assigned yet. Once a recruiter is on this requirement, the day they submitted CVs and how many appear here.</p>
                 ) : (
                   <ul className="space-y-2">
-                    {submitters.map((r, i) => {
+                    {submitters.map((r) => {
                       const row = cvs[r.id] ?? { date: '', count: '' };
                       return (
                         <li key={r.id} className="grid items-center gap-2 sm:grid-cols-[minmax(0,1fr)_10rem_7rem]">
                           <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-slate-800">
                             <span className="truncate">{r.username}</span>
-                            {i === 0 && <span className="rounded bg-navy-50 px-1.5 py-0.5 text-2xs font-semibold text-navy-800">Lead</span>}
                           </span>
                           <Input type="date" aria-label={`CVs submitted on, ${r.username}`} value={row.date} min={date || undefined} max="2100-12-31" disabled={!ed.cvs_submitted}
                                  onChange={(e) => setCvs((c) => ({ ...c, [r.id]: { ...row, date: e.target.value } }))} />

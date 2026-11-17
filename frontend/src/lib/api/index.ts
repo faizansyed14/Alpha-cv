@@ -28,6 +28,8 @@ export const api = {
   clearNotice: () => RequestRetryHandler.withRetry(() => apiClient.clearNotice()),
   acknowledgeNotice: (noticeId: string) => RequestRetryHandler.withRetry(() => apiClient.acknowledgeNotice(noticeId)),
   getNoticeAcknowledgements: () => RequestRetryHandler.withRetry(() => apiClient.getNoticeAcknowledgements()),
+  getLoginBlocks: () => RequestRetryHandler.withRetry(() => apiClient.getLoginBlocks()),
+  unlockLogin: (body: { kind: 'ip' | 'username_ip' | 'account'; username?: string | null; ip?: string | null }) => apiClient.unlockLogin(body),
   getCVDetails: (cvId: string) => RequestRetryHandler.withRetry(() => apiClient.getCVDetails(cvId)),
   deleteCV: (cvId: string) => RequestRetryHandler.withRetry(() => apiClient.deleteCV(cvId)),
 

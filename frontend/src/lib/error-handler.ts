@@ -61,7 +61,9 @@ export class ApiErrorHandler {
       }
       case 429:
         message = 'Too many requests';
-        detail = data?.detail || 'You are submitting applications too quickly. Please wait a moment and try again.';
+        // the server's own words when it gives them (the sign-in limits, the rate limiter's "message"), else a generic line
+        detail = (typeof data?.detail === 'string' && data.detail) || (typeof data?.message === 'string' && data.message) ||
+          'Too many requests. Please wait a moment and try again.';
         break;
       case 500:
         message = 'Server error';
