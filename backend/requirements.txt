@@ -32,7 +32,7 @@ scikit-learn==1.5.2  # PYSEC-2024-110 fix
 scipy==1.13.1
 sqlmodel==0.0.14
 psycopg2-binary==2.9.9
-SQLAlchemy==2.0.55
+SQLAlchemy==2.1.8
 alembic==1.20.1
 openpyxl==3.1.5
 passlib[argon2,bcrypt]==1.7.4
