@@ -7,7 +7,7 @@
 # refuse to build unless both files match the SHA-256 recorded here (a moved tag, a hijacked repo or a corrupted download
 # fails the build instead of shipping unverified weights). To move to a new model version: change REVISION and both hashes.
 # huggingface-hub is only needed here and is not copied to the runtime image.
-FROM python:3.12-slim AS model
+FROM python:3.15-slim AS model
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN --mount=type=cache,target=/root/.cache/pip pip install huggingface-hub==0.26.2
 WORKDIR /opt/model
@@ -34,7 +34,7 @@ print("model verified:", REPO, REVISION)
 PY
 
 # Stage 2: the Python environment (versions match backend/requirements.txt where they overlap).
-FROM python:3.12-slim AS build
+FROM python:3.15-slim AS build
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /src
 RUN python -m venv /opt/venv
@@ -42,7 +42,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install fastapi==0.135.1 uvicorn==0.32.0 pydantic==2.8.2 numpy==1.26.4 onnxruntime==1.20.1 tokenizers==0.22.2
 
-FROM python:3.12-slim AS runtime
+FROM python:3.15-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
