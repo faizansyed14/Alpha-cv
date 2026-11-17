@@ -43,7 +43,7 @@
     "@types/uuid": "^10.0.0",
     "autoprefixer": "^10.4.16",
     "eslint": "^9",
-    "eslint-config-next": "16.1.2",
+    "eslint-config-next": "16.4.6",
     "eslint-plugin-unused-imports": "^4.2.0",
     "jsdom": "^26.1.0",
     "postcss": "^8.4.32",
