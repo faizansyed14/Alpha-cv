@@ -141,6 +141,58 @@ def test_the_same_file_again_is_joined_not_stored_twice(world, tmp_path):
     assert [a["id"] for a in world.store.applications_for_job(world.job)] == [first.cv_id]
 
 
+def _deleted(storage):
+    return [c.args for c in storage.delete_file.call_args_list]
+
+
+def test_a_duplicate_upload_removes_its_own_stored_copy_and_keeps_the_existing_one(world, tmp_path):
+    storage = pipeline.get_storage_service()
+    first = ingest_cv(CVSubmission(source=SOURCE_UPLOAD, filename="cv.pdf", file_path=_file(tmp_path, "a.pdf"), cv_id=uid(70)))
+    assert first.merged is False and _deleted(storage) == []
+    # the same file again: the route had already saved it to S3 under the new id before the duplicate was known
+    second = ingest_cv(CVSubmission(source=SOURCE_UPLOAD, filename="cv.pdf", file_path=_file(tmp_path, "b.pdf"), cv_id=uid(71),
+                                    persisted_path=f"s3://bucket/cvs/{uid(71)}.pdf"))
+    assert second.merged is True and second.cv_id == uid(70)
+    assert _deleted(storage) == [(uid(71), "cv", ".pdf")]                       # the new copy only, never the existing candidate's file
+    assert world.store.candidate_document(uid(70))                              # the existing candidate is untouched
+
+
+def test_the_job_page_duplicate_is_cleaned_up_too(world, tmp_path):
+    storage = pipeline.get_storage_service()
+    ingest_cv(CVSubmission(source=SOURCE_UPLOAD, filename="cv.pdf", file_path=_file(tmp_path, "a.pdf"), cv_id=uid(72)))
+    ingest_cv(CVSubmission(source=SOURCE_JOB_PAGE, filename="cv.pdf", file_path=_file(tmp_path, "b.pdf"), cv_id=uid(73),
+                           persisted_path=f"s3://bucket/cvs/{uid(73)}.pdf", candidate={"email": "x@y.com"}, job={"job_id": world.job}))
+    assert _deleted(storage) == [(uid(73), "cv", ".pdf")]
+
+
+def test_nothing_is_deleted_when_the_submission_is_the_stored_candidate_itself(world, tmp_path):
+    storage = pipeline.get_storage_service()
+    path = _file(tmp_path)
+    ingest_cv(CVSubmission(source=SOURCE_UPLOAD, filename="cv.pdf", file_path=path, cv_id=uid(74),
+                           persisted_path=f"s3://bucket/cvs/{uid(74)}.pdf"))
+    again = ingest_cv(CVSubmission(source=SOURCE_UPLOAD, filename="cv.pdf", file_path=path, cv_id=uid(74),
+                                   persisted_path=f"s3://bucket/cvs/{uid(74)}.pdf"))          # a retried job: same id as the candidate
+    assert again.merged is True and _deleted(storage) == []
+
+
+def test_only_a_file_named_for_the_submission_is_ever_deleted(world, tmp_path):
+    storage = pipeline.get_storage_service()
+    ingest_cv(CVSubmission(source=SOURCE_UPLOAD, filename="cv.pdf", file_path=_file(tmp_path, "a.pdf"), cv_id=uid(75)))
+    ingest_cv(CVSubmission(source=SOURCE_UPLOAD, filename="cv.pdf", file_path=_file(tmp_path, "b.pdf"), cv_id=uid(76),
+                           persisted_path=f"s3://bucket/cvs/{uid(75)}.pdf"))                 # names someone else's file: left alone
+    assert _deleted(storage) == []
+
+
+def test_a_failed_queued_upload_removes_the_file_it_saved(world, tmp_path, monkeypatch):
+    from app.ingestion import upload_job
+    storage = pipeline.get_storage_service()
+    monkeypatch.setattr(upload_job, "set_public_job_status", lambda *a, **k: None)
+    monkeypatch.setattr(upload_job, "ingest_cv", lambda sub: (_ for _ in ()).throw(IngestError("unreadable", 400)))
+    job = {"application_id": uid(77), "filename": "cv.pdf", "persisted_path": f"s3://bucket/cvs/{uid(77)}.pdf"}
+    asyncio.run(upload_job.process_cv_upload(job))
+    assert _deleted(storage) == [(uid(77), "cv", ".pdf")]
+
+
 def test_same_file_for_a_different_job_is_a_new_application_of_the_same_candidate(world, tmp_path):
     other = world.store.create_job_posting({"job_description_id": "jd-1", "public_token": "tok2"})
     one = ingest_cv(CVSubmission(source=SOURCE_JOB_PAGE, filename="cv.pdf", file_path=_file(tmp_path), cv_id=uid(11), job={"job_id": world.job}))

@@ -256,7 +256,27 @@ def _application_data(sub: CVSubmission, facts: Dict[str, Any]) -> Dict[str, Any
 # ---------------------------------------------------------------------------------------------------------------------
 # merging into an existing candidate
 # ---------------------------------------------------------------------------------------------------------------------
-def _merge_into(store, existing: Dict[str, Any], sub: CVSubmission) -> IngestResult:
+def discard_orphan_original(store, cv_id: str, stored_path: Optional[str]) -> bool:
+    """Delete an original file that was saved to storage for ``cv_id`` but that no candidate row owns: the upload turned out to be a
+    duplicate (the candidate already exists with its own file) or processing failed. Never touches a file whose name is not this
+    id, and never a file whose candidate exists. Returns True when a delete was sent; a failure is only logged."""
+    if not stored_path:
+        return False
+    stem, ext = os.path.splitext(os.path.basename(stored_path))
+    if stem != cv_id:
+        return False
+    try:
+        if store.candidate_document(cv_id):
+            return False
+        get_storage_service().delete_file(cv_id, "cv", ext)
+        logger.info(f"Removed the unused stored file of {cv_id} ({stored_path})")
+        return True
+    except Exception as exc:  # noqa: BLE001 - a stray file is cleaned up later, it must never fail the upload
+        logger.warning(f"Could not remove the unused stored file of {cv_id}: {exc}")
+        return False
+
+
+def _merge_into(store, existing: Dict[str, Any], sub: CVSubmission, stored_path: Optional[str] = None) -> IngestResult:
     cv_id = existing["id"]
     facts = _clean(sub.candidate)
     person = {k: v for k, v in facts.items() if k != "name"}
@@ -266,6 +286,10 @@ def _merge_into(store, existing: Dict[str, Any], sub: CVSubmission) -> IngestRes
     if sub.job and sub.job.get("job_id"):
         store.link_application(sub.job["job_id"], cv_id, _application_data(sub, facts))
     logger.info(f"CV {cv_id} already stored; joined data from {sub.source} into the existing candidate")
+    if sub.cv_id and sub.cv_id != cv_id:
+        # the existing candidate keeps its own file; the copy this submission saved first (queued uploads and the job page save it
+        # before the duplicate is known) belongs to nobody
+        discard_orphan_original(store, sub.cv_id, stored_path or sub.persisted_path)
     return IngestResult(cv_id=cv_id, merged=True, standardized={}, stats={"merged_fields": sorted(person), "source": sub.source})
 
 
@@ -381,7 +405,7 @@ def _ingest(sub: CVSubmission, step: Progress) -> IngestResult:
         if not winner:
             raise IngestError(f"The CV could not be saved to the database: {exc}", 500) from exc
         logger.info(f"CV {sub.cv_id} was stored at the same moment by another worker; joining the details into {winner['id']}")
-        return _merge_into(store, winner, sub)
+        return _merge_into(store, winner, sub, stored_path=persisted)
     except Exception as exc:  # noqa: BLE001
         store.delete_candidate(sub.cv_id)
         raise IngestError(f"The CV could not be saved to the database: {exc}", 500) from exc

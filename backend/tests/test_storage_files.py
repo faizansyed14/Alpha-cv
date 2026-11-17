@@ -87,3 +87,36 @@ def test_a_local_file_is_still_served_first(monkeypatch, tmp_path):
 def test_bad_ids_are_refused(monkeypatch, bad):
     c = client(monkeypatch, FakeS3({}))
     assert c.get(f"/api/storage/files/jd/{bad}").status_code in (400, 404)
+
+
+# ---- a JD's stored original goes when the JD does ---------------------------------------------------------------------------
+def _jd_client(monkeypatch, doc, storage):
+    from app.api.routers import job_descriptions as J
+    store = SimpleNamespace(jd_document=lambda i: doc, delete_job_description=lambda i: "Role.pdf")
+    monkeypatch.setattr(J, "get_store", lambda: store)
+    monkeypatch.setattr(J, "get_storage_service", lambda: storage)
+    app = FastAPI()
+    app.include_router(J.router, prefix="/api/jd")
+    app.dependency_overrides[J.require_core_app] = lambda: SimpleNamespace(role="user", username="u")
+    return TestClient(app)
+
+
+def test_deleting_a_jd_deletes_its_file_from_storage(monkeypatch):
+    gone = []
+    storage = SimpleNamespace(delete_file=lambda *a: gone.append(a))
+    c = _jd_client(monkeypatch, {"file_path": "s3://bucket/jds/jd1.pdf", "filename": "Role.pdf"}, storage)
+    assert c.delete("/api/jd/jd/jd1").status_code == 200
+    assert gone == [("jd1", "jd", ".pdf")]
+
+
+def test_a_jd_file_that_is_not_named_for_it_is_left_alone_and_a_storage_error_does_not_fail_the_delete(monkeypatch):
+    gone = []
+
+    def boom(*a):
+        gone.append(a)
+        raise Exception("s3 down")
+
+    c = _jd_client(monkeypatch, {"file_path": "s3://bucket/jds/other.pdf"}, SimpleNamespace(delete_file=boom))
+    assert c.delete("/api/jd/jd/jd1").status_code == 200 and gone == []
+    c = _jd_client(monkeypatch, {"file_path": "s3://bucket/jds/jd1.pdf"}, SimpleNamespace(delete_file=boom))
+    assert c.delete("/api/jd/jd/jd1").status_code == 200 and gone == [("jd1", "jd", ".pdf")]
