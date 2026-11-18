@@ -12,6 +12,7 @@ from sqlmodel import SQLModel
 from app.config.settings import settings
 import app.models.agent  # noqa: F401  (registers tables)
 import app.models.bug_report  # noqa: F401
+import app.models.notification  # noqa: F401
 import app.models.requirement  # noqa: F401  (the tracker: without these, autogenerate would propose dropping its tables)
 import app.models.selection  # noqa: F401
 import app.models.talent  # noqa: F401

@@ -27,6 +27,10 @@ LOCATION_ROLES = ("user", "manager", "account_manager")      # roles that must h
 ALL_LOCATIONS_ROLES = ("evp", "admin")                       # roles that see every location
 # who may create a requirement and change its details (a recruiter works only on their own assigned requirements)
 TRACKER_FULL_ROLES = ("account_manager", "manager", "evp", "admin")
+# who can be ASSIGNED as a recruiter on a requirement: the recruiters, and the recruitment managers, who also recruit. A recruitment
+# manager assigned to a requirement works on it as its recruiters do (their own CVs submitted, the recruiter comments, credited when
+# they close it) and keeps the manager's view of everything else.
+RECRUITER_ROLES = ("user", "manager")
 # who may change each field of a requirement. Each comment belongs to one role: the sales manager writes the sales manager comments, the
 # recruitment manager the recruitment manager comments and the recruiter the recruiter comments. The status is changed by the recruiter and
 # the recruitment manager. The EVP and the admin, who oversee everything, may change any field.

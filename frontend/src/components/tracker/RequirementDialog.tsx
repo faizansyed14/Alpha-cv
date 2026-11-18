@@ -54,6 +54,8 @@ export default function RequirementDialog({ requirement, options, previewOpen, o
   const [extendable, setExtendable] = useState(requirement?.duration_extendable ?? false);
   const [recruiterIds, setRecruiterIds] = useState<string[]>(requirement?.recruiters?.map((r) => r.id) ?? []);
   const me = useAuthStore((s) => s.user);
+  // a recruitment manager who is one of this requirement's recruiters writes the recruiter comments too, as its recruiters do
+  const canRecruiterComment = !!ed.recruiter_comments || (me?.role === 'manager' && !!requirement?.recruiters?.some((r) => r.id === me.id));
   const [managerId, setManagerId] = useState(requirement?.manager?.id ?? '');
   // a sales manager adding a requirement is its sales manager unless they choose another
   const [salesId, setSalesId] = useState(requirement ? requirement.sales_manager?.id ?? '' : me?.role === 'account_manager' ? me.id : '');
@@ -176,7 +178,7 @@ export default function RequirementDialog({ requirement, options, previewOpen, o
         if (ed.sales_comments && !same(next.sales_comments, requirement.sales_comments)) body.sales_comments = next.sales_comments;
         if (ed.rm_comments && !same(next.rm_comments, requirement.rm_comments)) body.rm_comments = next.rm_comments;
         const rc = recruiterComments.trim() || null;
-        if (ed.recruiter_comments && !same(rc, requirement.recruiter_comments)) body.recruiter_comments = rc;
+        if (canRecruiterComment && !same(rc, requirement.recruiter_comments)) body.recruiter_comments = rc;
         if (!same(next.cv_submission_date, requirement.cv_submission_date)) body.cv_submission_date = next.cv_submission_date;
         const before = requirement.recruiters.map((r) => r.id);
         if (before.length !== recruiterIds.length || before.some((id, i) => id !== recruiterIds[i])) body.recruiter_ids = recruiterIds;
@@ -361,8 +363,8 @@ export default function RequirementDialog({ requirement, options, previewOpen, o
               <Textarea id="rq-rm" value={rmComments} onChange={(e) => setRmComments(e.target.value)} maxLength={4000} rows={3} disabled={!ed.rm_comments} />
             </Field>
             {editing && (
-              <Field label="Recruiter comments" htmlFor="rq-rc" hint={ed.recruiter_comments ? 'Optional. Shown to everyone who can see this requirement.' : 'Written by the recruiter'} className="sm:col-span-2">
-                <Textarea id="rq-rc" value={recruiterComments} onChange={(e) => setRecruiterComments(e.target.value)} maxLength={4000} rows={2} disabled={!ed.recruiter_comments} />
+              <Field label="Recruiter comments" htmlFor="rq-rc" hint={canRecruiterComment ? 'Optional. Shown to everyone who can see this requirement.' : 'Written by the recruiter'} className="sm:col-span-2">
+                <Textarea id="rq-rc" value={recruiterComments} onChange={(e) => setRecruiterComments(e.target.value)} maxLength={4000} rows={2} disabled={!canRecruiterComment} />
               </Field>
             )}
           </div>

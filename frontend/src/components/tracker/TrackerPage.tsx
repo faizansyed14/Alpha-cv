@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { IconButton } from '@/components/ui/icon-button';
+import { InfiniteScrollSentinel } from '@/components/ui/infinite-scroll';
 import { Input } from '@/components/ui/input';
 import { PageHeader, EmptyState } from '@/components/ui/page';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -21,6 +22,8 @@ import type { Requirement, RequirementFilters, RequirementInput, RequirementStat
 import { cn } from '@/lib/utils';
 import ClosureCelebration, { type ClosureCelebrationPayload } from './ClosureCelebration';
 import RequirementDialog from './RequirementDialog';
+import ImportDialog from './ImportDialog';
+import { FOCUS_EVENT } from '@/components/notifications/NotificationBell';
 import { errorText } from './jd';
 import { CommentCell, RecruitersSelect, STATUS_META, STATUSES, StatusPill, StatusSelect, InlineCount, InlineDate, LocationFilter, PersonFilter, PersonSelect, durationParts, formatDay, todayIso, TRACKER_TH_STICKY, TRACKER_THEAD } from './shared';
 
@@ -65,6 +68,7 @@ export default function TrackerPage() {
   const [dateTo, setDateTo] = useState('');
 
   const [dialog, setDialog] = useState<{ requirement: Requirement | null } | null>(null);
+  const [importing, setImporting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Requirement | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -82,6 +86,22 @@ export default function TrackerPage() {
     if (!user) return;
     api.getTrackerOptions().then(setOptions).catch((e) => setError(errorText(e, 'The tracker could not be loaded.')));
   }, [user]);
+
+  // Opened from a notification (/tracker?focus=<id>): scroll to that requirement and highlight it for a few seconds. When it is not in
+  // the list (other filters, or further down), the filters are cleared and its role is searched for; a closed one is on Closures.
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const searchedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const read = (link?: string) => {
+      const query = link ? (link.split('?')[1] ?? '') : window.location.search.slice(1);
+      const id = new URLSearchParams(query).get('focus');
+      if (id) { searchedFor.current = null; setFocusId(id); }
+    };
+    read();
+    const onOpen = (e: Event) => { const link = (e as CustomEvent<string>).detail; if (typeof link === 'string' && link.startsWith('/tracker')) read(link); };
+    window.addEventListener(FOCUS_EVENT, onOpen);
+    return () => window.removeEventListener(FOCUS_EVENT, onOpen);
+  }, []);
 
   // the first page of what the filters match; an older answer that arrives late is dropped
   const run = useRef(0);
@@ -103,15 +123,21 @@ export default function TrackerPage() {
 
   useEffect(() => { if (user) { setLoading(true); void load(); } }, [load, user]);
 
+  // the next page, asked for when the reader scrolls near the end; a page for filters that changed meanwhile is dropped
+  const [moreFailed, setMoreFailed] = useState(false);
   const loadMore = async () => {
+    if (loadingMore) return;
+    const mine = run.current;
     setLoadingMore(true);
+    setMoreFailed(false);
     try {
       const page = await api.listRequirements(filters, PAGE, items.length);
+      if (mine !== run.current) return;
       setItems((prev) => [...prev, ...page.items.filter((r) => !prev.some((p) => p.id === r.id))]);
       setTotal(page.total);
       setStats(page.stats);
-    } catch (e) {
-      showError('Could not load more', errorText(e, 'Please try again.'));
+    } catch {
+      if (mine === run.current) setMoreFailed(true);       // the strip at the end offers "Try again"
     } finally {
       setLoadingMore(false);
     }
@@ -177,6 +203,27 @@ export default function TrackerPage() {
     router.push(`/careers-manage?${q.toString()}`);
   };
 
+  useEffect(() => {
+    if (!focusId || loading) return;
+    const row = document.querySelector(`[data-req-id="${CSS.escape(focusId)}"]`);
+    if (row) {
+      row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      const t = window.setTimeout(() => setFocusId(null), 5000);
+      return () => window.clearTimeout(t);
+    }
+    if (searchedFor.current === focusId) { setFocusId(null); return; }   // searched already and still not here: closed, or no longer theirs
+    searchedFor.current = focusId;
+    let alive = true;
+    api.getRequirement(focusId).then((req) => {
+      if (!alive) return;
+      clearFilters();
+      setSearch(req.position);
+      setQ(req.position);
+    }).catch(() => { if (alive) setFocusId(null); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusId, loading, items]);
+
   const clearFilters = () => { setStatus(''); setSearch(''); setQ(''); setLocation(''); setRecruiterId(''); setManagerId(''); setSalesId(''); setDateFrom(''); setDateTo(''); };
 
   if (!user) return null;
@@ -217,6 +264,7 @@ export default function TrackerPage() {
       actions={
         <>
           <Button variant="secondary" size="sm" icon={<Download />} onClick={() => void exportExcel()} loading={exporting} disabled={loading || total === 0}>Export to Excel</Button>
+          {manage && options?.can_create && <Button variant="secondary" size="sm" icon={<Upload />} onClick={() => setImporting(true)}>Import from Excel</Button>}
           {manage && options?.can_create && <Button variant="primary" size="sm" icon={<Plus />} onClick={() => setDialog({ requirement: null })}>New requirement</Button>}
         </>
       }
@@ -375,7 +423,7 @@ export default function TrackerPage() {
               )) : items.map((r, i) => {
                 const overdue = !!r.cv_submission_date && r.cv_submission_date < today && (r.status === 'open' || r.status === 'hold');
                 return (
-                  <TR key={r.id} className="align-top">
+                  <TR key={r.id} data-req-id={r.id} className={cn('align-top transition-colors duration-700', focusId === r.id && 'bg-amber-50 ring-2 ring-inset ring-amber-300')}>
                     <TD className="tabular-nums text-slate-400">{i + 1}</TD>
                     <TD className="min-w-[7.5rem]">
                       <p className="font-semibold text-slate-900">{r.position}</p>
@@ -414,7 +462,7 @@ export default function TrackerPage() {
                       <TD><CommentCell width="w-24" label="Sales manager comments" value={r.sales_comments} editable={!!ed?.sales_comments} onSave={(v) => patch(r.id, { sales_comments: v })} /></TD>
                     )}
                     <TD><CommentCell width="w-24" label="Recruitment manager comments" value={r.rm_comments} editable={!!ed?.rm_comments} onSave={(v) => patch(r.id, { rm_comments: v })} /></TD>
-                    <TD><CommentCell width="w-24" label="Recruiter comments" value={r.recruiter_comments} editable={!!ed?.recruiter_comments} onSave={(v) => patch(r.id, { recruiter_comments: v })} /></TD>
+                    <TD><CommentCell width="w-24" label="Recruiter comments" value={r.recruiter_comments} editable={!!ed?.recruiter_comments || (user?.role === 'manager' && r.recruiters.some((x) => x.id === user.id))} onSave={(v) => patch(r.id, { recruiter_comments: v })} /></TD>
                     <TD className="min-w-[6rem]">{r.job_location || <span className="text-slate-300">-</span>}</TD>
                     <TD className="min-w-[6.75rem] tabular-nums">{r.salary || <span className="text-slate-300">-</span>}</TD>
                     <TD className="min-w-[5.5rem]">
@@ -469,12 +517,21 @@ export default function TrackerPage() {
               {items.length.toLocaleString()} of {total.toLocaleString()} requirement{total === 1 ? '' : 's'}
             </p>
           )}
-          {!firstLoad && items.length < total && (
-            <div className="mt-2 flex justify-center">
-              <Button variant="secondary" size="sm" onClick={() => void loadMore()} loading={loadingMore}>Load more</Button>
-            </div>
+          {!firstLoad && (
+            <InfiniteScrollSentinel hasMore={items.length < total} loading={loadingMore} error={moreFailed} itemCount={items.length} onLoadMore={loadMore} />
           )}
         </>
+      )}
+
+      {importing && (
+        <ImportDialog
+          onClose={() => setImporting(false)}
+          onImported={(created) => {
+            setImporting(false);
+            showSuccess('Imported', `${created} requirement${created === 1 ? '' : 's'} added.`);
+            void load();
+          }}
+        />
       )}
 
       {dialog && options && (

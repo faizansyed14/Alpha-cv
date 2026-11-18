@@ -44,6 +44,17 @@ const FilePreviewModal = dynamic(
 
 const ITEMS_PER_PAGE = 200;   // same as the API page size (200 per call)
 const CATEGORY_ALL = '__all__';
+/** The Freshness (date added) choices of the left filter: the same as Advanced search, plus six months and a year. `value` is the number of days. */
+const FRESHNESS_OPTIONS = [
+  { value: 'any', label: 'Any time' },
+  { value: '1', label: 'Last 24 hours' },
+  { value: '7', label: 'Last 7 days' },
+  { value: '30', label: 'Last 30 days' },
+  { value: '90', label: 'Last 90 days' },
+  { value: '180', label: 'Last 6 months' },
+  { value: '365', label: 'Last year' },
+  { value: 'custom', label: 'Custom range' },
+];
 
 export function getCVDisplay(cv: CVListItem) {
   const contactEmail =
@@ -237,6 +248,11 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     nationality: [],
     language: [],
   });
+  /** Freshness (date added), above the checkbox filters: "any", the last N days, or a custom range. The server filters by it. */
+  const [freshness, setFreshness] = useState<string>('any');
+  const [addedFrom, setAddedFrom] = useState('');
+  const [addedTo, setAddedTo] = useState('');
+  const freshnessActive = freshness !== 'any' && (freshness !== 'custom' || !!addedFrom || !!addedTo);
   const [locationFacets, setLocationFacets] = useState<{ value: string; count: number; members?: string[] }[]>([]);
   const [nationalityFacets, setNationalityFacets] = useState<{ value: string; count: number }[]>([]);
   const [languageFacets, setLanguageFacets] = useState<{ value: string; count: number }[]>([]);
@@ -431,7 +447,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     const languages = sidebarFilters.language || [];
     const cats = sidebarFilters.category || [];
     // with an advanced search on screen the notes filter is part of that search instead (see below)
-    const active = locations.length > 0 || nationalities.length > 0 || languages.length > 0 || cats.length >= 2 || (!!notesParam && !advancedQuery);
+    const active = locations.length > 0 || nationalities.length > 0 || languages.length > 0 || cats.length >= 2 || freshnessActive || (!!notesParam && !advancedQuery);
     if (!active) {
       geoQueryRef.current = null;
       setGeoFilterCVs(null);
@@ -447,6 +463,9 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       languages: languages.length ? languages : undefined,
       categories: cats.length ? cats : undefined,
       notes: advancedQuery ? undefined : notesParam,
+      added_within_days: freshnessActive && freshness !== 'custom' ? Number(freshness) : undefined,
+      added_from: freshness === 'custom' && addedFrom ? addedFrom : undefined,
+      added_to: freshness === 'custom' && addedTo ? addedTo : undefined,
       limit: 100,
     };
     geoQueryRef.current = query;
@@ -470,7 +489,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarFilters.location, sidebarFilters.nationality, sidebarFilters.language, sidebarFilters.category, notesParam, advancedQuery === null]);
+  }, [sidebarFilters.location, sidebarFilters.nationality, sidebarFilters.language, sidebarFilters.category, notesParam, advancedQuery === null, freshness, addedFrom, addedTo]);
 
   // With an advanced search on screen, a change of the notes filter runs that same search again with the filter added (the server applies it).
   const skipFirstNotes = useRef(true);
@@ -909,6 +928,9 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
 
   const clearSidebarFilters = () => {
     setSidebarFilters({ category: [], location: [], nationality: [], language: [] });
+    setFreshness('any');
+    setAddedFrom('');
+    setAddedTo('');
   };
 
   const cvCount = totalCVs ?? cvs.length;
@@ -991,13 +1013,13 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
               ? 'No candidates match this search'
               : search
               ? 'No candidates match your search'
-              : (sidebarFilters.category?.length || sidebarFilters.location?.length || sidebarFilters.nationality?.length || sidebarFilters.language?.length)
+              : (sidebarFilters.category?.length || sidebarFilters.location?.length || sidebarFilters.nationality?.length || sidebarFilters.language?.length || freshnessActive)
                 ? 'No candidates match these filters'
                 : 'No CVs yet'
           }
           hint={
             !search &&
-            !(sidebarFilters.category?.length || sidebarFilters.location?.length || sidebarFilters.nationality?.length || sidebarFilters.language?.length)
+            !(sidebarFilters.category?.length || sidebarFilters.location?.length || sidebarFilters.nationality?.length || sidebarFilters.language?.length || freshnessActive)
               ? 'Upload CVs from the Upload tab to build your database.'
               : undefined
           }
@@ -1167,6 +1189,16 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
               </button>
             )),
           )}
+          {freshnessActive && (
+            <button
+              type="button"
+              onClick={() => { setFreshness('any'); setAddedFrom(''); setAddedTo(''); }}
+              className="inline-flex items-center gap-1 rounded-md bg-navy-50 px-2 py-0.5 text-2xs font-medium text-navy-700 hover:bg-navy-100"
+              title="Remove filter"
+            >
+              Added: {freshness === 'custom' ? `${addedFrom || '…'} to ${addedTo || '…'}` : FRESHNESS_OPTIONS.find((o) => o.value === freshness)?.label} <X className="h-3 w-3" />
+            </button>
+          )}
         </div>
       )}
 
@@ -1286,6 +1318,21 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
             selected={sidebarFilters}
             onToggle={toggleSidebarFilter}
             onClearAll={clearSidebarFilters}
+            extraActive={freshnessActive ? 1 : 0}
+            top={
+              <div>
+                <label htmlFor="cv-freshness" className="mb-1.5 block text-sm font-semibold text-slate-800">Freshness (date added)</label>
+                <select id="cv-freshness" value={freshness} onChange={(e) => setFreshness(e.target.value)} className="field-input w-full">
+                  {FRESHNESS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                {freshness === 'custom' && (
+                  <div className="mt-2 space-y-2">
+                    <input type="date" value={addedFrom} max={addedTo || undefined} onChange={(e) => setAddedFrom(e.target.value)} className="field-input w-full" aria-label="Added from" />
+                    <input type="date" value={addedTo} min={addedFrom || undefined} onChange={(e) => setAddedTo(e.target.value)} className="field-input w-full" aria-label="Added to" />
+                  </div>
+                )}
+              </div>
+            }
             className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto"
           />
           <div className="min-w-0 flex-1">{renderCandidatesBody()}</div>

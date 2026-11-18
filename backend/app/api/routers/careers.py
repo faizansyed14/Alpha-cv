@@ -71,6 +71,7 @@ def _summary(job: dict, user: Optional[User] = None) -> JobPostingSummary:
     """One posting as the lists show it. The poster's name and role are internal: only a signed-in user (``user``) sees them."""
     is_owner = bool(user) and job.get("posted_by_user") == user.username
     is_admin = bool(user) and user.role == "admin"
+    is_manager = bool(user) and user.role == "manager"
     return JobPostingSummary(
         job_id=job["id"],
         job_title=job["job_title"],
@@ -85,7 +86,7 @@ def _summary(job: dict, user: Optional[User] = None) -> JobPostingSummary:
         public_token=job["public_token"],
         posted_by_user=job.get("posted_by_user") if user else None,
         posted_by_role=job.get("posted_by_role") if user else None,
-        can_edit=is_owner or is_admin,
+        can_edit=is_owner or is_admin or is_manager,
         can_delete=is_owner or is_admin,
         email_subject_id=job.get("email_subject_id") if user else None,
         email_subject_template=job.get("email_subject_template") if user else None,
@@ -604,6 +605,7 @@ async def list_job_postings(
     q: Optional[str] = Query(None, max_length=200, description="Search the title, poster, e-mail subject or id of every posting"),
     scope: Literal["all", "mine", "others"] = Query("all", description="Only the postings you posted, or only the others'"),
     status_filter: Literal["all", "active", "inactive"] = Query("all", alias="status", description="Only open or only closed postings"),
+    location: Optional[Literal["Dubai", "Abu Dhabi"]] = Query(None, description="Only the jobs whose location is in Dubai, or in Abu Dhabi"),
     current_user: User = Depends(require_core_app)
 ) -> Union[List[JobPostingSummary], dict]:
     """List job postings for the HR dashboard. Everyone sees every posting; edit / delete rights are the poster's and the admin's."""
@@ -614,14 +616,14 @@ async def list_job_postings(
             get_store().list_job_postings, include_inactive=include_inactive,
             offset=int(offset or 0) if paged else 0, limit=int(limit or 25) if paged else 1000, q=q,
             posted_by=current_user.username if scope == "mine" else None, not_posted_by=current_user.username if scope == "others" else None,
-            status=None if status_filter == "all" else status_filter)
+            status=None if status_filter == "all" else status_filter, location=location)
         summaries = [_summary(job, current_user) for job in rows]
         logger.info(f"Found {len(summaries)} job postings (total={total})")
         if not paged:
             return summaries
         counts = await asyncio.to_thread(
             get_store().posting_status_counts, q=q, posted_by=current_user.username if scope == "mine" else None,
-            not_posted_by=current_user.username if scope == "others" else None)
+            not_posted_by=current_user.username if scope == "others" else None, location=location)
         return {"jobs": summaries, "total": total, "counts": counts}
     except Exception as e:
         logger.error(f"Failed to list job postings: {e}")
@@ -741,7 +743,9 @@ async def get_job_for_matching(job_id: str, current_user: User = Depends(require
 
 
 def _own_job_or_403(job: dict, user: User, action: str) -> None:
-    if user.role != "admin" and job.get("posted_by_user") != user.username:
+    # The recruitment manager can edit and (de)activate any posting, like the admin; deleting stays with the poster and the admin.
+    manager_ok = user.role == "manager" and action != "delete"
+    if user.role != "admin" and not manager_ok and job.get("posted_by_user") != user.username:
         logger.warning(f"Unauthorized {action} attempt: {user.username} on a job posted by {job.get('posted_by_user')}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"You can only {action} job postings that you created")
 

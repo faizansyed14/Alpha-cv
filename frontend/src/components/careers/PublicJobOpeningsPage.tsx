@@ -151,7 +151,7 @@ export default function PublicJobOpeningsPage() {
                 variants={rise}
                 className="mb-4 inline-flex rounded-full border border-slate-200 bg-paper/90 px-4 py-1.5 text-2xs font-semibold uppercase tracking-[0.14em] text-navy-700 shadow-card"
               >
-                Careers at AlphaData
+                Careers at Alpha Data Recruitment
               </motion.p>
               <motion.h1
                 variants={rise}

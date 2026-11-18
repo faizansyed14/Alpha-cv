@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, Megaphone, ThumbsUp, Check, AlertCircle } from '@/components/icons';
-import { Button } from '@/components/ui/button';
+import { X, Megaphone, Check, AlertCircle } from '@/components/icons';
 import { api } from '@/lib/api';
 import { ease } from '@/lib/motion';
 import { useAuthStore } from '@/stores/authStore';
@@ -11,13 +10,79 @@ import type { NoticeData } from '@/lib/types';
 
 const DISMISS_PREFIX = 'notice_dismissed_';
 
-/** "Nov 16, 2026, 10:30 AM" in the reader's own time zone; the server sends UTC without a zone marker. */
-function postedOn(iso: string | undefined): string | null {
-  if (!iso) return null;
-  const when = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
-  if (Number.isNaN(when.getTime())) return null;
-  return when.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+type Block = { kind: 'p'; text: string } | { kind: 'ol'; items: { n: string; text: string }[] } | { kind: 'ul'; items: string[] };
+const NUMBERED = /^\s*(\d{1,3})[.)]\s+(.+)$/;
+const BULLET = /^\s*[-*•–]\s+(.+)$/;
+
+/** The admin's message as paragraphs and lists: "1. ..." lines become a numbered list, "- ..." / "• ..." lines a bulleted one. */
+export function toBlocks(message: string): Block[] {
+  const blocks: Block[] = [];
+  for (const raw of message.replace(/\r\n?/g, '\n').split('\n')) {
+    const line = raw.trim();
+    const last = blocks[blocks.length - 1];
+    if (!line) {
+      if (last && last.kind === 'p') blocks.push({ kind: 'p', text: '' });         // a blank line ends a paragraph
+      continue;
+    }
+    const num = NUMBERED.exec(line);
+    const bullet = num ? null : BULLET.exec(line);
+    if (num) {
+      if (last && last.kind === 'ol') last.items.push({ n: num[1], text: num[2] });
+      else blocks.push({ kind: 'ol', items: [{ n: num[1], text: num[2] }] });
+    } else if (bullet) {
+      if (last && last.kind === 'ul') last.items.push(bullet[1]);
+      else blocks.push({ kind: 'ul', items: [bullet[1]] });
+    } else if (last && last.kind === 'p' && last.text) {
+      last.text += '\n' + line;
+    } else if (last && last.kind === 'p') {
+      last.text = line;
+    } else {
+      blocks.push({ kind: 'p', text: line });
+    }
+  }
+  return blocks.filter((b) => b.kind !== 'p' || b.text);
 }
+
+/** One short sentence is centred under the title; anything with a list or several paragraphs reads left-aligned. */
+function NoticeMessage({ text }: { text: string }) {
+  const blocks = toBlocks(text);
+  const simple = blocks.length === 1 && blocks[0].kind === 'p' && blocks[0].text.length < 160;
+  return (
+    <div id="notice-body" className={`mt-3 w-full space-y-3 text-[0.95rem] leading-relaxed text-slate-600 ${simple ? 'text-center' : 'text-left'}`}>
+      {blocks.map((b, i) => {
+        if (b.kind === 'ol') {
+          return (
+            <ol key={i} className="space-y-2">
+              {b.items.map((item, j) => (
+                <li key={j} className="flex gap-3">
+                  <span className="mt-[2px] flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-navy-50 text-2xs font-semibold tabular-nums text-navy-700">{item.n}</span>
+                  <span className="min-w-0 break-words">{item.text}</span>
+                </li>
+              ))}
+            </ol>
+          );
+        }
+        if (b.kind === 'ul') {
+          return (
+            <ul key={i} className="space-y-2">
+              {b.items.map((item, j) => (
+                <li key={j} className="flex gap-3">
+                  <span aria-hidden className="mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full bg-navy-400" />
+                  <span className="min-w-0 break-words">{item}</span>
+                </li>
+              ))}
+            </ul>
+          );
+        }
+        const heading = !simple && b.text.length <= 60 && b.text.endsWith(':') && !b.text.includes('\n');
+        return heading
+          ? <p key={i} className="text-sm font-semibold text-slate-800">{b.text}</p>
+          : <p key={i} className="whitespace-pre-wrap break-words">{b.text}</p>;
+      })}
+    </div>
+  );
+}
+
 
 /**
  * Shows an admin-published notice to non-admin users.
@@ -122,8 +187,6 @@ export default function NoticePopup() {
     };
   }, [open, dismiss]);
 
-  const posted = postedOn(notice?.updated_at);
-
   return (
     <AnimatePresence>
       {open && notice && (
@@ -135,101 +198,63 @@ export default function NoticePopup() {
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
         >
-          <div className="absolute inset-0 bg-scrim/55 backdrop-blur-[3px]" aria-hidden onClick={dismiss} />
+          <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-[2px]" aria-hidden onClick={dismiss} />
 
           <motion.div
             role="dialog"
             aria-modal="true"
             aria-labelledby="notice-title"
             aria-describedby="notice-body"
-            initial={{ opacity: 0, y: 16, scale: 0.97 }}
+            initial={{ opacity: 0, y: 14, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
-            transition={{ duration: 0.28, ease }}
-            className="relative z-10 flex max-h-[85vh] w-full max-w-[460px] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_30px_80px_-20px_rgba(10,16,48,0.55)] ring-1 ring-black/5"
+            transition={{ duration: 0.26, ease }}
+            className="relative z-10 flex max-h-[80vh] w-full max-w-[400px] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_24px_60px_-18px_rgba(15,23,42,0.28)] ring-1 ring-slate-200/70"
           >
-            {/* header: the same deep navy as the sign-in page, with a soft glow */}
-            <div
-              className="relative shrink-0 overflow-hidden px-6 pb-6 pt-6 text-white"
-              style={{
-                background:
-                  'radial-gradient(420px 200px at 100% -20%, rgba(99,110,240,0.38), transparent 62%),' +
-                  'linear-gradient(160deg, #0a1030 0%, #111a40 60%, #16215a 100%)',
-              }}
+            <button
+              type="button"
+              onClick={dismiss}
+              className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500/30"
+              aria-label="Close"
             >
-              <button
-                type="button"
-                onClick={dismiss}
-                className="absolute right-3.5 top-3.5 flex h-8 w-8 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-                aria-label="Close for now"
-                title="Close for now (it comes back at your next sign-in)"
-              >
-                <X className="h-4 w-4" />
-              </button>
-              <div className="flex items-center gap-3.5">
-                <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/12 ring-1 ring-white/20">
-                  <span aria-hidden className="absolute inset-0 animate-ping rounded-2xl bg-white/10 [animation-duration:2.6s] [animation-iteration-count:2]" />
-                  <Megaphone className="relative h-6 w-6 text-white" />
-                </span>
-                <div className="min-w-0 pr-8">
-                  <p className="text-2xs font-semibold uppercase tracking-[0.18em] text-white/55">Announcement</p>
-                  <h2 id="notice-title" className="mt-0.5 font-display text-[1.25rem] font-semibold leading-tight tracking-[-0.02em]">
-                    A message from your admin
-                  </h2>
-                </div>
-              </div>
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-7 pb-2 pt-8 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-navy-50 ring-8 ring-navy-50/50">
+                <Megaphone className="h-[22px] w-[22px] text-navy-700" />
+              </span>
+              <h2 id="notice-title" className="mt-4 font-display text-lg font-semibold tracking-[-0.01em] text-slate-900">Notice</h2>
+              <NoticeMessage text={notice.message} />
             </div>
 
-            {/* the message */}
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-              <p id="notice-body" className="whitespace-pre-wrap break-words text-[0.97rem] leading-relaxed text-slate-700">
-                {notice.message}
-              </p>
-              {(posted || notice.updated_by) && (
-                <p className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-400">
-                  {notice.updated_by ? <>Posted by <span className="font-medium text-slate-500">{notice.updated_by}</span></> : 'Posted'}
-                  {posted ? ` · ${posted}` : ''}
-                </p>
-              )}
-            </div>
-
-            {/* the thumbs-up */}
-            <div className="shrink-0 border-t border-slate-100 bg-slate-50/70 px-6 py-4">
+            <div className="shrink-0 px-7 pb-7 pt-5">
               {problem && (
-                <p role="alert" className="mb-3 flex items-center gap-1.5 text-xs font-medium text-red-600">
+                <p role="alert" className="mb-3 flex items-center justify-center gap-1.5 text-xs font-medium text-red-600">
                   <AlertCircle className="h-3.5 w-3.5" /> {problem}
                 </p>
               )}
-              <div className="flex items-center gap-3">
-                <button
-                  ref={okRef}
-                  type="button"
-                  onClick={acknowledge}
-                  disabled={sending || thanks}
-                  className={`group inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold text-white shadow-[0_8px_20px_-8px_rgba(10,16,48,0.6)] transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500/50 focus-visible:ring-offset-2 disabled:cursor-default ${
-                    thanks ? 'bg-emerald-600' : 'bg-navy-800 hover:-translate-y-px hover:bg-navy-700 active:translate-y-0'
-                  }`}
-                >
-                  <AnimatePresence mode="wait" initial={false}>
-                    {thanks ? (
-                      <motion.span key="done" className="inline-flex items-center gap-2" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}>
-                        <Check className="h-4 w-4 text-white" /> Thanks, noted
-                      </motion.span>
-                    ) : (
-                      <motion.span key="ok" className="inline-flex items-center gap-2" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                        <ThumbsUp className="h-[18px] w-[18px] text-white transition-transform duration-200 group-hover:-rotate-12 group-hover:scale-110" />
-                        {sending ? 'Saving…' : 'OK, got it'}
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                </button>
-                <Button type="button" variant="ghost" size="lg" onClick={dismiss} disabled={sending || thanks} className="h-11 shrink-0 text-slate-500">
-                  Later
-                </Button>
-              </div>
-              <p className="mt-3 text-center text-xs text-slate-400">
-                Tap <span className="font-medium text-slate-500">OK, got it</span> and this won&apos;t show again. Your admin will see that you&apos;ve read it.
-              </p>
+              <button
+                ref={okRef}
+                type="button"
+                onClick={acknowledge}
+                disabled={sending || thanks}
+                className={`inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500/40 focus-visible:ring-offset-2 disabled:cursor-default ${
+                  thanks ? 'bg-emerald-600' : 'bg-navy-800 hover:bg-navy-700'
+                }`}
+              >
+                <AnimatePresence mode="wait" initial={false}>
+                  {thanks ? (
+                    <motion.span key="done" className="inline-flex items-center gap-2" initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }}>
+                      <Check className="h-4 w-4 text-white" /> Thanks
+                    </motion.span>
+                  ) : (
+                    <motion.span key="ok" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                      {sending ? 'Saving…' : 'Got it'}
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+              </button>
             </div>
           </motion.div>
         </motion.div>

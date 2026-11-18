@@ -51,6 +51,8 @@ export interface CVAdvancedSearchResponse {
 }
 
 export interface CVListItem extends BaseDocument {
+  /** When the person's first CV arrived. `upload_date` is when the current CV arrived: a newer CV of the same person replaces the old one. */
+  first_added_at?: string | null;
   full_name: string;
   job_title: string;
   years_of_experience: string;
@@ -137,6 +139,25 @@ export interface LoginBlocks {
   lockout_seconds: number;
   limits: { ip: number; username_ip: number; account: number };
   items: LoginBlock[];
+}
+
+/** One notification on the bell (the last 30 days only). */
+export interface AppNotification {
+  id: string;
+  kind: 'requirement_assigned' | 'requirement_closed' | 'requirement_status' | 'bug_status' | 'bug_reply' | 'bug_reported' | string;
+  title: string;
+  body: string | null;
+  /** the page it opens */
+  link: string | null;
+  actor: string | null;
+  created_at: string;
+  read: boolean;
+}
+
+export interface NotificationPage {
+  items: AppNotification[];
+  has_more: boolean;
+  unread: number;
 }
 
 export interface NoticeAcknowledgements {
@@ -650,6 +671,62 @@ export interface TrackerAnalytics {
 
 /** The status counts, and `cvs_submitted`: the CVs submitted added up over every requirement these filters match */
 export interface RequirementStats { total: number; open: number; submitted: number; hold: number; closed: number; canceled: number; cvs_submitted: number }
+
+/** One sheet row of a requirements import: what happens to it (import, already in the tracker, or a problem that keeps it out). */
+export interface RequirementImportRow {
+  row: number;
+  outcome: 'import' | 'exists' | 'error';
+  problems: string[];
+  notes: string[];
+  position: string | null;
+  client: string | null;
+  requirement_date: string | null;
+  status: RequirementStatus | null;
+  recruiters: string[];
+  manager: string | null;
+  sales_manager: string | null;
+  cvs_submitted_date: string | null;
+  cvs_submitted_count: number | null;
+  comments: string | null;
+  /** the people as the sheet names them (shown even when no login matches) */
+  sheet: { recruiters: string[]; manager: string | null; sales_manager: string | null };
+  /** sheet names that have no login */
+  missing: { name: string; role: string }[];
+}
+
+export interface RequirementImportResult {
+  applied: boolean;
+  created: number;
+  ignored_columns: string[];
+  summary: { rows: number; import: number; exists: number; error: number; with_notes: number };
+  /** each login the sheet needs that does not exist, with how many rows wait for it */
+  missing_logins: { name: string; role: string; rows: number }[];
+  rows: RequirementImportRow[];
+}
+
+/** One sheet row of a Selections & joining import: a new row, filled into a closed requirement's empty row, already there (skipped), or a problem. */
+export interface SelectionImportRow {
+  row: number;
+  outcome: 'new' | 'fill' | 'exists' | 'error';
+  problems: string[];
+  notes: string[];
+  missing: { name: string; role: string }[];
+  candidate_name: string | null;
+  position: string | null;
+  client: string | null;
+  date: string | null;
+  status: SelectionStatus | null;
+  comments: string | null;
+  sheet: { recruiters: string[]; manager: string | null; sales_manager: string | null };
+}
+
+export interface SelectionImportResult {
+  applied: boolean;
+  created: number;
+  summary: { rows: number; new: number; fill: number; exists: number; error: number; with_notes: number };
+  missing_logins: { name: string; role: string; rows: number }[];
+  rows: SelectionImportRow[];
+}
 export interface RequirementPage { items: Requirement[]; total: number; stats: RequirementStats }
 export interface RequirementEvent { at: string; actor: string; action: 'created' | 'changed'; field: string | null; old: string | null; new: string | null }
 export interface RequirementDetail extends Requirement { history: RequirementEvent[] }

@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, CheckCircle2, Hourglass, Pencil, Search, Send, Trash2, Trophy, X, XCircle } from '@/components/icons';
+import { AlertCircle, CheckCircle2, Hourglass, Pencil, Search, Send, Trash2, Trophy, Upload, X, XCircle } from '@/components/icons';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { Bone } from '@/components/skeletons';
 import { Button } from '@/components/ui/button';
+import { InfiniteScrollSentinel } from '@/components/ui/infinite-scroll';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { IconButton } from '@/components/ui/icon-button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +19,7 @@ import { ToastContainer, useToast } from '@/components/ui/toast';
 import type { Selection, SelectionFilters, SelectionInput, SelectionOptions, SelectionStats, SelectionStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { errorText } from './jd';
+import ImportDialog from './ImportDialog';
 import { CommentCell, InlineDate, LocationFilter, TRACKER_TH_STICKY, TRACKER_THEAD } from './shared';
 
 const PAGE = 50;
@@ -102,6 +104,7 @@ export default function SelectionsPage() {
   const router = useRouter();
   const allowed = !!user && user.role !== 'user';
   const { toasts, showSuccess, showError, removeToast } = useToast();
+  const [importing, setImporting] = useState(false);
 
   const [options, setOptions] = useState<SelectionOptions | null>(null);
   const [items, setItems] = useState<Selection[]>([]);
@@ -146,15 +149,21 @@ export default function SelectionsPage() {
   }, [filters]);
   useEffect(() => { if (allowed) { setLoading(true); void load(); } }, [load, allowed]);
 
+  // the next page, asked for when the reader scrolls near the end; a page for filters that changed meanwhile is dropped
+  const [moreFailed, setMoreFailed] = useState(false);
   const loadMore = async () => {
+    if (loadingMore) return;
+    const mine = run.current;
     setLoadingMore(true);
+    setMoreFailed(false);
     try {
       const page = await api.listSelections(filters, PAGE, items.length);
+      if (mine !== run.current) return;
       setItems((prev) => [...prev, ...page.items.filter((r) => !prev.some((p) => p.id === r.id))]);
       setTotal(page.total);
       setStats(page.stats);
-    } catch (e) {
-      showError('Could not load more', errorText(e, 'Please try again.'));
+    } catch {
+      if (mine === run.current) setMoreFailed(true);       // the strip at the end offers "Try again"
     } finally {
       setLoadingMore(false);
     }
@@ -211,7 +220,19 @@ export default function SelectionsPage() {
         className="!mb-3"
         title="Selections & joining"
         description="A row is added here when a requirement is closed. Record who was selected and whether they joined."
+        actions={<Button variant="secondary" size="sm" icon={<Upload />} onClick={() => setImporting(true)}>Import from Excel</Button>}
       />
+      {importing && (
+        <ImportDialog
+          kind="selections"
+          onClose={() => setImporting(false)}
+          onImported={(created) => {
+            setImporting(false);
+            showSuccess('Imported', `${created} selection${created === 1 ? '' : 's'} added.`);
+            void load();
+          }}
+        />
+      )}
 
       <div className="mb-3 grid grid-cols-2 gap-1 sm:grid-cols-5">
         {tiles.map((t) => (
@@ -339,8 +360,8 @@ export default function SelectionsPage() {
             </TBody>
           </Table>
           {!firstLoad && <p className="mt-2 text-center text-xs tabular-nums text-slate-500">{items.length.toLocaleString()} of {total.toLocaleString()} selection{total === 1 ? '' : 's'}</p>}
-          {!firstLoad && items.length < total && (
-            <div className="mt-2 flex justify-center"><Button variant="secondary" size="sm" onClick={() => void loadMore()} loading={loadingMore}>Load more</Button></div>
+          {!firstLoad && (
+            <InfiniteScrollSentinel hasMore={items.length < total} loading={loadingMore} error={moreFailed} itemCount={items.length} onLoadMore={loadMore} />
           )}
         </>
       )}

@@ -24,7 +24,7 @@ from app.db.database import get_session
 from app.models.requirement import Requirement, RequirementRecruiter
 from app.models.user import User
 from app.security.logsafe import security_event
-from app.security.rbac_rules import ALL_LOCATIONS_ROLES, LOCATIONS
+from app.security.rbac_rules import ALL_LOCATIONS_ROLES, LOCATIONS, RECRUITER_ROLES
 
 router = APIRouter(prefix="/api/tracker", tags=["tracker"])
 
@@ -242,7 +242,7 @@ def analytics(
     if _is_recruiter(user):
         listed = {user.id}
     else:
-        q = select(User).where(User.role == "user", User.is_active == True)            # noqa: E712
+        q = select(User).where(User.role.in_(RECRUITER_ROLES), User.is_active == True)            # noqa: E712  (recruitment managers recruit too)
         q = q.where(User.location == own) if own else q.where(User.location.in_(LOCATIONS))      # a recruiter with no location has nothing to show
         listed = {u.id for u in session.exec(q).all()} | {k for k in per if k}
     closer_ids = {c[3] for c in closures if c[3]}
@@ -269,7 +269,7 @@ def analytics(
     # Dubai and Abu Dhabi side by side, for the EVP and the admin looking at both
     locations: List[Dict[str, Any]] = []
     if show_locations:
-        recruiters_in = dict(session.exec(select(User.location, func.count()).where(User.role == "user", User.is_active == True)   # noqa: E712
+        recruiters_in = dict(session.exec(select(User.location, func.count()).where(User.role.in_(RECRUITER_ROLES), User.is_active == True)   # noqa: E712
                                           .where(User.location.in_(LOCATIONS)).group_by(User.location)).all())
         for place in list(LOCATIONS) + ([None] if None in places else []):
             d = places[place]

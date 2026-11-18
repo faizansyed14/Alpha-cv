@@ -26,6 +26,9 @@ from app.api.routers.bug_reports import router as bug_reports_router
 from app.api.routers.hiring_image import router as hiring_image_router
 from app.api.routers.tracker import router as tracker_router
 from app.api.routers.tracker_closures import router as tracker_closures_router
+from app.api.routers.tracker_import import router as tracker_import_router
+from app.api.routers.notifications import router as notifications_router
+from app.api.routers.tracker_selections_import import router as tracker_selections_import_router
 from app.api.routers.tracker_selections import router as tracker_selections_router
 
 # Services init
@@ -199,6 +202,9 @@ app.include_router(bug_reports_router)
 app.include_router(hiring_image_router)
 app.include_router(tracker_router)
 app.include_router(tracker_closures_router)
+app.include_router(tracker_import_router)
+app.include_router(notifications_router)
+app.include_router(tracker_selections_import_router)
 app.include_router(tracker_selections_router)
 app.include_router(notices.router)
 

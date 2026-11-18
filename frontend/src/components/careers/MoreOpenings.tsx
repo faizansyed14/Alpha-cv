@@ -74,6 +74,9 @@ export default function MoreOpenings({ currentJobToken }: MoreOpeningsProps) {
         <p className="mt-1 text-xs text-slate-500">
           This is currently the only active job opening. Check back later.
         </p>
+        <a href="/careers/openings" className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 hover:underline">
+          Show all jobs <ArrowRight className="h-4 w-4" />
+        </a>
       </div>
     );
   }
@@ -105,6 +108,13 @@ export default function MoreOpenings({ currentJobToken }: MoreOpeningsProps) {
           </button>
         );
       })}
+      <a
+        href="/careers/openings"
+        className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-semibold text-brand-700 transition-colors hover:border-brand-300 hover:bg-brand-100"
+      >
+        Show all jobs
+        <ArrowRight className="h-4 w-4" />
+      </a>
     </div>
   );
 }

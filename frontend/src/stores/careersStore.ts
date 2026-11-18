@@ -14,6 +14,8 @@ export interface JobFilters {
   q: string;
   scope: 'all' | 'mine' | 'others';
   status: 'all' | 'active' | 'inactive';
+  /** where the job is: only Dubai, only Abu Dhabi, or anywhere */
+  location: 'all' | 'Dubai' | 'Abu Dhabi';
 }
 
 export interface MatchJobOptions {
@@ -23,7 +25,7 @@ export interface MatchJobOptions {
   databaseIds?: string[];
 }
 
-const NO_JOB_FILTERS: JobFilters = { q: '', scope: 'all', status: 'all' };
+const NO_JOB_FILTERS: JobFilters = { q: '', scope: 'all', status: 'all', location: 'all' };
 
 interface CareersState {
   // Job postings

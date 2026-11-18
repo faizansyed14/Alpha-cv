@@ -899,8 +899,10 @@ Extract these 5 fields from the cleaned text:
 1. job_title: The exact job title from the text (with any customer name removed if it was embedded in the title)
 2. job_location: Only the city if explicitly provided; otherwise "Location not specified". Never invent a city.
 3. job_summary: 2-3 sentences summarizing what this role does, with customer identity removed (use "our client" where a customer was named)
-4. key_responsibilities: 3-5 main responsibilities as bullet points, cleaned of customer-specific names
-5. qualifications: 3-5 required skills/qualifications as bullet points, cleaned of customer-specific names
+4. key_responsibilities: up to 5 main responsibilities as bullet points, cleaned of customer-specific names
+5. qualifications: up to 5 required qualifications as bullet points: education, certifications, years of experience, required skills, cleaned of customer-specific names
+
+Write only what the job description states. If it lists fewer items, give fewer; if it states no qualifications at all, return an empty string for qualifications. Never repeat a responsibility as a qualification. Never write notes about the source or about missing information (such as "not specified", "no other requirements are mentioned", "the source text does not state"): candidates read every line.
 
 Return ONLY this JSON format:
 {{
@@ -943,6 +945,7 @@ Return ONLY this JSON format:
             for field in required_fields:
                 if field not in ui_data:
                     ui_data[field] = ""
+            ui_data = clean_ui_fields(ui_data)          # no "not specified" notes, no responsibility repeated as a qualification
             
             logger.info(f"UI data extracted successfully for {filename}")
             return ui_data
@@ -950,6 +953,44 @@ Return ONLY this JSON format:
         except Exception as e:
             logger.error(f"Failed to extract UI data: {e}")
             return None
+
+# ============================
+# ---- Careers-page cleanup ----
+# ============================
+# A line about the source rather than the job ("No other qualifications are specified in the source text."): the model writes these
+# when asked for more items than a JD has. Candidates read every line, so they are removed whatever the prompt says.
+_META_LINE = re.compile(
+    r"(source text|the (provided |given )?(text|job description|jd|document) (does not|doesn't|did not)"
+    r"|\b(not|none) (specified|mentioned|stated|provided|listed|given|indicated)\b"
+    r"|\bno (other|additional|further|specific|explicit)\b.{0,80}\b(specified|mentioned|stated|provided|listed|given|required|indicated)\b"
+    r"|^\W*(n/?a|none|not applicable)\W*$)",
+    re.IGNORECASE,
+)
+
+
+def _bullets(text: Any) -> List[str]:
+    return [line.strip() for line in str(text or "").splitlines() if line.strip()]
+
+
+def _bare(line: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", line.lower()).strip()
+
+
+def clean_ui_fields(ui: Dict[str, Any]) -> Dict[str, Any]:
+    """The careers-page fields without lines about the source or missing information, and without a qualification that only repeats a
+    responsibility. A field left with nothing becomes "" (the page then leaves that section out)."""
+    out = dict(ui)
+    duties = [line for line in _bullets(ui.get("key_responsibilities")) if not _META_LINE.search(line)]
+    duty_keys = {_bare(line) for line in duties}
+    quals = [line for line in _bullets(ui.get("qualifications"))
+             if not _META_LINE.search(line) and _bare(line) not in duty_keys]
+    out["key_responsibilities"] = "\n".join(duties)
+    out["qualifications"] = "\n".join(quals)
+    summary = str(ui.get("job_summary") or "")
+    sentences = re.split(r"(?<=[.!?])\s+", summary.strip())
+    out["job_summary"] = " ".join(s for s in sentences if s and not _META_LINE.search(s)).strip()
+    return out
+
 
 # ============================
 # ---- Thin helpers / DI  ----

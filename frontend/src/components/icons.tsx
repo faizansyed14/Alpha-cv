@@ -21,7 +21,7 @@ import {
   Power as PhPower, Pulse, Shield as PhShield, ShieldCheck as PhShieldCheck, ShareNetwork, SignOut, SlidersHorizontal as PhSliders,
   Sparkle, SquaresFour, Tag as PhTag, Target as PhTarget, ThumbsUp as PhThumbsUp, Timer as PhTimer, Translate, Trash, TrendDown, TrendUp, Trophy as PhTrophy, UploadSimple,
   User as PhUser, UserCircle, Users as PhUsers, Wallet as PhWallet, Warning, WarningCircle, X as PhX, XCircle as PhXCircle,
-  CaretDoubleLeft, CaretDoubleRight, ImageSquare,
+  CaretDoubleLeft, CaretDoubleRight, ImageSquare, Bell as PhBell, SpeakerHigh, SpeakerSlash, Checks,
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 
@@ -133,6 +133,10 @@ export const Calendar = make(CalendarBlank, SKY, 'Calendar');
 export const CalendarDays = make(CalendarDots, SKY, 'CalendarDays');
 export const Clock = make(PhClock, SKY, 'Clock');
 export const Bug = make(PhBug, RED, 'Bug');
+export const Bell = make(PhBell, BLUE, 'Bell');
+export const Volume2 = make(SpeakerHigh, BLUE, 'Volume2');
+export const VolumeX = make(SpeakerSlash, BLUE, 'VolumeX');
+export const CheckCheck = make(Checks, GREEN, 'CheckCheck');
 export const Timer = make(PhTimer, SKY, 'Timer');
 export const Hourglass = make(PhHourglass, AMBER, 'Hourglass');
 

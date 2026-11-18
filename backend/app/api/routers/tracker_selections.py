@@ -20,7 +20,7 @@ from app.db.database import get_session
 from app.models.selection import SELECTION_STATUSES, Selection, SelectionRecruiter
 from app.models.user import User
 from app.security.logsafe import security_event
-from app.security.rbac_rules import ALL_LOCATIONS_ROLES, LOCATIONS, SELECTION_FIELD_EDITORS, SELECTION_ROLES
+from app.security.rbac_rules import ALL_LOCATIONS_ROLES, LOCATIONS, RECRUITER_ROLES, SELECTION_FIELD_EDITORS, SELECTION_ROLES
 
 router = APIRouter(prefix="/api/tracker/selections", tags=["tracker"])
 
@@ -153,7 +153,7 @@ def _get_visible(session: Session, user: User, selection_id: str, lock: bool = F
 @router.get("/options")
 def options(user: User = Depends(require_selection_role), session: Session = Depends(get_session)):
     own = _scope_location(user) if user.role not in ALL_LOCATIONS_ROLES else None
-    q = select(User).where(User.role == "user", User.is_active == True)   # noqa: E712
+    q = select(User).where(User.role.in_(RECRUITER_ROLES), User.is_active == True)   # noqa: E712  (recruitment managers recruit too)
     if own is not None:
         q = q.where(User.location == own)
     recruiters = [{"id": u.id, "username": u.username, "location": u.location}

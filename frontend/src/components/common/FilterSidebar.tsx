@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, SlidersHorizontal } from '@/components/icons';
 
 export interface FilterOption {
@@ -20,19 +20,23 @@ interface FilterSidebarProps {
   selected: Record<string, string[]>;
   onToggle: (groupKey: string, value: string) => void;
   onClearAll: () => void;
+  /** A block shown above the checkbox groups (the page's own control, e.g. a date range). */
+  top?: ReactNode;
+  /** Filters active in `top`, counted in "Clear all". */
+  extraActive?: number;
   className?: string;
 }
 
 /** Recruiter-portal style left filter panel: grouped checkboxes with counts,
  * each group collapsible, sticky under the page header. */
-export default function FilterSidebar({ groups, selected, onToggle, onClearAll, className }: FilterSidebarProps) {
+export default function FilterSidebar({ groups, selected, onToggle, onClearAll, top, extraActive = 0, className }: FilterSidebarProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   const toggleGroupCollapse = (key: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const activeCount = Object.values(selected).reduce((sum, arr) => sum + (arr?.length || 0), 0);
+  const activeCount = Object.values(selected).reduce((sum, arr) => sum + (arr?.length || 0), 0) + extraActive;
 
   return (
     <aside className={`w-full shrink-0 sm:w-60 ${className || ''}`}>
@@ -52,6 +56,7 @@ export default function FilterSidebar({ groups, selected, onToggle, onClearAll, 
             </button>
           )}
         </div>
+        {top && <div className="border-b border-surface-border px-4 py-3">{top}</div>}
         <div className="divide-y divide-surface-border">
           {groups.map((group) => {
             const isCollapsed = collapsedGroups[group.key] ?? false;

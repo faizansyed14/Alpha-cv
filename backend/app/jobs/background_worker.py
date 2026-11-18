@@ -125,6 +125,22 @@ async def _run_storage_watch() -> None:
         await asyncio.sleep(interval)
 
 
+async def _run_notification_purge() -> None:
+    """Every hour delete notifications older than NOTIFICATION_RETENTION_DAYS (30) and any beyond the per-person cap, so the bell's table
+    never grows without limit (the API already hides older ones)."""
+    from app.db.database import engine
+    from app.services.notifications import purge
+
+    while True:
+        try:
+            removed = await asyncio.to_thread(purge, engine)
+            if removed:
+                logger.info("Deleted %d old notifications", removed)
+        except Exception:  # noqa: BLE001 - a clean-up failure never stops the worker; it is tried again in an hour
+            logger.exception("The notification clean-up failed")
+        await asyncio.sleep(3600)
+
+
 async def main() -> None:
     from app.monitoring.recorder import get_recorder
 
@@ -137,7 +153,7 @@ async def main() -> None:
         init_database()
 
     logger.info("Background worker started (CV ingestion queue consumer)")
-    await asyncio.gather(_run_public_cv_consumer(), _run_storage_watch())
+    await asyncio.gather(_run_public_cv_consumer(), _run_storage_watch(), _run_notification_purge())
     logger.info("Background worker: all tasks exited")
 
 

@@ -10,12 +10,9 @@ export function PublicHeader({ right }: { right?: React.ReactNode }) {
   return (
     <header className="glass sticky top-0 z-30 border-b border-surface-border/60">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        <Link href="/careers/openings" className="flex items-center gap-2.5" aria-label="AlphaData careers">
+        <Link href="/careers/openings" className="flex items-center gap-2.5" aria-label="Alpha Data Recruitment careers">
           <img src="/alphadatalogo.svg" alt="" className="h-7 w-7 object-contain" />
-          <span className="leading-tight">
-            <span className="block text-md font-semibold tracking-[-0.025em] text-ink">AlphaData</span>
-            <span className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Recruitment</span>
-          </span>
+          <span className="text-md font-semibold leading-tight tracking-[-0.025em] text-ink">Alpha Data Recruitment</span>
         </Link>
         {right ?? <div className="w-20" aria-hidden />}
       </div>

@@ -19,6 +19,10 @@ import {
 } from '@/components/icons';
 import ContactActions from '@/components/common/ContactActions';
 import { CVListItem } from '@/lib/types';
+import { addedOnText, cvAge, differentDay, type CvAgeTone } from '@/lib/cvAge';
+
+/** The CV's age, in the app's status chip colours: green while under six months, yellow to a year, red from a year. */
+const AGE_CHIP: Record<CvAgeTone, string> = { new: 'chip-success', aging: 'chip-warning', old: 'chip-danger' };
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 
@@ -118,6 +122,7 @@ export default function CandidateCard({
   const menuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const age = cvAge(cv.upload_date);
   const hasSalary = d.expectedSalary && d.expectedSalary !== '-';
   /** Short keyword chips (preview 6). */
   const keywords = (d.skillKeywords || []).filter(Boolean);
@@ -244,6 +249,14 @@ export default function CandidateCard({
               {Math.round(d.matchScore * 100)}% match
             </span>
           ) : null}
+          {age && (
+            <span
+              className={`chip chip-dot py-1 ${AGE_CHIP[age.tone]}`}
+              title={`CV received on ${addedOnText(cv.upload_date)}`}
+            >
+              {age.label}
+            </span>
+          )}
         </div>
 
         <p className="mt-0.5 truncate text-sm text-slate-500">
@@ -404,6 +417,15 @@ export default function CandidateCard({
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{noteText}</p>
           </div>
         ) : null}
+
+        {/* when the current CV arrived; when a newer CV replaced an earlier one, also when the person was first added */}
+        {addedOnText(cv.upload_date) && (
+          <p className="mt-3 border-t border-slate-100 pt-2 text-2xs tabular-nums text-slate-400">
+            {differentDay(cv.upload_date, cv.first_added_at)
+              ? <>CV updated {addedOnText(cv.upload_date)} · first received {addedOnText(cv.first_added_at)}</>
+              : <>CV received {addedOnText(cv.upload_date)}</>}
+          </p>
+        )}
       </div>
 
       <div className="flex shrink-0 flex-col items-center gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
