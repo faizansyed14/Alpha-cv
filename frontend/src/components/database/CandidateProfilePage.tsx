@@ -239,7 +239,8 @@ export default function CandidateProfilePage({ cvId }: { cvId: string }) {
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 pb-12">
-      <div className="flex flex-wrap items-center gap-2">
+      {/* stays at the top while the profile and the original CV are scrolled, so "back" is always one click away (below the mobile top bar on small screens) */}
+      <div className="sticky top-14 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-surface-border bg-paper/90 px-2 py-1.5 shadow-soft backdrop-blur-xl lg:top-3">
         <Button type="button" variant="ghost" size="sm" icon={<ArrowLeft />} onClick={() => router.push(backHref, { scroll: false })}>
           {backLabel}
         </Button>

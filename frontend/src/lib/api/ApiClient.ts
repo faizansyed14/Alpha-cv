@@ -50,6 +50,7 @@ import {
   BugSeverity,
   NoticeData,
   NoticeAcknowledgements,
+  LoginBlocks,
   UsersPresenceResponse,
   CVAdvancedSearchParams,
   CVAdvancedSearchResponse,
@@ -158,6 +159,16 @@ export class ApiClient {
     return response.data;
   }
   /** Admin: who has clicked OK on the current notice and who has not. */
+  /** Admin: failed sign-in counters, and which have reached their limit. */
+  async getLoginBlocks(): Promise<LoginBlocks> {
+    const response = await this.client.get('/api/admin/security/lockouts', { params: { _t: Date.now() } });
+    return response.data;
+  }
+  /** Admin: lift one block. Say which: an address, an account, or an account from one address. */
+  async unlockLogin(body: { kind: 'ip' | 'username_ip' | 'account'; username?: string | null; ip?: string | null }): Promise<{ unlocked: boolean }> {
+    const response = await this.client.post('/api/admin/security/lockouts/unlock', body);
+    return response.data;
+  }
   async getNoticeAcknowledgements(): Promise<NoticeAcknowledgements> {
     const response = await this.client.get('/api/admin/notice/acknowledgements', { params: { _t: Date.now() } });
     return response.data;

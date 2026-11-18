@@ -7,7 +7,7 @@ Optimized for the CV matching application.
 import json
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import redis
 from redis.exceptions import ConnectionError, RedisError, TimeoutError
@@ -258,6 +258,36 @@ class RedisCacheService:
         
         return True
     
+    def entries(self, namespace: str) -> List[Tuple[str, Any, Optional[int]]]:
+        """Every ``(key, value, seconds_left)`` in a namespace (``seconds_left`` None = no expiry). A scan for admin screens, never for
+        a request path."""
+        prefix = self._get_namespaced_key(namespace, "")
+        found: List[Tuple[str, Any, Optional[int]]] = []
+        if self.is_connected:
+            try:
+                for full in self.redis_client.scan_iter(match=prefix + "*", count=200):
+                    raw = self.redis_client.get(full)
+                    if raw is None:
+                        continue                                  # expired between the scan and the read
+                    ttl = self.redis_client.ttl(full)
+                    found.append((full[len(prefix):], self._deserialize_value(raw), ttl if ttl and ttl > 0 else None))
+                return found
+            except (ConnectionError, TimeoutError, RedisError) as e:
+                logger.warning(f"Redis scan failed: {e}")
+                self.stats["errors"] += 1
+                self.is_connected = False
+                found = []
+
+        now = time.time()
+        for full, raw in list(self.fallback_cache.items()):
+            if not full.startswith(prefix):
+                continue
+            expires = self.fallback_ttl.get(full)
+            if expires is not None and now > expires:
+                continue
+            found.append((full[len(prefix):], self._deserialize_value(raw), int(expires - now) if expires is not None else None))
+        return found
+
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
         stats = self.stats.copy()

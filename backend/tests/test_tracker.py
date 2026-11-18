@@ -803,22 +803,41 @@ def test_a_recruiter_already_on_a_requirement_stays_even_if_deactivated(world):
     assert out.status_code == 200 and names_of(out.json()) == ["rita", "rob"]                         # nothing wrong with leaving him where he was
 
 
-def test_closing_credits_the_recruiter_who_closed_it_and_keeps_all_of_them(world):
+def test_a_closed_requirement_is_the_closing_recruiters_alone(world):
     a = make(world, recruiter_ids=[world.rita.id, world.rob.id])
     b = make(world, recruiter_ids=[world.rita.id, world.rob.id])
+    both = make(world, recruiter_ids=[world.rita.id, world.rob.id])
+    assert names_of(both) == ["rita", "rob"]                                                          # while it is open, everyone assigned is shown
     by_rob = close(world, a, by=world.rob)
-    assert by_rob["recruiter"]["username"] == "rob" and names_of(by_rob) == ["rob", "rita"]          # the one who closed it is credited, the other stays on it
+    assert by_rob["recruiter"]["username"] == "rob" and names_of(by_rob) == ["rob"]                  # closed: only the one who closed it is named
     by_manager = close(world, b, by=world.mgr)
-    assert by_manager["recruiter"]["username"] == "rita" and by_manager["closed_by"] == "mona"        # a manager closing credits the lead
+    assert by_manager["recruiter"]["username"] == "rita" and by_manager["closed_by"] == "mona" and names_of(by_manager) == ["rita"]   # a manager closing: the first assigned
     world.as_(world.mgr)
     assert world.client.patch(f"/api/tracker/requirements/{a['id']}", json={"recruiter_ids": [world.rob.id]}).status_code == 422   # not while closed
+    # rita: only the one credited to her is on her Closures, in her counts and analytics; the other is gone, and she cannot open or reopen it
     world.as_(world.rita)
-    assert world.client.get("/api/tracker/closures").json()["total"] == 2                              # both closures are hers to see ...
+    closures = world.client.get("/api/tracker/closures").json()
+    assert [i["id"] for i in closures["items"]] == [b["id"]] and closures["summary"]["closed"] == 1
+    assert world.client.get("/api/tracker/requirements").json()["stats"]["closed"] == 1
+    assert world.client.get(f"/api/tracker/requirements/{a['id']}").status_code == 404
+    assert world.client.patch(f"/api/tracker/requirements/{a['id']}", json={"status": "open"}).status_code == 404
     mine = world.client.get("/api/tracker/analytics").json()
-    assert mine["summary"]["closed"] == 1 and mine["recruiters"][0]["closed"] == 1                     # ... but only the one credited to her counts
+    assert mine["summary"]["closed"] == 1 and mine["recruiters"][0]["closed"] == 1
+    # rob: his own closure only, under his name alone
+    world.as_(world.rob)
+    closures = world.client.get("/api/tracker/closures").json()
+    assert [i["id"] for i in closures["items"]] == [a["id"]] and names_of(closures["items"][0]) == ["rob"]
+    ws = sheet(world.client.get("/api/tracker/closures/export"))
+    assert ws.max_row == 2 and {h: c.value for h, c in zip([c.value for c in ws[1]], ws[2])}["Recruiter"] == "rob"
     world.as_(world.mgr)
     people = {p["username"]: p for p in world.client.get("/api/tracker/analytics").json()["recruiters"]}
     assert people["rita"]["closed"] == 1 and people["rob"]["closed"] == 1
+    # reopened, it is everyone's again
+    world.as_(world.rob)
+    reopened = world.client.patch(f"/api/tracker/requirements/{a['id']}", json={"status": "open"}).json()
+    assert names_of(reopened) == ["rob", "rita"]
+    world.as_(world.rita)
+    assert world.client.get(f"/api/tracker/requirements/{a['id']}").status_code == 200
 
 
 def test_open_work_counts_for_every_recruiter_on_it_but_once_in_the_totals(world):
@@ -1080,7 +1099,7 @@ def test_closing_a_requirement_makes_its_selection_row_and_reopening_does_not_du
     assert page["total"] == 1 and page["stats"] == {"offer_pending": 1, "offer_released": 0, "joined": 0, "backed_out": 0, "total": 1}
     row = page["items"][0]
     assert row["position"] == "Cloud Engineer" and row["client"] == "Globex" and row["status"] == "offer_pending" and row["candidate_name"] is None
-    assert [p["username"] for p in row["recruiters"]] == ["rita", "rob"]
+    assert [p["username"] for p in row["recruiters"]] == ["rita"]                       # the one who closed it, not everyone who was on it
     assert row["sales_manager"]["username"] == "sam" and row["manager"]["username"] == "mona" and row["requirement_id"] == r["id"]
     world.client.patch(f"/api/tracker/selections/{row['id']}", json={"candidate_name": "Aisha Khan", "status": "offer_released", "comments": "CTC agreed"})
     world.as_(world.mgr)                                                                # the recruitment manager reopens it and closes it again
@@ -1176,7 +1195,7 @@ def test_a_second_close_of_the_same_requirement_makes_no_second_row_and_no_error
     assert create_for_closed(world.session, row, [world.rita.id]) is None          # the other worker's insert already happened
     world.session.commit()
     assert world.session.execute(select(func.count()).select_from(Selection)).scalar_one() == 1
-    assert world.session.execute(select(func.count()).select_from(SelectionRecruiter)).scalar_one() == 2     # and its recruiters were not written twice
+    assert world.session.execute(select(func.count()).select_from(SelectionRecruiter)).scalar_one() == 1     # the closing recruiter alone, and not written twice
     close(world, r, by=world.rita)                                                    # closing an already closed requirement changes nothing either
     assert world.session.execute(select(func.count()).select_from(Selection)).scalar_one() == 1
 

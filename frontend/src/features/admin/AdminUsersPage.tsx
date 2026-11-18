@@ -14,6 +14,7 @@ import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/table';
 import { AlertCircle, X, Power, Trash2, Pencil, Users as UsersIcon, Plus, Megaphone, Eye, EyeOff } from '@/components/icons';
 import { Bone } from '@/components/skeletons';
 import NoticeAcknowledgements from './NoticeAcknowledgements';
+import BlockedSignIns from './BlockedSignIns';
 function roleBadgeVariant(role?: string) {
   switch (role) {
     case 'admin':
@@ -526,6 +527,10 @@ export default function AdminUsersPage() {
 
           {/* who has clicked OK on the current notice */}
           <NoticeAcknowledgements refreshKey={noticeVersion} />
+
+          {/* sign-ins that are being refused */}
+          <p className="section-label mb-2 mt-8">Blocked sign-ins</p>
+          <BlockedSignIns />
 
         </div>
 

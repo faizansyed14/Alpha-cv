@@ -120,6 +120,25 @@ export interface NoticeAckUser {
   acknowledged_at: string | null;
 }
 
+/** One failed-sign-in counter on the admin's "Blocked sign-ins" list. */
+export interface LoginBlock {
+  /** ip = one address across all accounts; username_ip = one account from one address; account = one account from any address */
+  kind: 'ip' | 'username_ip' | 'account';
+  username: string | null;
+  ip: string | null;
+  attempts: number;
+  limit: number;
+  /** the limit is reached: sign-ins are being refused */
+  blocked: boolean;
+  seconds_left: number | null;
+}
+
+export interface LoginBlocks {
+  lockout_seconds: number;
+  limits: { ip: number; username_ip: number; account: number };
+  items: LoginBlock[];
+}
+
 export interface NoticeAcknowledgements {
   notice: NoticeData | null;
   summary: { total: number; acknowledged: number; pending: number };

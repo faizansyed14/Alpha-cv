@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Literal, Optional, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field, field_validator, model_validator
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlmodel import Session, select
 
 from app.api.deps import require_core_app
@@ -89,6 +89,8 @@ def _can_see(session: Session, user: User, req: Requirement) -> bool:
         return False
     if _is_recruiter(user) and user.id not in _assignee_ids(session, req.id):       # a recruiter sees the requirements they are one of the recruiters of
         return False
+    if _is_recruiter(user) and req.status == "closed" and req.recruiter_id != user.id:
+        return False                                  # ... until it is closed: then it is the credited recruiter's alone (the others no longer see it, or reopen it)
     return True
 
 
@@ -370,7 +372,10 @@ def _recruiters_text(req: Requirement, links: Sequence[RequirementRecruiter], na
 
 def _view(req: Requirement, names: Dict[str, str], user: User, links: Sequence[RequirementRecruiter] = ()) -> Dict[str, Any]:
     team = []
-    for link in links:
+    # a CLOSED requirement names only the recruiter it is credited to (the one who closed it); the others on it are no longer shown. Reopening
+    # shows everyone again: nobody is removed from it.
+    shown = [l for l in links if l.recruiter_id == req.recruiter_id] if req.status == "closed" and req.recruiter_id else links
+    for link in shown:
         own = not _is_recruiter(user) or link.recruiter_id == user.id         # a recruiter sees only their own CV numbers, not their colleagues'
         team.append({"id": link.recruiter_id, "username": names.get(link.recruiter_id) or "Former user",
                      "cvs_submitted_date": link.cvs_submitted_date.isoformat() if own and link.cvs_submitted_date else None,
@@ -576,7 +581,14 @@ def _conditions(user: User, f: Filters, with_status: bool, closed: str = "exclud
     elif f.location in LOCATIONS:
         conds.append(Requirement.location == f.location)                       # the EVP and the admin choosing Dubai or Abu Dhabi
     if _is_recruiter(user):
-        conds.append(_assigned_to(user.id))                                    # the requirements they are one of the recruiters of
+        # the requirements they are one of the recruiters of. A CLOSED one belongs to the recruiter it is credited to (the one who closed it, or
+        # the lead when a manager did) and to nobody else on it: the other recruiters do not see it on Closures or in their counts.
+        if closed == "only":
+            conds.append(Requirement.recruiter_id == user.id)
+        elif closed == "any":
+            conds.append(or_(and_(Requirement.status != "closed", _assigned_to(user.id)), and_(Requirement.status == "closed", Requirement.recruiter_id == user.id)))
+        else:
+            conds.append(_assigned_to(user.id))
     elif f.recruiter_id == "none":
         conds.append(Requirement.recruiter_id.is_(None))                       # nobody assigned
     elif f.recruiter_id:
@@ -803,7 +815,7 @@ def create_requirement(body: RequirementIn, user: User = Depends(require_core_ap
     _set_assignees(session, req, ids)
     _event(session, req, user, "created")
     if req.status == "closed":
-        create_for_closed(session, req, ids)                     # a requirement added already closed is on the Selections page too
+        create_for_closed(session, req, ids[:1])                 # a requirement added already closed is on the Selections page too (credited to its lead)
     session.commit()
     session.refresh(req)
     security_event("requirement_created", by=user.username, requirement=req.id, location=location)
@@ -921,7 +933,7 @@ def update_requirement(requirement_id: str, body: RequirementPatch, user: User =
         req.closed_at, req.closed_by = datetime.utcnow(), user.username           # it now leaves the requirements lists for Closures
         if _is_recruiter(user) and new_ids and user.id in new_ids and new_ids[0] != user.id:
             _set_assignees(session, req, [user.id] + [i for i in new_ids if i != user.id])    # the recruiter who closed it is the one credited
-        create_for_closed(session, req, _assignee_ids(session, req.id))           # and it gets its row on the Selections and joining page
+        create_for_closed(session, req, _assignee_ids(session, req.id)[:1])       # and it gets its row on the Selections and joining page, with the credited recruiter only
     elif old_status == "closed" and new_status != "closed":
         req.closed_at, req.closed_by = None, None                                  # reopened
     if submissions:
