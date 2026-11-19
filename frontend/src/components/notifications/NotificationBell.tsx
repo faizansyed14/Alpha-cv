@@ -2,13 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, Bug, CheckCheck, ClipboardList, Trophy, Volume2, VolumeX } from '@/components/icons';
+import { Bell, Bug, CheckCheck, ClipboardList, MessageSquare, Trophy, Volume2, VolumeX } from '@/components/icons';
 import { api } from '@/lib/api';
 import type { AppNotification } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { claimChime, isMuted, playChime, setMuted, unlockSoundOnFirstGesture } from '@/lib/notificationSound';
+import { isLive, onLive } from '@/lib/liveEvents';
 
-const POLL_MS = 30_000;                       // how often the count is checked while the page is open and visible
+// New notifications arrive on the live line the moment they are saved (lib/liveEvents). The timer is only a safety net: every 5 minutes
+// while the line is up, every 30 s when it is down (an old proxy, the server restarting), and only while the tab is visible.
+const CHECK_LIVE_MS = 300_000;
+const CHECK_OFFLINE_MS = 30_000;
 export const FOCUS_EVENT = 'alphacv:notification-open';   // a page that is already open is told which item to show
 
 function ago(iso: string): string {
@@ -23,10 +27,11 @@ function ago(iso: string): string {
 function KindIcon({ kind }: { kind: string }) {
   const bug = kind.startsWith('bug');
   const closed = kind === 'requirement_closed';
+  const comment = kind === 'requirement_comment';
   return (
     <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-1',
-      bug ? 'bg-rose-50 ring-rose-100' : closed ? 'bg-emerald-50 ring-emerald-100' : 'bg-navy-50 ring-navy-100')}>
-      {bug ? <Bug className="h-4 w-4" /> : closed ? <Trophy className="h-4 w-4" /> : <ClipboardList className="h-4 w-4" />}
+      bug ? 'bg-rose-50 ring-rose-100' : closed ? 'bg-emerald-50 ring-emerald-100' : comment ? 'bg-sky-50 ring-sky-100' : 'bg-navy-50 ring-navy-100')}>
+      {bug ? <Bug className="h-4 w-4" /> : closed ? <Trophy className="h-4 w-4" /> : comment ? <MessageSquare className="h-4 w-4" /> : <ClipboardList className="h-4 w-4" />}
     </span>
   );
 }
@@ -35,7 +40,7 @@ function KindIcon({ kind }: { kind: string }) {
  * The bell at the top of every page: how many notifications are unread, the list, and a chime when a new one arrives.
  * Opening a notification marks it read (the count goes down at once) and goes to its page. Only the last 30 days are kept.
  */
-export default function NotificationBell({ className }: { className?: string }) {
+export default function NotificationBell({ className, buttonClassName }: { className?: string; buttonClassName?: string }) {
   const router = useRouter();
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
@@ -68,9 +73,10 @@ export default function NotificationBell({ className }: { className?: string }) 
     }
   }, [items]);
 
-  // the count: now, every 30 s while the tab is visible, and as soon as the person comes back to the tab
-  const poll = useCallback(async () => {
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+  // the count: now, when the live line says something changed (even while the person is in another window: they hear the chime),
+  // as soon as they come back to the tab, and on the safety timer
+  const poll = useCallback(async (whenHidden = false) => {
+    if (!whenHidden && typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     try {
       const { unread: n, latest_id } = await api.getNotificationCount();
       setUnread(n);
@@ -85,18 +91,28 @@ export default function NotificationBell({ className }: { className?: string }) 
     }
   }, [open, loadList]);
 
+  const pollRef = useRef(poll);
+  useEffect(() => { pollRef.current = poll; });
+
   useEffect(() => {
-    void poll();
-    const id = window.setInterval(() => void poll(), POLL_MS);
-    const onVisible = () => { if (document.visibilityState === 'visible') void poll(); };
+    void pollRef.current();
+    let lastCheck = Date.now();
+    const check = () => { lastCheck = Date.now(); void pollRef.current(); };
+    // the safety timer ticks every 30 s but only asks the server when the live line is down, or every 5 minutes when it is up
+    const id = window.setInterval(() => {
+      if (Date.now() - lastCheck >= (isLive() ? CHECK_LIVE_MS : CHECK_OFFLINE_MS)) check();
+    }, CHECK_OFFLINE_MS);
+    const onVisible = () => { if (document.visibilityState === 'visible' && !isLive()) check(); };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
+    const off = onLive(() => { lastCheck = Date.now(); void pollRef.current(true); });   // new, read elsewhere, or back after a gap
     return () => {
       window.clearInterval(id);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
+      off();
     };
-  }, [poll]);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -147,7 +163,10 @@ export default function NotificationBell({ className }: { className?: string }) 
         aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="relative flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+        className={cn(
+          'relative flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900',
+          buttonClassName,
+        )}
       >
         <Bell className="h-5 w-5" />
         {unread > 0 && (

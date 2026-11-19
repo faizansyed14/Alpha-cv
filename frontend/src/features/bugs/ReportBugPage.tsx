@@ -11,6 +11,8 @@ import { PageHeader } from '@/components/ui/page';
 import { cn } from '@/lib/utils';
 import { BUG_AREAS, SEVERITIES, SeverityChip, StatusChip, errText, shortId, whenLabel } from './bugUi';
 import { FOCUS_EVENT } from '@/components/notifications/NotificationBell';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
+import { fetchUpTo } from '@/lib/fetchUpTo';
 
 const TITLE_MAX = 160, DESCRIPTION_MAX = 4000, STEPS_MAX = 3000;
 const field = 'h-9 w-full rounded-md border border-gray-200 bg-paper px-3 text-sm text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30';
@@ -35,10 +37,11 @@ export default function ReportBugPage() {
   const [loadingList, setLoadingList] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  const loadMine = useCallback(async () => {
+  /** The first page, or (a quiet refresh) as many as are on screen: `keep`. */
+  const loadMine = useCallback(async (keep = 0) => {
     try {
-      const r = await api.listMyBugReports({ limit: 20, offset: 0 });
-      setMine(r.items);
+      const { first: r, items } = await fetchUpTo(keep, 20, 100, (limit, offset) => api.listMyBugReports({ limit, offset }));
+      setMine(items);
       setTotal(r.total);
     } catch {
       /* the list is a convenience: the form still works */
@@ -71,6 +74,9 @@ export default function ReportBugPage() {
     const t = window.setTimeout(() => setFocusId(null), 5000);
     return () => window.clearTimeout(t);
   }, [focusId, loadingList, mine]);
+
+  // fresh without a refresh: when the person comes back to the tab, and when the admin answers or changes a report (a live notification)
+  useAutoRefresh(() => { void loadMine(mine.length); }, { kinds: ['bug_status', 'bug_reply'] });
 
   const loadMore = async () => {
     if (loadingMore) return;

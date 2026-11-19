@@ -14,6 +14,7 @@ import re
 from datetime import date, datetime, time
 from typing import Any, Dict, List, Optional, Tuple
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import ValidationError
 from sqlalchemy import func
@@ -33,8 +34,8 @@ from app.services.selections import create_for_closed
 
 router = APIRouter(prefix="/api/tracker", tags=["tracker"])
 
-MAX_IMPORT_BYTES = 5 * 1024 * 1024
-MAX_IMPORT_ROWS = 2000
+MAX_IMPORT_BYTES = 10 * 1024 * 1024        # an .xlsx of 10,000 rows is well under 2 MB; this only stops a wrong file
+MAX_IMPORT_ROWS = 10_000                  # a year of requirements or selections in one sheet; more: split it
 
 # the template's columns, exactly as the sheet must name them -> what each holds
 COLUMNS = {
@@ -353,6 +354,11 @@ async def import_requirements(
     data = await read_limited(file, MAX_IMPORT_BYTES)
     if not data.startswith(b"PK"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This is not an Excel (.xlsx) file that can be read.")
+    return await run_in_threadpool(_import_requirements_now, data, apply, user, session)
+
+
+def _import_requirements_now(data: bytes, apply: bool, user: User, session: Session) -> Dict[str, Any]:
+    """Reading the sheet and the database work: run off the event loop, so other requests are not held up meanwhile."""
     rows, unknown = _read_sheet(data)
     people = People(session)
     seen: set = set()

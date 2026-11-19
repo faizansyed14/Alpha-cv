@@ -6,6 +6,7 @@ Optimized for the CV matching application.
 
 import json
 import logging
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -112,6 +113,51 @@ class RedisCacheService:
             self.is_connected = False
             self.stats["fallback_used"] = True
     
+    # --- coming back after Redis was down -------------------------------------------------------------------------------------------
+    # One failed call marks Redis as down, and every call then uses the in-memory fallback at once (no request waits for a dead server).
+    # It used to stay down until the process restarted: a Redis restart left presence, the notice, the shared caches and the live
+    # events cut off for good. Now, while it is marked down, a background thread pings it at most every RECONNECT_SECONDS and switches
+    # back as soon as it answers. The caller never waits for that ping.
+    RECONNECT_SECONDS = 15.0
+
+    @property
+    def is_connected(self) -> bool:
+        connected = self.__dict__.get("_connected", False)
+        if not connected:
+            self._try_reconnect_soon()
+        return connected
+
+    @is_connected.setter
+    def is_connected(self, value: bool) -> None:
+        if not value and self.__dict__.get("_connected", False):
+            self.__dict__["_down_since"] = time.monotonic()       # the first retry waits a moment: it has only just failed
+        self.__dict__["_connected"] = bool(value)
+
+    def _try_reconnect_soon(self) -> None:
+        client = self.__dict__.get("redis_client")
+        if client is None:
+            return
+        lock = self.__dict__.setdefault("_reconnect_lock", threading.Lock())
+        with lock:
+            now = time.monotonic()
+            last = max(self.__dict__.get("_last_reconnect", 0.0), self.__dict__.get("_down_since", 0.0))
+            if self.__dict__.get("_reconnecting") or now - last < self.RECONNECT_SECONDS:
+                return
+            self.__dict__["_reconnecting"] = True
+            self.__dict__["_last_reconnect"] = now
+
+        def ping() -> None:
+            try:
+                client.ping()
+                self.__dict__["_connected"] = True
+                logger.info("Redis connection restored")
+            except Exception:  # noqa: BLE001 - still down: tried again later
+                pass
+            finally:
+                self.__dict__["_reconnecting"] = False
+
+        threading.Thread(target=ping, name="redis-reconnect", daemon=True).start()
+
     def _get_namespaced_key(self, namespace: str, key: str) -> str:
         """Create namespaced key for Redis."""
         return f"cv_app:{namespace}:{key}"

@@ -168,6 +168,50 @@ def test_a_recruiter_changing_the_status_tells_its_managers(world):
     assert status(world.mgr)[0]["title"] == "Requirement reopened: Network Engineer"
 
 
+def test_a_comment_tells_everyone_else_on_the_requirement(world):
+    r = requirement(world, recruiter_ids=[world.rita.id, world.rob.id], manager_id=world.mgr.id)
+    comments = lambda who: [i for i in bell(world, who)["items"] if i["kind"] == "requirement_comment"]
+    world.as_(world.rita)                                                                 # a recruiter writes
+    assert world.client.patch(f"/api/tracker/requirements/{r['id']}", json={"recruiter_comments": "  3 CVs shared,\n waiting on feedback "}).status_code == 200
+    for who in (world.rob, world.mgr, world.sales):
+        [n] = comments(who)
+        assert n["title"] == "New recruiter comment on Network Engineer" and n["body"] == "rita: 3 CVs shared, waiting on feedback"
+        assert n["link"] == f"/tracker?focus={r['id']}"
+    assert comments(world.rita) == [] and comments(world.mgr2) == [] and comments(world.evp) == []   # not the writer, not off it
+    world.as_(world.sales)                                                                # the sales manager writes
+    world.client.patch(f"/api/tracker/requirements/{r['id']}", json={"sales_comments": "Client wants Arabic speakers"})
+    assert comments(world.rita)[0]["title"] == "New sales comment on Network Engineer"
+    assert len(comments(world.sales)) == 1                                                # only rita's, not their own
+    world.as_(world.mgr)                                                                  # the recruitment manager writes
+    world.client.patch(f"/api/tracker/requirements/{r['id']}", json={"rm_comments": "Push this one"})
+    assert comments(world.rob)[0]["title"] == "New recruitment manager comment on Network Engineer"
+
+
+def test_a_comment_cleared_or_unchanged_tells_nobody(world):
+    r = requirement(world, recruiter_ids=[world.rita.id], manager_id=world.mgr.id)
+    world.as_(world.sales)
+    world.client.patch(f"/api/tracker/requirements/{r['id']}", json={"sales_comments": "first"})
+    before = count(world, world.rita)
+    world.as_(world.sales)
+    world.client.patch(f"/api/tracker/requirements/{r['id']}", json={"sales_comments": "first"})     # saved again as it was
+    world.client.patch(f"/api/tracker/requirements/{r['id']}", json={"sales_comments": ""})          # cleared
+    world.client.patch(f"/api/tracker/requirements/{r['id']}", json={"sales_comments": "   "})       # only spaces
+    assert count(world, world.rita) == before
+
+
+def test_a_comment_on_a_closed_requirement_tells_only_who_can_still_see_it(world):
+    r = requirement(world, recruiter_ids=[world.rita.id, world.rob.id], manager_id=world.mgr.id)
+    world.as_(world.rob)
+    world.client.patch(f"/api/tracker/requirements/{r['id']}", json={"status": "closed"})          # rob closed it: it is his now
+    comments = lambda who: [i for i in bell(world, who)["items"] if i["kind"] == "requirement_comment"]
+    world.as_(world.sales)
+    world.client.patch(f"/api/tracker/requirements/{r['id']}", json={"sales_comments": "Offer accepted"})
+    [n] = comments(world.rob)
+    assert n["link"] == f"/tracker/closures?focus={r['id']}"
+    assert len(comments(world.mgr)) == 1
+    assert comments(world.rita) == []                                                     # rita no longer sees a closed one
+
+
 def test_a_manager_changing_the_status_is_not_told_of_it_themselves(world):
     r = requirement(world, recruiter_ids=[world.rita.id], manager_id=world.mgr.id)
     world.as_(world.mgr)

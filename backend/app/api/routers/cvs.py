@@ -426,7 +426,7 @@ async def search_cvs_advanced(
             keywords=req.keywords, match_all=req.match_all, experience_min=req.experience_min, experience_max=req.experience_max,
             locations=req.locations, nationalities=req.nationalities, languages=req.languages, limit=req.limit, cursor=req.cursor,
             with_total=not req.cursor, boolean_query=req.boolean_query, added_after=added_after, added_before=added_before,
-            categories=req.categories, notes=req.notes)
+            categories=req.categories, notes=req.notes, salary_min=req.salary_min, salary_max=req.salary_max)
         rows = await asyncio.to_thread(store.candidate_rows, found["ids"])
         fields = CVSearchResultItem.model_fields
         results = [CVSearchResultItem(**{**{k: r.get(k) for k in fields if k in r}, "matched_keywords": found["matched"].get(r["id"], [])})

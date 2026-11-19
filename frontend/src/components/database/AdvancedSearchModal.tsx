@@ -6,12 +6,40 @@ import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
 import type { CVAdvancedSearchParams } from '@/lib/types';
+import { nationalitySearchTerms } from '@/lib/nationalityGroups';
+import { toRange } from '@/lib/useNumberRange';
+
+type Freshness = 'any' | '1' | '7' | '30' | '90' | 'custom';
+
+/** What is filled in on the form: kept by the page, so the form opens again as it was left (also after visiting a candidate). */
+export interface AdvancedSearchForm {
+  mode: 'keywords' | 'boolean';
+  booleanInput: string;
+  keywords: string[];
+  matchMode: 'all' | 'any';
+  experienceMin: string;
+  experienceMax: string;
+  salaryMin: string;
+  salaryMax: string;
+  freshness: Freshness;
+  addedFrom: string;
+  addedTo: string;
+  locations: string[];
+  nationalities: string[];
+  languages: string[];
+}
+
+export const EMPTY_ADVANCED_FORM: AdvancedSearchForm = {
+  mode: 'keywords', booleanInput: '', keywords: [], matchMode: 'all', experienceMin: '', experienceMax: '', salaryMin: '', salaryMax: '',
+  freshness: 'any', addedFrom: '', addedTo: '', locations: [], nationalities: [], languages: [],
+};
 
 interface AdvancedSearchModalProps {
   onClose: () => void;
-  /** Run search on the candidates page with these filters. */
-  onSubmit: (query: CVAdvancedSearchParams) => void;
-  initialMode?: 'keywords' | 'boolean';
+  /** Run search on the candidates page with these filters; `form` is what was filled in, to open the form with next time. */
+  onSubmit: (query: CVAdvancedSearchParams, form: AdvancedSearchForm) => void;
+  /** The form as it was last left. */
+  initialForm?: AdvancedSearchForm;
 }
 
 interface FacetValue {
@@ -123,20 +151,23 @@ function FacetCheckboxList({
  * Centered search form. Results are shown on the candidates list after submit —
  * not in a side panel inside this overlay.
  */
-export default function AdvancedSearchModal({ onClose, onSubmit, initialMode = 'keywords' }: AdvancedSearchModalProps) {
-  const [freshness, setFreshness] = useState<'any' | '1' | '7' | '30' | '90' | 'custom'>('any');
-  const [addedFrom, setAddedFrom] = useState('');
-  const [addedTo, setAddedTo] = useState('');
-  const [mode, setMode] = useState<'keywords' | 'boolean'>(initialMode);
-  const [booleanInput, setBooleanInput] = useState('');
+export default function AdvancedSearchModal({ onClose, onSubmit, initialForm = EMPTY_ADVANCED_FORM }: AdvancedSearchModalProps) {
+  const f0 = initialForm;
+  const [freshness, setFreshness] = useState<Freshness>(f0.freshness);
+  const [addedFrom, setAddedFrom] = useState(f0.addedFrom);
+  const [addedTo, setAddedTo] = useState(f0.addedTo);
+  const [mode, setMode] = useState<'keywords' | 'boolean'>(f0.mode);
+  const [booleanInput, setBooleanInput] = useState(f0.booleanInput);
   const [keywordInput, setKeywordInput] = useState('');
-  const [keywords, setKeywords] = useState<string[]>([]);
-  const [matchMode, setMatchMode] = useState<'all' | 'any'>('all');
-  const [experienceMin, setExperienceMin] = useState('');
-  const [experienceMax, setExperienceMax] = useState('');
-  const [locations, setLocations] = useState<string[]>([]);
-  const [nationalities, setNationalities] = useState<string[]>([]);
-  const [languages, setLanguages] = useState<string[]>([]);
+  const [keywords, setKeywords] = useState<string[]>(f0.keywords);
+  const [matchMode, setMatchMode] = useState<'all' | 'any'>(f0.matchMode);
+  const [experienceMin, setExperienceMin] = useState(f0.experienceMin);
+  const [experienceMax, setExperienceMax] = useState(f0.experienceMax);
+  const [salaryMin, setSalaryMin] = useState(f0.salaryMin);
+  const [salaryMax, setSalaryMax] = useState(f0.salaryMax);
+  const [locations, setLocations] = useState<string[]>(f0.locations);
+  const [nationalities, setNationalities] = useState<string[]>(f0.nationalities);
+  const [languages, setLanguages] = useState<string[]>(f0.languages);
   // The location filter lists countries; the search itself looks for the locations stored behind them.
   const [countryMembers, setCountryMembers] = useState<Record<string, string[]>>({});
 
@@ -165,7 +196,8 @@ export default function AdvancedSearchModal({ onClose, onSubmit, initialMode = '
     const allKeywords = withTyped(keywords, keywordInput);
     setKeywords(allKeywords);
     setKeywordInput('');
-    const num = (v: string) => (v.trim() && Number.isFinite(Number(v)) ? Number(v) : undefined);
+    const experience = toRange({ min: experienceMin, max: experienceMax });
+    const salary = toRange({ min: salaryMin, max: salaryMax });
     const booleanText = mode === 'boolean' ? booleanInput.trim() : '';
     const query: CVAdvancedSearchParams = {
       keywords: mode === 'keywords' && allKeywords.length ? allKeywords : undefined,
@@ -174,14 +206,20 @@ export default function AdvancedSearchModal({ onClose, onSubmit, initialMode = '
       added_from: freshness === 'custom' && addedFrom ? addedFrom : undefined,
       added_to: freshness === 'custom' && addedTo ? addedTo : undefined,
       match_all: matchMode === 'all',
-      experience_min: num(experienceMin),
-      experience_max: num(experienceMax),
+      experience_min: experience.min,
+      experience_max: experience.max,
+      salary_min: salary.min,
+      salary_max: salary.max,
       locations: locations.length ? locations.flatMap((c) => countryMembers[c] || [c]) : undefined,
-      nationalities: nationalities.length ? nationalities : undefined,
+      // a nationality is searched under every name a CV may give it ("India", "Indian")
+      nationalities: nationalities.length ? nationalitySearchTerms(nationalities) : undefined,
       languages: languages.length ? languages : undefined,
       limit: 100,
     };
-    onSubmit(query);
+    onSubmit(query, {
+      mode, booleanInput, keywords: allKeywords, matchMode, experienceMin, experienceMax, salaryMin, salaryMax,
+      freshness, addedFrom, addedTo, locations, nationalities, languages,
+    });
   };
 
   return (
@@ -190,15 +228,13 @@ export default function AdvancedSearchModal({ onClose, onSubmit, initialMode = '
         className="flex max-h-[min(92vh,880px)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-surface-border bg-paper shadow-xl"
         role="dialog"
         aria-modal="true"
-        aria-label={mode === 'boolean' ? 'Boolean search' : 'Advanced search'}
+        aria-label="Advanced search"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-surface-border px-5 py-3.5">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">
-              {mode === 'boolean' ? 'Boolean search' : 'Advanced search'}
-            </h2>
+            <h2 className="text-lg font-semibold text-slate-900">Advanced search</h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              Results replace the candidate list on this page
+              Search by keywords or paste a Boolean string. Results replace the candidate list on this page.
             </p>
           </div>
           <button
@@ -295,26 +331,27 @@ export default function AdvancedSearchModal({ onClose, onSubmit, initialMode = '
             </div>
           )}
 
-          <div>
-            <label className="section-label mb-1.5 block">Work experience (years)</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={0}
-                value={experienceMin}
-                onChange={(e) => setExperienceMin(e.target.value)}
-                placeholder="Min"
-                className="field-input w-full"
-              />
-              <span className="text-slate-400">–</span>
-              <input
-                type="number"
-                min={0}
-                value={experienceMax}
-                onChange={(e) => setExperienceMax(e.target.value)}
-                placeholder="Max"
-                className="field-input w-full"
-              />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="adv-exp-min" className="section-label mb-1.5 block">Work experience (years)</label>
+              <div className="flex items-center gap-2">
+                <input id="adv-exp-min" type="text" inputMode="decimal" value={experienceMin} placeholder="Min" aria-label="Minimum years of experience"
+                  onChange={(e) => setExperienceMin(e.target.value.replace(/[^\d.]/g, ''))} className="field-input w-full min-w-0 tabular-nums" />
+                <span className="text-slate-400">–</span>
+                <input type="text" inputMode="decimal" value={experienceMax} placeholder="Max" aria-label="Maximum years of experience"
+                  onChange={(e) => setExperienceMax(e.target.value.replace(/[^\d.]/g, ''))} className="field-input w-full min-w-0 tabular-nums" />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="adv-salary-min" className="section-label mb-1.5 block">Expected salary (AED / month)</label>
+              <div className="flex items-center gap-2">
+                <input id="adv-salary-min" type="text" inputMode="numeric" value={salaryMin} placeholder="Min" aria-label="Minimum expected salary (AED a month)"
+                  onChange={(e) => setSalaryMin(e.target.value.replace(/[^\d,]/g, ''))} className="field-input w-full min-w-0 tabular-nums" />
+                <span className="text-slate-400">–</span>
+                <input type="text" inputMode="numeric" value={salaryMax} placeholder="Max" aria-label="Maximum expected salary (AED a month)"
+                  onChange={(e) => setSalaryMax(e.target.value.replace(/[^\d,]/g, ''))} className="field-input w-full min-w-0 tabular-nums" />
+              </div>
+              {(salaryMin || salaryMax) && <p className="mt-1 text-2xs text-slate-400">Only CVs with an expected salary are found.</p>}
             </div>
           </div>
 
@@ -343,7 +380,7 @@ export default function AdvancedSearchModal({ onClose, onSubmit, initialMode = '
 
           <FacetCheckboxList
             field="location"
-            label="Country"
+            label="Current country"
             onLoaded={(vals) => setCountryMembers(Object.fromEntries(vals.map((v) => [v.value, v.members || [v.value]])))}
             selected={locations}
             onToggle={(v) => toggle(locations, v, setLocations)}

@@ -230,6 +230,10 @@ class Settings(BaseSettings):
     # ---- In-app notifications (the bell; see app/services/notifications.py) ----
     NOTIFICATION_RETENTION_DAYS: int = 30       # older notifications are never shown and are deleted by the background worker
     NOTIFICATION_MAX_PER_USER: int = 300        # a person keeps at most this many (the newest), whatever happens in 30 days
+    # the live line to the browser (GET /api/notifications/stream): a ping this often keeps proxies from closing it; it is reopened (and the
+    # sign-in checked again) after this long
+    LIVE_HEARTBEAT_SECONDS: int = 25
+    LIVE_STREAM_MAX_SECONDS: int = 900
 
     # ---- One candidate per person (see app/ingestion/identity.py) ----
     # A new CV whose e-mail AND phone match an existing candidate replaces that candidate's CV (file, extracted data, vectors) instead of

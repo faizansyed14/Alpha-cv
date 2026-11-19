@@ -9,6 +9,7 @@ import {
   JobApplicationResponse
 } from '@/lib/types';
 import { logger } from '@/lib/logger';
+import { fetchUpTo } from '@/lib/fetchUpTo';
 
 export interface JobFilters {
   q: string;
@@ -63,6 +64,8 @@ interface CareersActions {
   createJobPostingWithFormData: (file: File | null, formData: any) => Promise<JobPostingResponse | null>;
   /** First page of the postings that match the filters (the filters are kept for the next pages and for later reloads). */
   loadJobPostings: (filters?: Partial<JobFilters>) => Promise<void>;
+  /** The jobs on screen fetched again (as many as are loaded), quietly: no loading state, the rows stay until the new ones arrive. */
+  refreshJobPostings: () => Promise<void>;
   loadMoreJobPostings: () => Promise<void>;
   selectJob: (job: JobPostingListItem | null) => void;
   updateJobStatus: (jobId: string, isActive: boolean) => Promise<boolean>;
@@ -174,6 +177,25 @@ export const useCareersStore = create<CareersStore>((set, get) => ({
         isLoading: false, 
         error: error.message || 'Failed to load job postings' 
       });
+    }
+  },
+
+  refreshJobPostings: async () => {
+    const { jobPostings, jobFilters, isLoading } = get();
+    if (isLoading) return;                                       // a load is already on its way: it brings the fresh rows
+    try {
+      const { first, items } = await fetchUpTo(jobPostings.length, 20, 200, async (limit, offset) => {
+        const r = await api.listJobPostingsPaged({ includeInactive: true, limit, offset, ...jobFilters });
+        return { ...r, items: r.jobs };
+      });
+      if (get().jobFilters !== jobFilters) return;               // the filter changed meanwhile: its own load wins
+      set({
+        jobPostings: items,
+        totalJobPostings: first.total,
+        jobCounts: first.counts ?? { all: first.total, active: first.total, inactive: 0 },
+      });
+    } catch {
+      /* a quiet refresh: the rows on screen stay, the next one tries again */
     }
   },
 

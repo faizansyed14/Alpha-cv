@@ -570,7 +570,7 @@ class CandidateStore:
         return self._padded_like(getattr(CandidateSearch, field), term)
 
     def _filters(self, *, experience_min, experience_max, locations, nationalities, languages, bool_node, added_after, added_before,
-                 categories=None, notes=None, exclude_ids=None):
+                 categories=None, notes=None, exclude_ids=None, salary_min=None, salary_max=None):
         """The conditions of a search that are not about the typed keywords."""
         conds = []
         if exclude_ids:
@@ -592,6 +592,10 @@ class CandidateStore:
             conds.append(Candidate.uploaded_at >= datetime.utcfromtimestamp(added_after))
         if added_before is not None:
             conds.append(Candidate.uploaded_at <= datetime.utcfromtimestamp(added_before))
+        if salary_min is not None:                     # the expected salary (AED a month): a CV without one is left out of a salary filter
+            conds.append(Candidate.expected_salary >= Decimal(str(salary_min)))
+        if salary_max is not None:
+            conds.append(Candidate.expected_salary <= Decimal(str(salary_max)))
         if experience_min is not None:
             conds.append(Candidate.years_of_experience >= Decimal(str(experience_min)))
         if experience_max is not None:
@@ -628,7 +632,8 @@ class CandidateStore:
     def search_candidates(self, *, keywords=None, match_all: bool = True, experience_min=None, experience_max=None, locations=None,
                           nationalities=None, languages=None, limit: int = 50, cursor: Optional[str] = None, with_total: bool = False,
                           boolean_query: Optional[str] = None, added_after=None, added_before=None, categories=None,
-                          notes: Optional[str] = None, exclude_ids: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+                          notes: Optional[str] = None, exclude_ids: Optional[Sequence[str]] = None,
+                          salary_min=None, salary_max=None) -> Dict[str, Any]:
         """The advanced search. ``exclude_ids``: candidates never returned or counted (a job's own applicants, when its boolean string
         is run against the rest of the database). A keyword matches as a whole word (a phrase as an exact phrase), anywhere in the CV; ``match_all`` false
         puts the CVs with every keyword first, then those with some. A pasted boolean string is decided exactly on the CV's own text.
@@ -660,7 +665,8 @@ class CandidateStore:
 
         filters = dict(experience_min=experience_min, experience_max=experience_max, locations=locations, nationalities=nationalities,
                        languages=languages, bool_node=bool_node, added_after=added_after, added_before=added_before,
-                       categories=categories, notes=notes, exclude_ids=list(dict.fromkeys(exclude_ids or [])))
+                       categories=categories, notes=notes, exclude_ids=list(dict.fromkeys(exclude_ids or [])),
+                       salary_min=salary_min, salary_max=salary_max)
         found: List[Tuple[str, str]] = []
         next_cursor: Optional[str] = None
         with Session(self.engine) as s:

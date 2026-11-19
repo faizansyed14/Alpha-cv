@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { errorText } from './jd';
 import { FOCUS_EVENT } from '@/components/notifications/NotificationBell';
 import { CommentCell, LocationFilter, PersonFilter, StatusPill, MONTH_NAMES, durationParts, formatDay, todayIso, yearChoices, TRACKER_TH_STICKY, TRACKER_THEAD } from './shared';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 
 const PAGE = 50;
 const ALL = '__all__';
@@ -97,6 +98,8 @@ export default function ClosuresPage() {
     }
   }, [filters]);
   useEffect(() => { if (user) { setLoading(true); void load(); } }, [load, user]);
+  // fresh without a refresh: when the reader comes back to the tab, and when a requirement is closed or reopened (a live notification)
+  useAutoRefresh(() => { if (user) void load(items.length); }, { kinds: ['requirement_closed', 'requirement_status'] });
 
   // the next page, asked for when the reader scrolls near the end; a page for filters that changed meanwhile is dropped
   const [moreFailed, setMoreFailed] = useState(false);

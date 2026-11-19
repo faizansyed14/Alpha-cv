@@ -89,7 +89,7 @@ function TabButton({ selected, onClick, icon, label, count }: { selected: boolea
 export function JobWorkspaceSkeleton({ onBack }: { onBack: () => void }) {
   return (
     <div className="min-h-[calc(100vh-8rem)]" role="status" aria-busy="true" aria-label="Loading job">
-      <header className="sticky top-12 z-20 -mx-4 border-b border-surface-border bg-paper/90 px-4 pt-3 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:top-0 lg:-mx-8 lg:px-8">
+      <header className="sticky top-12 z-20 -mx-4 border-b border-surface-border bg-paper/90 px-4 pt-3 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:top-10 lg:-mx-8 lg:px-8">
         <div className="mx-auto max-w-[1400px]">
           <button type="button" onClick={onBack} className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 transition-colors hover:text-navy-700">
             <ArrowLeft className="h-3.5 w-3.5" /> All jobs
@@ -203,7 +203,7 @@ export default function JobWorkspace({
 
   return (
     <div className="animate-page-enter min-h-[calc(100vh-8rem)]" aria-label={`${job.job_title || 'Job'} workspace`}>
-      <header className="sticky top-12 z-20 -mx-4 border-b border-surface-border bg-paper/90 px-4 pt-3 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:top-0 lg:-mx-8 lg:px-8">
+      <header className="sticky top-12 z-20 -mx-4 border-b border-surface-border bg-paper/90 px-4 pt-3 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:top-10 lg:-mx-8 lg:px-8">
         <div className="mx-auto max-w-[1400px]">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
