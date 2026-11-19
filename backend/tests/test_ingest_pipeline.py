@@ -270,7 +270,10 @@ def test_same_person_same_job_is_refused_by_the_pipeline_whichever_door(world, t
     assert not world.store.candidate_exists(uid(4)) and not world.llm.standardize_cv.called      # nothing stored, no AI spend
 
 
-def test_a_cv_without_a_job_is_never_blocked_as_a_duplicate_application(world, tmp_path):
+def test_a_cv_without_a_job_is_never_blocked_as_a_duplicate_application(world, tmp_path, monkeypatch):
+    # both files read as the same person (the fake parser gives every file one e-mail and phone): with the one-candidate-per-person rule the
+    # second would replace the first (tests/test_same_person_cv.py); here only "never blocked" is checked
+    monkeypatch.setattr(settings, "CV_REPLACE_SAME_PERSON", False)
     ingest_cv(CVSubmission(source=SOURCE_JOB_PAGE, filename="cv.pdf", file_path=_file(tmp_path, body=b"%PDF a"), cv_id=uid(3),
                            candidate={"email": "jane@x.com"}, job={"job_id": world.job}))
     ingest_cv(CVSubmission(source=SOURCE_UPLOAD, filename="cv.pdf", file_path=_file(tmp_path, body=b"%PDF b"), cv_id=uid(8)))

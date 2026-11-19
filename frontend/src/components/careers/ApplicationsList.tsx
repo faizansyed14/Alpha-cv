@@ -1,6 +1,6 @@
 'use client';
 
-import { useLayoutEffect, useMemo } from 'react';
+import { useLayoutEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { User, FileText, Eye, MapPin, Globe, Clock, Briefcase } from '@/components/icons';
 import { useCareersStore } from '@/stores/careersStore';
@@ -87,14 +87,25 @@ export default function ApplicationsList() {
   const { applications, isLoading } = useCareersStore();
   const preview = useCvPreview();
 
-  // Newest application first.
+  // Newest application first, or by expected salary (applicants without one always go last).
+  const [sort, setSort] = useState<'newest' | 'salary_asc' | 'salary_desc'>('newest');
   const ordered = useMemo(() => {
     const at = (v?: string) => {
       const t = v ? Date.parse(v) : 0;
       return Number.isFinite(t) ? t : 0;
     };
-    return [...(applications || [])].sort((x: any, y: any) => at(y?.application_date) - at(x?.application_date));
-  }, [applications]);
+    const newest = (x: any, y: any) => at(y?.application_date) - at(x?.application_date);
+    const list = [...(applications || [])];
+    if (sort === 'newest') return list.sort(newest);
+    const pay = (a: any) => (a?.expected_salary != null && Number.isFinite(Number(a.expected_salary)) ? Number(a.expected_salary) : null);
+    return list.sort((x: any, y: any) => {
+      const px = pay(x), py = pay(y);
+      if (px === null && py === null) return newest(x, y);
+      if (px === null) return 1;
+      if (py === null) return -1;
+      return (sort === 'salary_asc' ? px - py : py - px) || newest(x, y);
+    });
+  }, [applications, sort]);
 
   useLayoutEffect(() => {
     if (ordered.length === 0) return;
@@ -118,6 +129,19 @@ export default function ApplicationsList() {
 
   return (
     <div>
+      <div className="mb-2 flex items-center justify-end gap-2 text-xs text-slate-500">
+        <label htmlFor="applicants-sort" className="font-medium">Sort by</label>
+        <select
+          id="applicants-sort"
+          value={sort}
+          onChange={(e) => setSort(e.target.value as 'newest' | 'salary_asc' | 'salary_desc')}
+          className="field-input h-8 w-auto px-2 pr-7 text-xs"
+        >
+          <option value="newest">Newest first</option>
+          <option value="salary_asc">Salary: low to high</option>
+          <option value="salary_desc">Salary: high to low</option>
+        </select>
+      </div>
       <div className="overflow-x-auto rounded-2xl border border-surface-border bg-paper shadow-card">
         <table className="w-full min-w-[860px] table-fixed border-collapse text-sm">
           <colgroup>

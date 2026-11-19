@@ -16,6 +16,7 @@ from app.api.deps import require_admin, require_user
 from app.db.database import get_session
 from app.models.bug_report import BUG_AREAS, BUG_SEVERITIES, BUG_STATUSES, BugReport
 from app.models.user import User
+from app.services.notifications import admin_ids, notify, user_id_by_username
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 Severity = Literal["low", "medium", "high", "critical"]
 Status = Literal["open", "in_progress", "resolved", "closed"]
+STATUS_WORDS = {"open": "Open", "in_progress": "In progress", "resolved": "Resolved", "closed": "Closed"}
 
 
 def _clean(value: Optional[str]) -> Optional[str]:
@@ -99,6 +101,10 @@ def report_bug(data: BugCreate, request: Request, user: User = Depends(require_u
         reporter_username=user.username, reporter_role=getattr(user, "role", None), reporter_email=getattr(user, "email", None),
     )
     session.add(row)
+    session.flush()
+    # the admins hear about it on the bell
+    notify(session, admin_ids(session), "bug_reported", f"New bug report: {row.title}",
+           body=f"{STATUS_WORDS.get(row.status, row.status)} · {row.severity} · {row.area} · from {user.username}", link="/admin/bugs", actor=user)
     session.commit()
     session.refresh(row)
     logger.info("Bug report %s from %s (%s, %s)", row.id, user.username, row.area, row.severity)
@@ -157,15 +163,26 @@ def update_bug_report(bug_id: str, data: BugUpdate, admin: User = Depends(requir
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bug report not found")
     now = datetime.utcnow()
-    if data.status is not None and data.status != row.status:
+    status_changed = data.status is not None and data.status != row.status
+    if status_changed:
         row.status = data.status
         row.resolved_at = now if data.status in ("resolved", "closed") else None
     if data.severity is not None:
         row.severity = data.severity
+    note_changed = False
     if "admin_note" in data.model_fields_set:
-        row.admin_note = _clean(data.admin_note)
+        note = _clean(data.admin_note)
+        note_changed = bool(note) and note != row.admin_note
+        row.admin_note = note
     row.handled_by, row.updated_at = admin.username, now
     session.add(row)
+    # the reporter hears about it on the bell: the new status, or the admin's answer
+    reporter, link = user_id_by_username(session, row.reporter_username), f"/report-bug?bug={row.id}"
+    if status_changed:
+        notify(session, [reporter], "bug_status", f"Your bug report is now {STATUS_WORDS.get(row.status, row.status)}",
+               body=row.title + (f" · {row.admin_note}" if note_changed else ""), link=link, actor=admin)
+    elif note_changed:
+        notify(session, [reporter], "bug_reply", "The admin answered your bug report", body=f"{row.title} · {row.admin_note}", link=link, actor=admin)
     session.commit()
     session.refresh(row)
     return _admin_view(row)

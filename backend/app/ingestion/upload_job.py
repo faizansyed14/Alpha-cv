@@ -56,6 +56,7 @@ async def process_cv_upload(job: Dict[str, Any]) -> None:
         return
 
     set_public_job_status(cv_id, status="completed", finished_at=time.time(), progress_percent=100,
-                          current_step="Processing completed successfully", cv_id=result.cv_id, merged=result.merged,
+                          current_step=("Replaced the older CV of this candidate" if result.replaced else "Processing completed successfully"),
+                          cv_id=result.cv_id, merged=result.merged, replaced=result.replaced,
                           processing_stats=result.stats)
     logger.info(f"Queued upload {cv_id} done in {time.time() - started:.1f}s")

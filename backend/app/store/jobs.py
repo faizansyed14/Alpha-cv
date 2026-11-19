@@ -309,9 +309,12 @@ class JobStore:
             return view
 
     @staticmethod
-    def _posting_conditions(q: Optional[str], posted_by: Optional[str], not_posted_by: Optional[str]) -> list:
-        """The conditions that choose postings by who posted them and by the words typed (not by open / closed)."""
+    def _posting_conditions(q: Optional[str], posted_by: Optional[str], not_posted_by: Optional[str], location: Optional[str] = None) -> list:
+        """The conditions that choose postings by who posted them, by the words typed and by where the job is (not by open / closed).
+        ``location`` (Dubai, Abu Dhabi): the job's location mentions that city."""
         conds = [JobPosting.deleted_at.is_(None)]
+        if location and location.strip():
+            conds.append(func.lower(func.coalesce(JobPosting.job_location, "")).like(f"%{location.strip().lower()}%"))
         if posted_by:
             conds.append(JobPosting.posted_by_user == posted_by)
         if not_posted_by:
@@ -327,10 +330,10 @@ class JobStore:
 
     def list_job_postings(self, *, include_inactive: bool = False, offset: int = 0, limit: Optional[int] = None, q: Optional[str] = None,
                           posted_by: Optional[str] = None, not_posted_by: Optional[str] = None,
-                          status: Optional[str] = None) -> Tuple[List[Dict[str, Any]], int]:
+                          status: Optional[str] = None, location: Optional[str] = None) -> Tuple[List[Dict[str, Any]], int]:
         """Postings (not deleted), newest first, with their application counts, and how many match in total. The database filters:
         ``q`` (title, poster, e-mail subject or id), ``posted_by`` / ``not_posted_by`` (a username), ``status`` active | inactive | all."""
-        conds = self._posting_conditions(q, posted_by, not_posted_by)
+        conds = self._posting_conditions(q, posted_by, not_posted_by, location)
         if status == "active" or (status in (None, "") and not include_inactive):
             conds.append(JobPosting.is_active.is_(True))
         elif status == "inactive":
@@ -380,9 +383,10 @@ class JobStore:
             page = joined.where(*conds).order_by(JobPosting.created_at.desc(), JobPosting.id.desc()).offset(max(0, offset)).limit(max(1, limit))
             return self._posting_views(s, list(s.execute(page).scalars())), total
 
-    def posting_status_counts(self, *, q: Optional[str] = None, posted_by: Optional[str] = None, not_posted_by: Optional[str] = None) -> Dict[str, int]:
-        """{all, active, inactive}: how many postings match the search and the owner filter, whether open or closed (the tabs' numbers)."""
-        conds = self._posting_conditions(q, posted_by, not_posted_by)
+    def posting_status_counts(self, *, q: Optional[str] = None, posted_by: Optional[str] = None, not_posted_by: Optional[str] = None,
+                              location: Optional[str] = None) -> Dict[str, int]:
+        """{all, active, inactive}: how many postings match the search, owner and location filters, whether open or closed (the tabs' numbers)."""
+        conds = self._posting_conditions(q, posted_by, not_posted_by, location)
         with Session(self.engine) as s:
             rows = s.execute(select(JobPosting.is_active, func.count()).select_from(JobPosting).outerjoin(
                 JobDescription, JobDescription.id == JobPosting.job_description_id).where(*conds).group_by(JobPosting.is_active))

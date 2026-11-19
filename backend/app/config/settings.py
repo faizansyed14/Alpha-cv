@@ -227,6 +227,15 @@ class Settings(BaseSettings):
     MONITORING_ENABLED: bool = True
     LLM_DAILY_BUDGET_USD: float = 0.0   # 0 = no budget alert on the Monitor page
 
+    # ---- In-app notifications (the bell; see app/services/notifications.py) ----
+    NOTIFICATION_RETENTION_DAYS: int = 30       # older notifications are never shown and are deleted by the background worker
+    NOTIFICATION_MAX_PER_USER: int = 300        # a person keeps at most this many (the newest), whatever happens in 30 days
+
+    # ---- One candidate per person (see app/ingestion/identity.py) ----
+    # A new CV whose e-mail AND phone match an existing candidate replaces that candidate's CV (file, extracted data, vectors) instead of
+    # becoming a second candidate. false = every different file is a new candidate, as before.
+    CV_REPLACE_SAME_PERSON: bool = True
+
     # ---- OCR (RapidOCR on ONNX Runtime; see app/ingestion/ocr.py) ----
     OCR_MAX_CONCURRENT: int = 2      # recognitions running at once per process
     OCR_THREADS: int = 2             # ONNX Runtime threads per recognition

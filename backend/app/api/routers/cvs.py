@@ -267,9 +267,10 @@ async def upload_cv(
         logger.info(f"CV processed and stored: {result.cv_id}")
         return JSONResponse({
             "status": "success",
-            "message": (f"CV '{filename}' was already in the database; its details were updated"
-                        if result.merged else f"CV '{filename}' processed successfully"),
-            "cv_id": result.cv_id, "filename": filename, "merged": result.merged,
+            "message": (f"CV '{filename}' was already in the database; its details were updated" if result.merged
+                        else f"CV '{filename}' is a newer CV of a candidate already in the database; it replaced their old CV" if result.replaced
+                        else f"CV '{filename}' processed successfully"),
+            "cv_id": result.cv_id, "filename": filename, "merged": result.merged, "replaced": result.replaced,
             "standardized_data": result.standardized, "processing_stats": result.stats,
         })
     except HTTPException:

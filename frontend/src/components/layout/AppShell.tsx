@@ -20,6 +20,7 @@ import TrackerSidebar from '@/components/tracker/TrackerSidebar';
 import { Avatar } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/version';
+import NotificationBell from '@/components/notifications/NotificationBell';
 import {
   workspacePath,
   workspaceFromPath,
@@ -399,12 +400,20 @@ export default function AppShell({ children }: AppShellProps) {
             </button>
             <img src="/alphadatalogo.svg" alt="" className="h-7 w-7 rounded-md object-contain" />
             <span className="font-display text-md font-semibold tracking-[-0.03em] text-slate-900">Alpha<span className="text-navy-700">CV</span></span>
+            <span className="ml-auto" />
+            <NotificationBell />
             <ModeToggle />
           </div>
         )}
         {!fullBleed && !trackerMode && (
           <div className="hidden h-12 shrink-0 items-center justify-end gap-2 px-4 lg:flex lg:px-8">
+            <NotificationBell />
             <ModeToggle />
+          </div>
+        )}
+        {!fullBleed && trackerMode && (
+          <div className="absolute right-3 top-2 z-30 hidden lg:block">
+            <NotificationBell />
           </div>
         )}
         {fullBleed ? (

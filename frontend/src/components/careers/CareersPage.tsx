@@ -26,6 +26,7 @@ import WeeklyReportDialog from './WeeklyReportDialog';
 
 type Owner = 'yours' | 'all' | 'others';
 type Status = 'all' | 'active' | 'inactive';
+type Place = 'all' | 'Dubai' | 'Abu Dhabi';
 const TABS: JobTab[] = ['applicants', 'database', 'details'];
 
 function jobHref(jobId: string, tab: JobTab = 'applicants', edit = false) {
@@ -67,8 +68,9 @@ export default function CareersPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<JobPostingListItem | null>(null);
-  const [owner, setOwner] = useState<Owner>('yours');
+  const [owner, setOwner] = useState<Owner>('all');          // the page opens on every job; Mine and Others narrow it
   const [status, setStatus] = useState<Status>('all');
+  const [place, setPlace] = useState<Place>('all');      // where the job is: Dubai, Abu Dhabi or anywhere
   const [query, setQuery] = useState('');
   const [firstLoadDone, setFirstLoadDone] = useState(false);
 
@@ -92,13 +94,13 @@ export default function CareersPage() {
   useEffect(() => {
     const t = setTimeout(async () => {
       try {
-        await loadJobPostings({ q: query.trim(), scope: owner === 'yours' ? 'mine' : owner === 'others' ? 'others' : 'all', status });
+        await loadJobPostings({ q: query.trim(), scope: owner === 'yours' ? 'mine' : owner === 'others' ? 'others' : 'all', status, location: place });
       } finally {
         setFirstLoadDone(true);      // the loading skeleton is for the first load only: typing in the search box must not replace the page
       }
     }, query.trim() ? 300 : 0);
     return () => clearTimeout(t);
-  }, [owner, status, query, loadJobPostings]);
+  }, [owner, status, place, query, loadJobPostings]);
 
   const copy = useCallback((text: string, what: string) => {
     if (!text) return;
@@ -202,7 +204,7 @@ export default function CareersPage() {
     );
   }
 
-  const filtered = !!query.trim() || status !== 'all' || owner !== 'all';
+  const filtered = !!query.trim() || status !== 'all' || owner !== 'all' || place !== 'all';
   const shownTotal = totalJobPostings ?? jobPostings.length;
   const hasMore = totalJobPostings != null && jobPostings.length < totalJobPostings;
   const postJob = (
@@ -300,6 +302,16 @@ export default function CareersPage() {
               </button>
             )}
           </div>
+          <Segmented<Place>
+            value={place}
+            onChange={setPlace}
+            size="sm"
+            items={[
+              { value: 'all', label: 'All locations' },
+              { value: 'Dubai', label: 'Dubai' },
+              { value: 'Abu Dhabi', label: 'Abu Dhabi' },
+            ]}
+          />
           <Segmented<Owner>
             value={owner}
             onChange={setOwner}
@@ -323,15 +335,15 @@ export default function CareersPage() {
         <EmptyState
           icon={Briefcase}
           title={filtered ? 'No jobs match these filters' : 'No jobs yet'}
-          hint={filtered ? (owner === 'yours' ? 'You are looking at your own jobs. Switch to Everyone to see the whole team\'s.' : 'Change the search or the filters above.') : 'Post your first job to start receiving applications.'}
+          hint={filtered ? (owner === 'yours' ? 'You are looking at your own jobs. Switch to All to see the whole team\'s.' : 'Change the search or the filters above.') : 'Post your first job to start receiving applications.'}
           action={filtered && owner === 'yours' ? <Button variant="secondary" onClick={() => setOwner('all')}>Show everyone&apos;s jobs</Button> : postJob}
         />
       ) : (
         <>
           <div className="overflow-hidden rounded-xl border border-surface-border bg-paper shadow-card" role="table" aria-label="Jobs">
             <JobListHeader />
-            {jobPostings.map((job) => (
-              <JobRow key={job.job_id} job={job} currentUser={user.username} handlers={handlers} />
+            {jobPostings.map((job, i) => (
+              <JobRow key={job.job_id} job={job} currentUser={user.username} handlers={handlers} index={i + 1} />
             ))}
           </div>
           <p className="mt-2 text-center text-xs tabular-nums text-slate-500">

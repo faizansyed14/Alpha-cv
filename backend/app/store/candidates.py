@@ -4,15 +4,18 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
+from contextlib import ExitStack, contextmanager
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
-from sqlalchemy import and_, exists, func, literal, literal_column, not_, or_, select, update
+from sqlalchemy import and_, exists, func, literal, literal_column, not_, or_, select, text, update
 from sqlmodel import Session
 
 from app.ingestion import boolean_query as bq
 from app.ingestion.categories import normalize_category
+from app.ingestion.identity import phone_key
 from app.ingestion.profile_links import normalize_github, normalize_linkedin
 from app.ingestion.search_index import FTS_CONFIG, build_search_documents, experience_years, matched_terms, normalize
 from app.models.talent import Candidate, CandidateNote, CandidateSearch, JobApplication, JobDescription, JobPosting
@@ -21,6 +24,9 @@ from app.store import arrays
 logger = logging.getLogger(__name__)
 
 CHUNK = 400   # ids per IN (...) query, below SQLite's limit of 999 variables
+PERSON_LOCK_TIMEOUT_S = 120   # how long a CV waits for another CV of the same person to finish storing
+_local_person_locks: Dict[str, threading.Lock] = {}          # the same lock without PostgreSQL (the tests' SQLite): one process
+_local_person_locks_guard = threading.Lock()
 COUNT_CAP = 100_000   # a search counts its matches only up to this many ("100,000+"): counting millions of matches would cost more than the search
 
 FACT_COLUMNS = {"full_name": 256, "email": 320, "phone": 64, "linkedin_url": 512, "github_url": 512, "gender": 16, "location": 256,
@@ -165,6 +171,11 @@ class CandidateStore:
                 row.years_of_experience = years(facts["years_of_experience"])
             if d.get("uploaded_at"):
                 row.uploaded_at = d["uploaded_at"]
+            if row.first_added_at is None:                       # a new person: their first CV is this one
+                row.first_added_at = row.uploaded_at or datetime.utcnow()
+            if "previous_sha256" in d:                           # a newer CV replaced this person's CV (see replace_cv)
+                row.previous_sha256 = list(dict.fromkeys(h for h in d["previous_sha256"] if h and h != row.content_sha256))
+            row.phone_key = phone_key(row.phone)
             for key in ("llm_model", "extraction_ms"):
                 if d.get(key) is not None:
                     setattr(row, key, cut(d[key], 128) if key == "llm_model" else int(d[key]))
@@ -248,8 +259,13 @@ class CandidateStore:
 
     # ------------------------------------------------------------------ reading one / a batch
     def find_candidate_by_hash(self, sha: str) -> Optional[Dict[str, Any]]:
+        """The candidate whose current CV is this file, or (since only the newest CV is kept) whose earlier CV it was."""
         with Session(self.engine) as s:
             row = s.execute(select(Candidate.id, Candidate.source).where(Candidate.content_sha256 == sha)).first()
+            if row is None:
+                row = s.execute(select(Candidate.id, Candidate.source)
+                                .where(arrays.contains_any(self.engine, Candidate.previous_sha256, [sha]))
+                                .order_by(Candidate.uploaded_at.desc()).limit(1)).first()
             if row is None:
                 return None
             jobs = list(s.execute(select(JobApplication.job_posting_id).where(JobApplication.candidate_id == row.id)).scalars())
@@ -295,6 +311,74 @@ class CandidateStore:
                     "languages": lst["languages"], "certifications": lst["certifications"],
                 })
             return out
+
+    # ------------------------------------------------------------------ one candidate per person
+    def find_same_person(self, emails: Sequence[str], phones: Sequence[str], exclude: Optional[str] = None) -> Optional[str]:
+        """The candidate who is this person: one of these e-mail addresses AND one of these phone keys (app/ingestion/identity.py). Both
+        must match; with several such candidates (duplicates made before this rule) the one with the newest CV."""
+        emails, phones = [e for e in emails if e], [p for p in phones if p]
+        if not emails or not phones:
+            return None
+        with Session(self.engine) as s:
+            q = select(Candidate.id).where(func.lower(Candidate.email).in_(emails), Candidate.phone_key.in_(phones))
+            if exclude:
+                q = q.where(Candidate.id != exclude)
+            return s.execute(q.order_by(Candidate.uploaded_at.desc(), Candidate.id.desc()).limit(1)).scalar()
+
+    def replace_cv(self, cid: str, d: Dict[str, Any]) -> str:
+        """Make ``d`` (a newer CV of the same person) the candidate's CV: its file, text, extracted facts and lists replace the old ones (an
+        empty fact keeps the value it had) and the old file's fingerprint is remembered. Notes and applications stay with the candidate."""
+        with Session(self.engine) as s:
+            row = s.get(Candidate, cid)
+            if row is None:
+                raise LookupError(f"Candidate {cid} does not exist")
+            previous = list(row.previous_sha256 or []) + [row.content_sha256]
+        return self.save_candidate({**d, "id": cid, "previous_sha256": previous})
+
+    @contextmanager
+    def person_lock(self, keys: Sequence[str]) -> Iterator[None]:
+        """Hold one lock per key (a person's e-mail addresses) while their CV is stored, so two CVs of the same person arriving at the same
+        moment, on any worker, are stored one after the other: the second then finds the first and replaces it instead of making a second
+        candidate. PostgreSQL advisory locks (shared by every process); a process lock without PostgreSQL. Raises TimeoutError when the
+        lock is not free within PERSON_LOCK_TIMEOUT_S."""
+        keys = sorted({k for k in keys if k})                      # always the same order: two CVs taking the same keys cannot deadlock
+        if not keys:
+            yield
+            return
+        if self.engine.dialect.name != "postgresql":
+            with ExitStack() as stack:
+                for k in keys:
+                    with _local_person_locks_guard:
+                        lock = _local_person_locks.setdefault(k, threading.Lock())
+                    if not lock.acquire(timeout=PERSON_LOCK_TIMEOUT_S):
+                        raise TimeoutError("Another CV of this person is still being stored")
+                    stack.callback(lock.release)
+                yield
+            return
+        with self.engine.connect() as conn:
+            taken: List[str] = []
+            try:
+                try:
+                    conn.execute(text(f"SET lock_timeout = '{int(PERSON_LOCK_TIMEOUT_S)}s'"))
+                    for k in keys:
+                        conn.execute(text("SELECT pg_advisory_lock(hashtext(:k))"), {"k": "person:" + k})
+                        taken.append(k)
+                    conn.commit()
+                except Exception as exc:  # noqa: BLE001 - lock_timeout: another CV of the person is taking too long
+                    raise TimeoutError("Another CV of this person is still being stored") from exc
+                yield
+            finally:
+                clean = True
+                try:
+                    conn.rollback()
+                    for k in taken:
+                        clean = bool(conn.execute(text("SELECT pg_advisory_unlock(hashtext(:k))"), {"k": "person:" + k}).scalar()) and clean
+                    conn.execute(text("RESET lock_timeout"))
+                    conn.commit()
+                except Exception:  # noqa: BLE001
+                    clean = False
+                if not clean:
+                    conn.invalidate()            # never hand back to the pool a connection that may still hold a lock (closing it frees it)
 
     def get_structured_cv(self, cid: str) -> Optional[Dict[str, Any]]:
         got = self.get_structured_cvs_batch([cid])
@@ -345,6 +429,7 @@ class CandidateStore:
                 c, lst, app = rows[i], lists[i], apps.get(i)
                 row = {
                     "id": c.id, "filename": os.path.basename(c.original_filename or "") or "Unknown", "upload_date": iso(c.uploaded_at),
+                    "first_added_at": iso(c.first_added_at or c.uploaded_at),
                     "full_name": c.full_name or "Not specified", "job_title": c.job_title or "Not specified",
                     "years_of_experience": fnum(c.years_of_experience) if c.years_of_experience is not None else "Not specified",
                     "skills_count": len(lst["skills"]), "skills": lst["skills"][:20], "skill_keywords": lst["keywords"][:20],
@@ -375,6 +460,7 @@ class CandidateStore:
             } for a in app_rows]
             return {
                 "id": c.id, "filename": c.original_filename, "upload_date": iso(c.uploaded_at), "file_format": c.file_format, "source": c.source,
+                "first_added_at": iso(c.first_added_at or c.uploaded_at),
                 "full_name": c.full_name, "email": c.email, "phone": c.phone, "linkedin_url": c.linkedin_url, "github_url": c.github_url,
                 "gender": c.gender, "location": c.location, "nationality": c.nationality, "notice_period": c.notice_period,
                 "expected_salary": fnum(c.expected_salary), "job_title": c.job_title, "years_of_experience": fnum(c.years_of_experience),

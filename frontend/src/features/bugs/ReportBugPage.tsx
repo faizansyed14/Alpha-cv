@@ -10,6 +10,7 @@ import { InfiniteScrollSentinel } from '@/components/ui/infinite-scroll';
 import { PageHeader } from '@/components/ui/page';
 import { cn } from '@/lib/utils';
 import { BUG_AREAS, SEVERITIES, SeverityChip, StatusChip, errText, shortId, whenLabel } from './bugUi';
+import { FOCUS_EVENT } from '@/components/notifications/NotificationBell';
 
 const TITLE_MAX = 160, DESCRIPTION_MAX = 4000, STEPS_MAX = 3000;
 const field = 'h-9 w-full rounded-md border border-gray-200 bg-paper px-3 text-sm text-gray-900 shadow-sm focus:outline-none focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30';
@@ -49,6 +50,27 @@ export default function ReportBugPage() {
   useEffect(() => {
     void loadMine();
   }, [loadMine]);
+
+  // Opened from a notification (/report-bug?bug=<id>): the report is fetched fresh (its new status and answer), scrolled to and highlighted.
+  const [focusId, setFocusId] = useState<string | null>(null);
+  useEffect(() => {
+    const read = (link?: string) => {
+      const id = new URLSearchParams(link ? (link.split('?')[1] ?? '') : window.location.search.slice(1)).get('bug');
+      if (id) { setFocusId(id); void loadMine(); }
+    };
+    read();
+    const onOpen = (e: Event) => { const link = (e as CustomEvent<string>).detail; if (typeof link === 'string' && link.startsWith('/report-bug')) read(link); };
+    window.addEventListener(FOCUS_EVENT, onOpen);
+    return () => window.removeEventListener(FOCUS_EVENT, onOpen);
+  }, [loadMine]);
+  useEffect(() => {
+    if (!focusId || loadingList) return;
+    const el = document.querySelector(`[data-bug-id="${CSS.escape(focusId)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const t = window.setTimeout(() => setFocusId(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [focusId, loadingList, mine]);
 
   const loadMore = async () => {
     if (loadingMore) return;
@@ -230,7 +252,7 @@ export default function ReportBugPage() {
             <>
             <ul className="space-y-3">
               {mine.map((b) => (
-                <li key={b.id} className="rounded-2xl border border-surface-border bg-paper p-4 shadow-card">
+                <li key={b.id} data-bug-id={b.id} className={cn('rounded-2xl border bg-paper p-4 shadow-card transition-colors duration-700', focusId === b.id ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-200' : 'border-surface-border')}>
                   <div className="flex items-start justify-between gap-3">
                     <p className="min-w-0 break-words text-sm font-semibold text-slate-900">{b.title}</p>
                     <StatusChip status={b.status} />

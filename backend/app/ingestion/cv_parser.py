@@ -27,6 +27,49 @@ from app.ingestion.contact import extract_contacts
 
 logger = logging.getLogger(__name__)
 
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _paragraph_text(p) -> str:
+    """The text of one Word paragraph: its runs, tabs as spaces, line breaks kept. A text box inside it is its own paragraphs (read on
+    their own), so its text is not counted here too."""
+    out = []
+    for node in p.iter(_W + "t", _W + "tab", _W + "br", _W + "cr"):
+        parent, nested = node.getparent(), False
+        while parent is not None and parent is not p:                  # inside a text box of this paragraph: read with its own paragraph
+            if parent.tag == _W + "txbxContent":
+                nested = True
+                break
+            parent = parent.getparent()
+        if nested:
+            continue
+        out.append(node.text or "" if node.tag == _W + "t" else (" " if node.tag == _W + "tab" else "\n"))
+    return " ".join("".join(out).split(" ")).strip()
+
+
+def docx_lines(document) -> list:
+    """Every paragraph of a Word document's body, in reading order, as lines.
+
+    It reads the XML itself because python-docx's ``paragraphs`` and ``tables`` miss what form-style documents hold: text inside content
+    controls (the fill-in fields of a template JD or CV), nested tables and text boxes. And python-docx repeats a merged table cell once per
+    column it spans, which turned one paragraph of a template JD into 50 copies; the XML holds each cell once. A long line repeated (a
+    table copied, a header repeated) is kept once; a short one (a heading such as "Responsibilities") may repeat.
+    """
+    lines, seen = [], set()
+    for p in document.element.body.iter(_W + "p"):
+        text = _paragraph_text(p)
+        if not text:
+            continue
+        if lines and lines[-1] == text:
+            continue
+        if len(text) > 40:
+            if text in seen:
+                continue
+            seen.add(text)
+        lines.append(text)
+    return lines
+
+
 class ParsingService:
     """
     Consolidated service for all document text extraction and processing.
@@ -298,29 +341,7 @@ class ParsingService:
             self.logger.info(f"Extracting text from DOCX: {file_path}")
             
             document = docx.Document(file_path)
-            text_parts = []
-            
-            # Extract paragraphs
-            for paragraph in document.paragraphs:
-                if paragraph.text.strip():
-                    text_parts.append(paragraph.text.strip())
-            
-            # Extract tables
-            for table in document.tables:
-                table_text = []
-                for row in table.rows:
-                    row_text = []
-                    for cell in row.cells:
-                        if cell.text.strip():
-                            row_text.append(cell.text.strip())
-                    if row_text:
-                        table_text.append(" | ".join(row_text))
-                
-                if table_text:
-                    text_parts.append("\n--- Table Data ---")
-                    text_parts.extend(table_text)
-            
-            extracted_text = "\n".join(text_parts).strip()
+            extracted_text = "\n".join(docx_lines(document)).strip()
             
             if not extracted_text:
                 raise ValueError("No text could be extracted from DOCX file")

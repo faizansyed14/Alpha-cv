@@ -15,6 +15,8 @@ from sqlmodel import Session, SQLModel
 from app.api.deps import require_core_app
 from app.api.routers import tracker as T
 from app.api.routers import tracker_closures as TC
+from app.api.routers import tracker_import as TI
+from app.api.routers import tracker_selections_import as TSI
 from app.api.routers import tracker_selections as TS
 from app.db.database import get_session
 from app.models.requirement import Requirement, RequirementEvent, RequirementRecruiter
@@ -78,6 +80,8 @@ def world(monkeypatch):
     app.include_router(T.router)
     app.include_router(TC.router)
     app.include_router(TS.router)
+    app.include_router(TI.router)
+    app.include_router(TSI.router)
     app.dependency_overrides[get_session] = lambda: session
     app.dependency_overrides[require_core_app] = lambda: caller["user"]
     w.client, w.caller = TestClient(app), caller
@@ -160,8 +164,10 @@ def test_a_recruiter_cannot_create_or_delete(world):
 
 
 def test_only_an_active_recruiter_of_the_same_location_can_be_assigned(world):
-    for who in (world.ravi, world.gone, world.mgr):
+    # another location's recruiter, a deactivated one, a sales manager (a recruitment manager CAN be: they recruit too)
+    for who in (world.ravi, world.gone, world.sales):
         assert world.client.post("/api/tracker/requirements", json=body(recruiter_id=who.id)).status_code == 422
+    assert world.client.post("/api/tracker/requirements", json=body(recruiter_id=world.mgr.id)).status_code == 201
     assert world.client.post("/api/tracker/requirements", json=body(recruiter_id="no-such-id")).status_code == 422
 
 
@@ -197,7 +203,7 @@ def test_evp_sees_both_locations(world):
     assert world.client.get("/api/tracker/requirements").json()["total"] == 2
     options = world.client.get("/api/tracker/options").json()
     assert options["all_locations"] is True and options["locations"] == ["Dubai", "Abu Dhabi"] and "my_location" not in options   # they get a Location dropdown
-    assert {r["username"] for r in options["recruiters"]} == {"rita", "rob", "ravi"}                            # every recruiter can be assigned
+    assert {r["username"] for r in options["recruiters"]} == {"rita", "rob", "ravi", "mona", "max"}             # every recruiter (and recruitment manager) can be assigned
 
 
 def test_an_account_with_no_location_sees_nothing(world):
@@ -207,7 +213,7 @@ def test_an_account_with_no_location_sees_nothing(world):
 
 def test_options_list_the_recruiters_of_the_location(world):
     names = [r["username"] for r in world.client.get("/api/tracker/options").json()["recruiters"]]
-    assert names == ["rita", "rob"]                      # not ravi (Abu Dhabi), not the deactivated one
+    assert names == ["mona", "rita", "rob"]              # the recruitment manager recruits too; not ravi (Abu Dhabi), not the deactivated one
     world.as_(world.rita)
     assert world.client.get("/api/tracker/options").json()["recruiters"] == []
 
@@ -621,10 +627,10 @@ def test_analytics_by_month_and_by_year_for_a_recruiter_and_for_the_team(world):
 
     world.as_(world.mgr_ad)                                                         # the other location sees none of it
     other = get(view="yearly", year=2026)
-    assert other["summary"]["closed"] == 0 and {p["username"] for p in other["recruiters"]} == {"ravi"}
+    assert other["summary"]["closed"] == 0 and {p["username"] for p in other["recruiters"]} == {"ravi", "max"}
     world.as_(world.evp)
     both = get(view="yearly", year=2026)
-    assert both["summary"]["closed"] == 3 and {p["username"] for p in both["recruiters"]} == {"rita", "rob", "ravi"}
+    assert both["summary"]["closed"] == 3 and {p["username"] for p in both["recruiters"]} == {"rita", "rob", "ravi", "mona", "max"}
     for bad in ({"view": "weekly"}, {"month": 13}, {"month": 0}, {"year": 1999}):
         assert world.client.get("/api/tracker/analytics", params=bad).status_code == 422, bad
 
@@ -944,10 +950,10 @@ def test_the_evp_and_admin_can_look_at_one_location_and_nobody_else_can_widen_th
         both = get("/api/tracker/analytics", view="yearly", year=this_year)
         assert both["summary"]["closed"] == 2 and both["location"] is None
         assert {p["location"]: p["closed"] for p in both["locations"]} == {"Dubai": 1, "Abu Dhabi": 1}      # the two side by side
-        assert {p["username"] for p in both["recruiters"]} == {"rita", "rob", "ravi"} and {p["location"] for p in both["recruiters"]} == {"Dubai", "Abu Dhabi"}
+        assert {p["username"] for p in both["recruiters"]} == {"rita", "rob", "ravi", "mona", "max"} and {p["location"] for p in both["recruiters"]} == {"Dubai", "Abu Dhabi"}
         one = get("/api/tracker/analytics", view="yearly", year=this_year, location="Abu Dhabi")
         assert one["summary"]["closed"] == 1 and one["location"] == "Abu Dhabi" and one["locations"] == []
-        assert {p["username"] for p in one["recruiters"]} == {"ravi"}
+        assert {p["username"] for p in one["recruiters"]} == {"ravi", "max"}             # Abu Dhabi's recruiter and its recruitment manager
 
     # everyone else stays in their own location, whatever they ask for
     for who, own, other in ((world.mgr, "Dubai", "Abu Dhabi"), (world.sales_ad, "Abu Dhabi", "Dubai"), (world.rita, "Dubai", "Abu Dhabi")):
@@ -1145,11 +1151,11 @@ def test_selection_visibility_follows_the_location(world):
     other = selections(world, location="Abu Dhabi")["items"][0]["id"]
     options = world.client.get("/api/tracker/selections/options").json()
     assert options["all_locations"] is True and options["statuses"] == ["offer_pending", "offer_released", "joined", "backed_out"]
-    assert {r["username"] for r in options["recruiters"]} == {"rita", "rob", "ravi"} and all(options["editable"].values())
+    assert {r["username"] for r in options["recruiters"]} == {"rita", "rob", "ravi", "mona", "max"} and all(options["editable"].values())
     world.as_(world.sales)                                                              # nobody widens their own location
     assert selections(world, location="Abu Dhabi")["total"] == 2
     options = world.client.get("/api/tracker/selections/options").json()
-    assert options["all_locations"] is False and {r["username"] for r in options["recruiters"]} == {"rita", "rob"}
+    assert options["all_locations"] is False and {r["username"] for r in options["recruiters"]} == {"rita", "rob", "mona"}
     assert world.client.patch(f"/api/tracker/selections/{other}", json={"status": "joined"}).status_code == 404     # not theirs: reported as missing
     assert world.client.delete(f"/api/tracker/selections/{other}").status_code == 404
 
@@ -1214,3 +1220,39 @@ def test_one_selection_can_be_read_by_id_under_the_same_rules_as_the_list(world)
         assert world.client.get(f"/api/tracker/selections/{sid}").status_code == expected, who.username
     world.as_(world.sales)
     assert world.client.get("/api/tracker/selections/no-such-id").status_code == 404
+
+
+# ---------------------------------------------------------------------------------------------------------------- recruitment managers recruit too
+def test_a_recruitment_manager_is_offered_and_can_be_assigned_as_a_recruiter(world):
+    world.as_(world.sales)
+    offered = {r["username"]: r for r in world.client.get("/api/tracker/options").json()["recruiters"]}
+    assert {"rita", "rob", "mona"} <= set(offered) and "max" not in offered and "sam" not in offered      # their location's managers, not sales
+    assert offered["mona"]["role"] == "manager" and offered["rita"]["role"] == "user"
+    r = make(world, recruiter_ids=[world.mgr.id, world.rita.id], manager_id=world.mgr.id)
+    assert names_of(r) == ["mona", "rita"] and r["manager"]["username"] == "mona"
+    bad = world.client.post("/api/tracker/requirements", json=body(recruiter_ids=[world.mgr_ad.id]))       # another location's manager
+    assert bad.status_code == 422
+    bad = world.client.post("/api/tracker/requirements", json=body(recruiter_ids=[world.sales.id]))        # a sales manager does not recruit
+    assert bad.status_code == 422
+
+
+def test_an_assigned_recruitment_manager_writes_recruiter_comments_and_is_credited_when_closing(world):
+    mine = make(world, recruiter_ids=[world.rita.id, world.mgr.id])
+    other = make(world, recruiter_ids=[world.rita.id])
+    world.as_(world.mgr)
+    assert world.client.patch(f"/api/tracker/requirements/{mine['id']}", json={"recruiter_comments": "3 CVs sent"}).status_code == 200
+    assert world.client.patch(f"/api/tracker/requirements/{other['id']}", json={"recruiter_comments": "x"}).status_code == 403   # not theirs
+    closed = world.client.patch(f"/api/tracker/requirements/{mine['id']}", json={"status": "closed"}).json()
+    assert closed["recruiter"]["username"] == "mona" and names_of(closed) == ["mona"] and closed["closed_by"] == "mona"
+    by_mgr = close(world, other, by=world.mgr)                                            # not one of its recruiters: rita keeps the credit
+    assert by_mgr["recruiter"]["username"] == "rita"
+    world.as_(world.rita)
+    assert [i["id"] for i in world.client.get("/api/tracker/closures").json()["items"]] == [other["id"]]   # mona's closure is hers alone
+    world.as_(world.mgr)
+    people = {p["username"]: p for p in world.client.get("/api/tracker/analytics").json()["recruiters"]}
+    assert people["mona"]["closed"] == 1 and people["rita"]["closed"] == 1
+
+
+def test_selections_offer_recruitment_managers_as_recruiters(world):
+    world.as_(world.sales)
+    assert "mona" in {r["username"] for r in world.client.get("/api/tracker/selections/options").json()["recruiters"]}

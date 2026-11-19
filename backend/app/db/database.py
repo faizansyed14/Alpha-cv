@@ -100,6 +100,7 @@ def run_migrations() -> None:
 
     import app.models.agent  # noqa: F401  (registers the tables)
     import app.models.bug_report  # noqa: F401
+    import app.models.notification  # noqa: F401
     import app.models.requirement  # noqa: F401
     import app.models.selection  # noqa: F401
     import app.models.user  # noqa: F401

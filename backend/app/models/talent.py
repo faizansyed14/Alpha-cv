@@ -67,6 +67,8 @@ class Candidate(SQLModel, table=True):
         Index("ix_candidate_uploaded_at", "uploaded_at", "id"),                                # the newest-first order every list and search pages by
         Index("ix_candidate_category_uploaded", "category", "uploaded_at", "id"),
         Index("ix_candidate_email_lower", text("lower(email)")),
+        Index("ix_candidate_phone_key", "phone_key"),
+        Index("ix_candidate_previous_sha256", "previous_sha256", postgresql_using="gin"),
         Index("ix_candidate_location", "location"),
         Index("ix_candidate_nationality", "nationality"),
         Index("ix_candidate_languages", "languages", postgresql_using="gin"),
@@ -77,6 +79,9 @@ class Candidate(SQLModel, table=True):
 
     # the file
     content_sha256: str = Field(sa_column=Column(String(64), nullable=False, unique=True))        # the same file is never stored twice
+    # the fingerprints of this person's earlier CVs, replaced by a newer one (only the newest CV is kept). An earlier file sent again is
+    # recognised by them and joins this candidate, instead of replacing the newer CV with the older one.
+    previous_sha256: List[str] = Field(default_factory=list, sa_column=_list())
     original_filename: str = Field(sa_column=Column(String(512), nullable=False))
     file_format: Optional[str] = Field(default=None, sa_column=Column(String(16)))                # pdf | docx | txt | png ...
     mime_type: Optional[str] = Field(default=None, sa_column=Column(String(128)))
@@ -88,6 +93,7 @@ class Candidate(SQLModel, table=True):
     full_name: Optional[str] = Field(default=None, sa_column=Column(String(256)))
     email: Optional[str] = Field(default=None, sa_column=Column(String(320)))
     phone: Optional[str] = Field(default=None, sa_column=Column(String(64)))
+    phone_key: Optional[str] = Field(default=None, sa_column=Column(String(16)))                  # the phone's last 9 digits (app/ingestion/identity.py)
     linkedin_url: Optional[str] = Field(default=None, sa_column=Column(String(512)))
     github_url: Optional[str] = Field(default=None, sa_column=Column(String(512)))
     gender: Optional[str] = Field(default=None, sa_column=Column(String(16)))
@@ -109,7 +115,9 @@ class Candidate(SQLModel, table=True):
     certifications: List[str] = Field(default_factory=list, sa_column=_list())
 
     # bookkeeping
+    # when the CURRENT CV arrived (a newer CV of the same person moves it on); every list, search and the freshness filter use it
     uploaded_at: datetime = Field(default_factory=_now, sa_column=_ts(nullable=False, server_default=func.now()))
+    first_added_at: Optional[datetime] = Field(default=None, sa_column=_ts())                    # when the person's first CV arrived
     llm_model: Optional[str] = Field(default=None, sa_column=Column(String(128)))               # the model that read the CV
     extraction_ms: Optional[int] = Field(default=None, sa_column=Column(Integer))
     embedding_model: Optional[str] = Field(default=None, sa_column=Column(String(128)))          # null until its vectors are in Qdrant

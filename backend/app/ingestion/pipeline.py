@@ -28,13 +28,14 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.exc import IntegrityError
 
 from app.config.settings import settings
 from app.ingestion.autofill import cached_standardized
 from app.ingestion.contact import resolve_name
+from app.ingestion.identity import email_keys, phone_keys
 from app.ingestion.cv_parser import get_parsing_service
 from app.ingestion.profile_links import pick_github, pick_linkedin
 from app.monitoring.recorder import timed
@@ -109,6 +110,7 @@ class CVSubmission:
 class IngestResult:
     cv_id: str
     merged: bool = False                     # True when an existing record was updated instead of a new one created
+    replaced: bool = False                   # True when this CV replaced the older CV of the same person (cv_id is that candidate)
     standardized: Dict[str, Any] = field(default_factory=dict)
     stats: Dict[str, Any] = field(default_factory=dict)
 
@@ -378,21 +380,71 @@ def _ingest(sub: CVSubmission, step: Progress) -> IngestResult:
 
     step(70, "Storing")
     ext = os.path.splitext(sub.filename)[1].lower() or ".txt"
-    persisted = sub.persisted_path or _persist_original(sub, text, ext)
-    meta = standardized.get("processing_metadata") or {}
-    facts = _candidate_facts(sub, standardized, pii)
+    record = _cv_record(sub, sha, text, ext, standardized, pii)
+
+    # One candidate per person: a newer CV of someone already in the database (same e-mail AND phone) replaces their CV. Decided under
+    # the person's lock, so two CVs of the same person arriving together are stored one after the other, never as two candidates.
+    emails = email_keys([sub.candidate.get("email"), (pii.get("email") or [None])[0], sub.hints.get("email")])
+    phones = phone_keys([sub.candidate.get("phone"), (pii.get("phone") or [None])[0], sub.hints.get("phone")])
+    if not (settings.CV_REPLACE_SAME_PERSON and emails and phones):
+        return _store_new(store, sub, record, embeddings, standardized, pii, job_id, step)
     try:
-        store.save_candidate({
-            "id": sub.cv_id, "content_sha256": sha, "filename": sub.filename, "file_format": ext.lstrip("."),
-            "mime_type": sub.mime_type or mimetypes.guess_type(sub.filename)[0] or "application/octet-stream",
-            "file_path": persisted, "source": sub.source, "raw_text": text, "facts": _person(sub, standardized, pii),
-            "skills": [x for x in standardized.get("skills_sentences", standardized.get("skills", [])) if x],
-            "responsibilities": [x for x in standardized.get("responsibility_sentences", standardized.get("responsibilities", [])) if x],
-            "keywords": standardized.get("keywords") or [], "languages": standardized.get("languages") or [],
-            "certifications": standardized.get("certifications") or [],
-            "llm_model": meta.get("model_used"),
-            "extraction_ms": int(float(meta["processing_time"]) * 1000) if meta.get("processing_time") is not None else None,
-        })
+        with store.person_lock(emails):
+            again = store.find_candidate_by_hash(sha)              # the same file was stored while this one was being read
+            if again:
+                step(95, "Already in the database - joining the new details")
+                return _merge_into(store, again, sub)
+            person = store.find_same_person(emails, phones, exclude=sub.cv_id)
+            if person:
+                return _replace_cv(store, person, sub, record, embeddings, standardized, pii, ext, job_id, step)
+            return _store_new(store, sub, record, embeddings, standardized, pii, job_id, step)
+    except TimeoutError as exc:
+        raise IngestError(f"{exc}. Please try again in a minute.", 503) from exc
+
+
+def _cv_record(sub: CVSubmission, sha: str, text: str, ext: str, standardized: Dict[str, Any], pii: Dict[str, Any]) -> Dict[str, Any]:
+    """The candidate row as ``save_candidate`` takes it, without the file's place in storage (added by the caller)."""
+    meta = standardized.get("processing_metadata") or {}
+    return {
+        "content_sha256": sha, "filename": sub.filename, "file_format": ext.lstrip("."),
+        "mime_type": sub.mime_type or mimetypes.guess_type(sub.filename)[0] or "application/octet-stream",
+        "source": sub.source, "raw_text": text, "facts": _person(sub, standardized, pii),
+        "skills": [x for x in standardized.get("skills_sentences", standardized.get("skills", [])) if x],
+        "responsibilities": [x for x in standardized.get("responsibility_sentences", standardized.get("responsibilities", [])) if x],
+        "keywords": standardized.get("keywords") or [], "languages": standardized.get("languages") or [],
+        "certifications": standardized.get("certifications") or [],
+        "llm_model": meta.get("model_used"),
+        "extraction_ms": int(float(meta["processing_time"]) * 1000) if meta.get("processing_time") is not None else None,
+    }
+
+
+def _stats(text: str, standardized: Dict[str, Any], pii: Dict[str, Any], **extra: Any) -> Dict[str, Any]:
+    return {
+        "text_length": len(text),
+        "skills_count": len(standardized.get("skills_sentences", standardized.get("skills", []))),
+        "responsibilities_count": len(standardized.get("responsibility_sentences", standardized.get("responsibilities", []))),
+        "embeddings_generated": 31,
+        "pii_extracted": {"emails": len(pii.get("email", [])), "phones": len(pii.get("phone", [])),
+                          "linkedin": len(pii.get("linkedin", [])), "github": len(pii.get("github", []))},
+        **extra,
+    }
+
+
+def _link(store, job_id: Optional[str], cv_id: str, sub: CVSubmission, standardized: Dict[str, Any], pii: Dict[str, Any], step: Progress) -> None:
+    if job_id:
+        step(90, "Linking to the job")
+        if not store.link_application(job_id, cv_id, _application_data(sub, _candidate_facts(sub, standardized, pii))):
+            logger.warning(f"CV {cv_id} stored but could not be linked to job {job_id}")
+
+
+def _store_new(store, sub: CVSubmission, record: Dict[str, Any], embeddings: Dict[str, Any], standardized: Dict[str, Any],
+               pii: Dict[str, Any], job_id: Optional[str], step: Progress) -> IngestResult:
+    """A new candidate."""
+    text, sha = record["raw_text"], record["content_sha256"]
+    ext = "." + record["file_format"] if record.get("file_format") else ".txt"
+    persisted = sub.persisted_path or _persist_original(sub, text, ext)
+    try:
+        store.save_candidate({**record, "id": sub.cv_id, "file_path": persisted})
         if not store.store_embeddings("cv", sub.cv_id, embeddings):
             raise IngestError("The CV's embeddings could not be saved", 500)
     except IngestError:
@@ -410,23 +462,98 @@ def _ingest(sub: CVSubmission, step: Progress) -> IngestResult:
         store.delete_candidate(sub.cv_id)
         raise IngestError(f"The CV could not be saved to the database: {exc}", 500) from exc
 
-    if job_id:
-        step(90, "Linking to the job")
-        if not store.link_application(job_id, sub.cv_id, _application_data(sub, facts)):
-            logger.warning(f"CV {sub.cv_id} stored but could not be linked to job {job_id}")
-
+    _link(store, job_id, sub.cv_id, sub, standardized, pii, step)
     step(100, "Done")
-    return IngestResult(
-        cv_id=sub.cv_id, standardized=standardized,
-        stats={
-            "text_length": len(text),
-            "skills_count": len(standardized.get("skills_sentences", standardized.get("skills", []))),
-            "responsibilities_count": len(standardized.get("responsibility_sentences",
-                                                           standardized.get("responsibilities", []))),
-            "embeddings_generated": 31,
-            "pii_extracted": {"emails": len(pii.get("email", [])), "phones": len(pii.get("phone", [])),
-                              "linkedin": len(pii.get("linkedin", [])), "github": len(pii.get("github", []))},
-        })
+    return IngestResult(cv_id=sub.cv_id, standardized=standardized, stats=_stats(text, standardized, pii))
+
+
+def _replace_cv(store, cid: str, sub: CVSubmission, record: Dict[str, Any], embeddings: Dict[str, Any], standardized: Dict[str, Any],
+                pii: Dict[str, Any], ext: str, job_id: Optional[str], step: Progress) -> IngestResult:
+    """A newer CV of candidate ``cid``: it becomes their CV (file, text, extracted data, vectors) and the old one is gone. Their notes,
+    applications and form details stay. All or nothing: if any step fails, the old file, vectors and row are put back as they were."""
+    step(75, "A newer CV of a candidate already in the database - replacing the old one")
+    storage = get_storage_service()
+    old = store.candidate_document(cid) or {}
+    old_ext = os.path.splitext(old.get("filename") or "")[1].lower() or (f".{old['file_format']}" if old.get("file_format") else "")
+    try:
+        old_vectors = store.retrieve_embeddings(cid, "cv")         # to put back if a later step fails
+    except Exception as exc:  # noqa: BLE001 - nothing has changed yet: stop rather than replace without a way back
+        raise IngestError(f"The vector store is not answering; the CV was not replaced: {exc}", 503) from exc
+    temps: List[str] = []
+    backup: Optional[str] = None
+    new_path: Optional[str] = None
+    try:
+        # 1. keep a copy of the old original, so a failure below can put it back
+        if old.get("file_path") and old_ext:
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=old_ext) as tmp:
+                    backup = tmp.name
+                temps.append(backup)
+                storage.download_file(cid, "cv", old_ext, backup)
+            except Exception as exc:  # noqa: BLE001 - nothing to restore from; the old file is simply not restorable
+                logger.warning(f"Could not keep a copy of the old CV of {cid} before replacing it: {exc}")
+                backup = None
+        # 2. the new original, under the candidate's id (where previews and downloads look for it)
+        local = _local_copy(sub)
+        if local and local not in (sub.file_path, sub.persisted_path):
+            temps.append(local)
+        if not local:                                              # pasted text: stored as a .txt file, as for a new candidate
+            with tempfile.NamedTemporaryFile("w", delete=False, suffix=".txt", encoding="utf-8") as tmp:
+                tmp.write(record["raw_text"])
+                local = tmp.name
+            temps.append(local)
+            ext = ".txt"
+            record = {**record, "file_format": "txt"}
+        new_path = storage.upload_file(local, cid, "cv", ext)
+        # 3. the vectors, then the row
+        if not store.store_embeddings("cv", cid, embeddings):
+            raise IngestError("The CV's embeddings could not be saved", 500)
+        # the source stays the door the person first came through; uploaded_at becomes this CV's date (lists, freshness, the age box)
+        store.replace_cv(cid, {**{k: v for k, v in record.items() if k != "source"}, "file_path": new_path, "uploaded_at": datetime.utcnow()})
+    except Exception as exc:  # noqa: BLE001
+        _restore(store, storage, cid, old_vectors, backup, old_ext, ext, new_path)
+        if isinstance(exc, IngestError):
+            raise
+        raise IngestError(f"The newer CV could not replace the old one: {exc}", 500) from exc
+    finally:
+        for path in temps:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+    if old_ext and old_ext != ext:                                 # the old original had another type: it is no longer anyone's file
+        try:
+            storage.delete_file(cid, "cv", old_ext)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Could not remove the old CV file of {cid}: {exc}")
+    if sub.cv_id and sub.cv_id != cid:                             # the copy this submission saved under its own id first
+        discard_orphan_original(store, sub.cv_id, sub.persisted_path)
+    logger.info(f"CV from {sub.source} replaced the CV of candidate {cid} (same e-mail and phone)")
+    _link(store, job_id, cid, sub, standardized, pii, step)
+    step(100, "Done")
+    return IngestResult(cv_id=cid, replaced=True, standardized=standardized,
+                        stats=_stats(record["raw_text"], standardized, pii, replaced_cv_of=cid))
+
+
+def _restore(store, storage, cid: str, old_vectors: Optional[Dict[str, Any]], backup: Optional[str], old_ext: str, new_ext: str,
+             new_path: Optional[str]) -> None:
+    """Put the candidate back as it was after a failed replacement (the row itself was not changed: its write is the last step)."""
+    if old_vectors:
+        try:
+            store.store_embeddings("cv", cid, old_vectors)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"Could not put back the vectors of {cid} after a failed CV replacement: {exc}")
+    if new_path and new_ext != old_ext:
+        try:
+            storage.delete_file(cid, "cv", new_ext)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Could not remove the new file of {cid} after a failed CV replacement: {exc}")
+    if backup and new_path and new_ext == old_ext:                 # the new file overwrote the old one: put the old one back
+        try:
+            storage.upload_file(backup, cid, "cv", old_ext)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"Could not put back the old CV file of {cid} after a failed CV replacement: {exc}")
 
 
 def _persist_original(sub: CVSubmission, text: str, ext: str) -> Optional[str]:

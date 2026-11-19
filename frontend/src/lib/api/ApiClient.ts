@@ -50,11 +50,13 @@ import {
   BugSeverity,
   NoticeData,
   NoticeAcknowledgements,
+  NotificationPage,
   LoginBlocks,
   UsersPresenceResponse,
   CVAdvancedSearchParams,
   CVAdvancedSearchResponse,
   TrackerOptions, Requirement, RequirementPage, RequirementDetail, RequirementFilters, RequirementInput, ClosuresPage, TrackerAnalytics, AnalyticsView,
+  RequirementImportResult, SelectionImportResult,
   Selection, SelectionFilters, SelectionInput, SelectionOptions, SelectionPage,
 } from '../types';
 
@@ -168,6 +170,20 @@ export class ApiClient {
   async unlockLogin(body: { kind: 'ip' | 'username_ip' | 'account'; username?: string | null; ip?: string | null }): Promise<{ unlocked: boolean }> {
     const response = await this.client.post('/api/admin/security/lockouts/unlock', body);
     return response.data;
+  }
+  /** The bell: the person's notifications of the last 30 days, newest first (``before``: the next, older page). */
+  async listNotifications(before?: string | null, limit = 20): Promise<NotificationPage> {
+    return (await this.client.get<NotificationPage>('/api/notifications', { params: { limit, before: before || undefined, _t: Date.now() } })).data;
+  }
+  /** What the bell polls: how many are unread, and the newest one's id (a new id is a new notification: the chime). */
+  async getNotificationCount(): Promise<{ unread: number; latest_id: string | null }> {
+    return (await this.client.get('/api/notifications/unread-count', { params: { _t: Date.now() } })).data;
+  }
+  async markNotificationRead(id: string): Promise<{ unread: number }> {
+    return (await this.client.post(`/api/notifications/${encodeURIComponent(id)}/read`)).data;
+  }
+  async markAllNotificationsRead(): Promise<{ unread: number }> {
+    return (await this.client.post('/api/notifications/read-all')).data;
   }
   async getNoticeAcknowledgements(): Promise<NoticeAcknowledgements> {
     const response = await this.client.get('/api/admin/notice/acknowledgements', { params: { _t: Date.now() } });
@@ -577,8 +593,10 @@ export class ApiClient {
     q?: string;
     scope?: 'all' | 'mine' | 'others';
     status?: 'all' | 'active' | 'inactive';
+    /** Only the jobs whose location is in Dubai, or in Abu Dhabi. */
+    location?: 'all' | 'Dubai' | 'Abu Dhabi';
   } = {}): Promise<{ jobs: JobPostingListItem[]; total: number; counts?: { all: number; active: number; inactive: number } }> {
-    const { includeInactive = false, limit, offset, q, scope, status } = params;
+    const { includeInactive = false, limit, offset, q, scope, status, location } = params;
     const response = await this.client.get<any>(
       '/api/careers/admin/jobs',
       {
@@ -595,6 +613,7 @@ export class ApiClient {
           q: q?.trim() || undefined,
           scope: scope && scope !== 'all' ? scope : undefined,
           status: status && status !== 'all' ? status : undefined,
+          location: location && location !== 'all' ? location : undefined,
           _t: Date.now()
         }
       }
@@ -989,6 +1008,40 @@ export class ApiClient {
   async getTrackerAnalytics(params: { view: AnalyticsView; year: number; month?: number; location?: string }): Promise<TrackerAnalytics> {
     const query = { view: params.view, year: params.year, ...(params.view === 'monthly' && params.month ? { month: params.month } : {}), ...(params.location ? { location: params.location } : {}) };
     return (await this.client.get<TrackerAnalytics>('/api/tracker/analytics', { params: query })).data;
+  }
+
+  /** Selections & joining from an Excel sheet: `apply` false only says what would happen; true adds and updates the rows that are fine. */
+  async importSelections(file: File, apply: boolean): Promise<SelectionImportResult> {
+    const form = new FormData();
+    form.append('file', file);
+    return (await this.client.post<SelectionImportResult>('/api/tracker/selections/import', form, {
+      params: { apply }, headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000,
+    })).data;
+  }
+  async getSelectionImportColumns(): Promise<{ columns: string[]; optional: string[]; example_rows: (string | number)[][] }> {
+    return (await this.client.get('/api/tracker/selections/import/columns')).data;
+  }
+  async downloadSelectionImportTemplate(): Promise<Blob> {
+    return (await this.client.get('/api/tracker/selections/import/template', { responseType: 'blob' })).data as Blob;
+  }
+
+  /** The exact column names an import sheet must have, and example rows. */
+  async getRequirementImportColumns(): Promise<{ columns: string[]; optional: string[]; example_rows: (string | number)[][] }> {
+    return (await this.client.get('/api/tracker/requirements/import/columns')).data;
+  }
+
+  /** The import template (.xlsx): the column names and two example rows. */
+  async downloadRequirementImportTemplate(): Promise<Blob> {
+    return (await this.client.get('/api/tracker/requirements/import/template', { responseType: 'blob' })).data as Blob;
+  }
+
+  /** Requirements from an Excel sheet: `apply` false only says what would happen to each row; true imports the rows that are fine. */
+  async importRequirements(file: File, apply: boolean): Promise<RequirementImportResult> {
+    const form = new FormData();
+    form.append('file', file);
+    return (await this.client.post<RequirementImportResult>('/api/tracker/requirements/import', form, {
+      params: { apply }, headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000,
+    })).data;
   }
 
   /** The requirements the filters match, as an Excel file. */

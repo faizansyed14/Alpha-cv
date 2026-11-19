@@ -85,7 +85,7 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
 
   const facts = [
     { icon: MapPin, label: 'Location', value: publicJob.job_location || 'UAE' },
-    { icon: Building2, label: 'Company', value: 'AlphaData' },
+    { icon: Building2, label: 'Company', value: 'Alpha Data Recruitment' },
     ...(experience ? [{ icon: Briefcase, label: 'Experience', value: experience }] : []),
     { icon: Calendar, label: 'Posted', value: formatDate(publicJob.upload_date) },
   ];

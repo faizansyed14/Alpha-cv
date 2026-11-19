@@ -33,8 +33,9 @@ from app.db.database import get_session
 from app.models.requirement import MAX_CVS_SUBMITTED, MAX_DURATION, REQUIREMENT_STATUSES, Requirement, RequirementEvent, RequirementRecruiter
 from app.models.user import User
 from app.security.logsafe import security_event
+from app.services.notifications import notify, role_ids
 from app.services.selections import create_for_closed
-from app.security.rbac_rules import ALL_LOCATIONS_ROLES, LOCATIONS, REQUIREMENT_FIELD_EDITORS, TRACKER_FULL_ROLES
+from app.security.rbac_rules import ALL_LOCATIONS_ROLES, LOCATIONS, RECRUITER_ROLES, REQUIREMENT_FIELD_EDITORS, TRACKER_FULL_ROLES
 from app.store import get_store
 
 logger = logging.getLogger(__name__)
@@ -450,7 +451,7 @@ def _check_recruiter(session: Session, recruiter_id: Optional[str], location: Op
     if not recruiter_id:
         return None
     person = session.get(User, recruiter_id)
-    if person is None or not person.is_active or person.role != "user":
+    if person is None or not person.is_active or person.role not in RECRUITER_ROLES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Choose an active recruiter from the list.")
     if person.location not in LOCATIONS:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="That recruiter has no location yet. Ask an administrator to set it.")
@@ -515,6 +516,39 @@ def _set_assignees(session: Session, req: Requirement, ids: Sequence[str]) -> No
             session.add(link)
     req.recruiter_id = ids[0] if ids else None
     session.flush()
+
+
+def _notify_assigned(session: Session, req: Requirement, actor: User, recruiter_ids: Sequence[str], manager_id: Optional[str] = None) -> None:
+    """Tell the recruiters just assigned to a requirement (and a recruitment manager just put on it) about it, on the bell. In the same
+    transaction as the change; the person who made the change is not told."""
+    link, body = f"/tracker?focus={req.id}", f"{req.client} · assigned by {actor.username}"
+    notify(session, recruiter_ids, "requirement_assigned", f"New requirement assigned to you: {req.position}", body=body, link=link, actor=actor)
+    if manager_id and manager_id not in recruiter_ids:
+        notify(session, [manager_id], "requirement_assigned", f"New requirement for your team: {req.position}", body=body, link=link, actor=actor)
+
+
+def _notify_closed(session: Session, req: Requirement, actor: User) -> None:
+    """A requirement was just closed: tell the people on it (its recruiters, its recruitment manager and sales manager) and the EVPs, on
+    the bell. The person who closed it is not told. The recruiter it is credited to, the managers and the EVPs are taken to it on Closures;
+    the other recruiters no longer see a closed requirement (it is the closer's alone), so theirs is only to let them know."""
+    title, body = f"Requirement closed: {req.position}", f"{req.client} · closed by {actor.username}"
+    seeing = [req.recruiter_id, req.manager_id, req.sales_manager_id, *role_ids(session, "evp")]
+    notify(session, seeing, "requirement_closed", title, body=body, link=f"/tracker/closures?focus={req.id}", actor=actor)
+    others = [i for i in _assignee_ids(session, req.id) if i not in seeing]
+    notify(session, others, "requirement_closed", title, body=body, link=None, actor=actor)
+
+
+_STATUS_LABEL = {"open": "Open", "submitted": "Submitted", "hold": "On hold", "closed": "Closed", "canceled": "Canceled"}
+
+
+def _notify_status(session: Session, req: Requirement, actor: User, old_status: str) -> None:
+    """The status of a requirement changed (other than to closed, which has its own notice): tell its recruitment manager and its sales
+    manager, on the bell, so a recruiter's move to Submitted, On hold, Canceled (or a reopen) does not go unseen. The person who changed it
+    is not told."""
+    old, new = _STATUS_LABEL.get(old_status, old_status), _STATUS_LABEL.get(req.status, req.status)
+    title = f"Requirement reopened: {req.position}" if old_status == "closed" else f"{req.position} is now {new}"
+    body = f"{req.client} · {old} → {new} · by {actor.username}"
+    notify(session, [req.manager_id, req.sales_manager_id], "requirement_status", title, body=body, link=f"/tracker?focus={req.id}", actor=actor)
 
 
 def _jd_name(jd_id: Optional[str]) -> Optional[str]:
@@ -639,10 +673,10 @@ def options(user: User = Depends(require_core_app), session: Session = Depends(g
     managers: List[Dict[str, Any]] = []
     sales_managers: List[Dict[str, Any]] = []
     if not _is_recruiter(user):
-        q = select(User).where(User.role == "user", User.is_active == True)   # noqa: E712
+        q = select(User).where(User.role.in_(RECRUITER_ROLES), User.is_active == True)   # noqa: E712  (recruitment managers recruit too)
         if own is not None:
             q = q.where(User.location == own)
-        recruiters = [{"id": u.id, "username": u.username, "location": u.location}
+        recruiters = [{"id": u.id, "username": u.username, "location": u.location, "role": u.role}
                       for u in session.exec(q.order_by(func.lower(User.username))).all() if u.location in LOCATIONS]
         def people(role: str) -> List[Dict[str, Any]]:
             pq = select(User).where(User.role == role, User.is_active == True)   # noqa: E712
@@ -814,6 +848,8 @@ def create_requirement(body: RequirementIn, user: User = Depends(require_core_ap
     session.flush()
     _set_assignees(session, req, ids)
     _event(session, req, user, "created")
+    if req.status != "closed":
+        _notify_assigned(session, req, user, ids, req.manager_id)
     if req.status == "closed":
         create_for_closed(session, req, ids[:1])                 # a requirement added already closed is on the Selections page too (credited to its lead)
     session.commit()
@@ -844,7 +880,9 @@ def _tag(who: str, value: Any) -> Optional[str]:
 def update_requirement(requirement_id: str, body: RequirementPatch, user: User = Depends(require_core_app), session: Session = Depends(get_session)):
     req = _get_visible(session, user, requirement_id, lock=True)
     sent = set(body.model_fields_set)
-    _check_editable(user, sent)
+    # a recruitment manager assigned as one of its recruiters also writes the recruiter comments, as its recruiters do
+    as_recruiter = user.role in RECRUITER_ROLES and not _is_recruiter(user) and user.id in _assignee_ids(session, req.id)
+    _check_editable(user, sent - ({"recruiter_comments"} if as_recruiter else set()))
     for required in ("requirement_date", "position", "client", "status"):
         if required in sent and getattr(body, required) is None:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{required.replace('_', ' ').capitalize()} cannot be empty.")
@@ -914,8 +952,11 @@ def update_requirement(requirement_id: str, body: RequirementPatch, user: User =
             if old != new:
                 setattr(req, field, new)
                 changes.append((field, old, new))
+    new_manager: Optional[str] = None
     for field, (chosen, new_id, event_name) in team.items():
         old_id = getattr(req, field)
+        if chosen and new_id != old_id and field == "manager_id":
+            new_manager = new_id
         if chosen and new_id != old_id:
             changes.append((event_name, (names.get(old_id) or "Former user") if old_id else None, (names.get(new_id) or "Former user") if new_id else None))
             setattr(req, field, new_id)
@@ -931,9 +972,10 @@ def update_requirement(requirement_id: str, body: RequirementPatch, user: User =
             req.location = common_location
     if old_status != "closed" and new_status == "closed":
         req.closed_at, req.closed_by = datetime.utcnow(), user.username           # it now leaves the requirements lists for Closures
-        if _is_recruiter(user) and new_ids and user.id in new_ids and new_ids[0] != user.id:
+        if new_ids and user.id in new_ids and new_ids[0] != user.id:              # whoever of its recruiters closes it (a recruitment manager too)
             _set_assignees(session, req, [user.id] + [i for i in new_ids if i != user.id])    # the recruiter who closed it is the one credited
         create_for_closed(session, req, _assignee_ids(session, req.id)[:1])       # and it gets its row on the Selections and joining page, with the credited recruiter only
+        _notify_closed(session, req, user)                                        # and the people on it, and the EVPs, hear about it
     elif old_status == "closed" and new_status != "closed":
         req.closed_at, req.closed_by = None, None                                  # reopened
     if submissions:
@@ -965,6 +1007,11 @@ def update_requirement(requirement_id: str, body: RequirementPatch, user: User =
         session.add(req)
         for field, old, new in changes:
             _event(session, req, user, "changed", field, old, new)
+        added = [i for i in new_ids if i not in current_ids] if requested is not None else []
+        if req.status != "closed" and (added or new_manager):
+            _notify_assigned(session, req, user, added, new_manager)
+        if req.status != old_status and req.status != "closed":
+            _notify_status(session, req, user, old_status)                       # its managers hear of a recruiter's status change
         session.commit()
         session.refresh(req)
         security_event("requirement_updated", by=user.username, requirement=req.id, fields=",".join(c[0] for c in changes))

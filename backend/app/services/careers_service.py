@@ -58,7 +58,7 @@ async def process_job_application_async(application_data: Dict[str, Any]) -> Dic
         processing_time = time.time() - start_time
         logger.info(f"Application {application_id} processed in {processing_time:.2f}s")
         return {
-            "success": True, "application_id": application_id, "cv_id": result.cv_id, "merged": result.merged,
+            "success": True, "application_id": application_id, "cv_id": result.cv_id, "merged": result.merged, "replaced": result.replaced,
             "processing_time": processing_time,
             "message": f"Thank you, {application_data.get('applicant_name')}! Your application has been processed successfully.",
             "next_steps": "We'll review your application and contact you if there's a match.",

@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useDocPreview } from '@/components/agentic/cards/actions';
 import { Bone } from '@/components/skeletons';
 import { Button } from '@/components/ui/button';
+import { InfiniteScrollSentinel } from '@/components/ui/infinite-scroll';
 import { EmptyState, PageHeader } from '@/components/ui/page';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatCard } from '@/components/ui/stat-card';
@@ -15,6 +16,7 @@ import { ToastContainer, useToast } from '@/components/ui/toast';
 import type { ClosuresPage as ClosuresData, Requirement, RequirementFilters, TrackerOptions } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { errorText } from './jd';
+import { FOCUS_EVENT } from '@/components/notifications/NotificationBell';
 import { CommentCell, LocationFilter, PersonFilter, StatusPill, MONTH_NAMES, durationParts, formatDay, todayIso, yearChoices, TRACKER_TH_STICKY, TRACKER_THEAD } from './shared';
 
 const PAGE = 50;
@@ -41,6 +43,18 @@ export default function ClosuresPage() {
   const [items, setItems] = useState<Requirement[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Opened from a "requirement closed" notification (/tracker/closures?focus=<id>): scroll to it and highlight it for a few seconds.
+  const [focusId, setFocusId] = useState<string | null>(null);
+  useEffect(() => {
+    const read = (link?: string) => {
+      const id = new URLSearchParams(link ? (link.split('?')[1] ?? '') : window.location.search.slice(1)).get('focus');
+      if (id) setFocusId(id);
+    };
+    read();
+    const onOpen = (e: Event) => { const link = (e as CustomEvent<string>).detail; if (typeof link === 'string' && link.startsWith('/tracker/closures')) read(link); };
+    window.addEventListener(FOCUS_EVENT, onOpen);
+    return () => window.removeEventListener(FOCUS_EVENT, onOpen);
+  }, []);
   const [exporting, setExporting] = useState(false);
   const [reopening, setReopening] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,13 +98,19 @@ export default function ClosuresPage() {
   }, [filters]);
   useEffect(() => { if (user) { setLoading(true); void load(); } }, [load, user]);
 
+  // the next page, asked for when the reader scrolls near the end; a page for filters that changed meanwhile is dropped
+  const [moreFailed, setMoreFailed] = useState(false);
   const loadMore = async () => {
+    if (loadingMore) return;
+    const mineRun = run.current;
     setLoadingMore(true);
+    setMoreFailed(false);
     try {
       const page = await api.listClosures(filters, PAGE, items.length);
+      if (mineRun !== run.current) return;
       setItems((prev) => [...prev, ...page.items.filter((r) => !prev.some((p) => p.id === r.id))]);
-    } catch (e) {
-      showError('Could not load more', errorText(e, 'Please try again.'));
+    } catch {
+      if (mineRun === run.current) setMoreFailed(true);       // the strip at the end offers "Try again"
     } finally {
       setLoadingMore(false);
     }
@@ -126,6 +146,16 @@ export default function ClosuresPage() {
       setExporting(false);
     }
   };
+
+  // the closure a notification opened: scrolled to and highlighted for a few seconds (before the early return below: hooks run every render)
+  useEffect(() => {
+    if (!focusId || loading) return;
+    const row = document.querySelector(`[data-req-id="${CSS.escape(focusId)}"]`);
+    if (!row) return;
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const t = window.setTimeout(() => setFocusId(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [focusId, loading, items]);
 
   const clear = () => { setSearch(''); setQ(''); setLocation(''); setRecruiterId(''); setManagerId(''); setSalesId(''); setYear(''); setMonth(''); };
 
@@ -261,7 +291,7 @@ export default function ClosuresPage() {
               )) : items.map((r, i) => {
                 const who = r.recruiter?.username ?? 'Unassigned';
                 return (
-                  <TR key={r.id} className="align-top">
+                  <TR key={r.id} data-req-id={r.id} className={cn('align-top transition-colors duration-700', focusId === r.id && 'bg-amber-50 ring-2 ring-inset ring-amber-300')}>
                     <TD className="tabular-nums text-slate-400">{i + 1}</TD>
                     <TD className="min-w-[11rem] font-semibold text-slate-900">{r.position}</TD>
                     <TD className="min-w-[7rem]">{r.client}</TD>
@@ -312,8 +342,8 @@ export default function ClosuresPage() {
             </TBody>
           </Table>
           {!firstLoad && <p className="mt-2 text-center text-xs tabular-nums text-slate-500">{items.length.toLocaleString()} of {total.toLocaleString()} closure{total === 1 ? '' : 's'}</p>}
-          {!firstLoad && items.length < total && (
-            <div className="mt-2 flex justify-center"><Button variant="secondary" size="sm" onClick={() => void loadMore()} loading={loadingMore}>Load more</Button></div>
+          {!firstLoad && (
+            <InfiniteScrollSentinel hasMore={items.length < total} loading={loadingMore} error={moreFailed} itemCount={items.length} onLoadMore={loadMore} />
           )}
         </>
       )}
