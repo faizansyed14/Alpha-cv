@@ -33,7 +33,7 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-const NAV_WIDTH = 232;
+const NAV_WIDTH = 192;
 const TRACKER_NAV_WIDTH = 168;
 const NAV_WIDTH_COLLAPSED = 68;
 const NAV_COLLAPSED_KEY = 'alphacv.navCollapsed';
@@ -337,7 +337,7 @@ export default function AppShell({ children }: AppShellProps) {
   return (
     <div className="relative isolate flex min-h-screen bg-[var(--app-bg)]">
       <aside
-        className={cn('sticky top-0 z-20 hidden h-screen shrink-0 transition-[width] duration-200 ease-out', agentic ? '' : 'lg:block')}
+        className={cn('sticky top-0 z-40 hidden h-screen shrink-0 transition-[width] duration-200 ease-out', agentic ? '' : 'lg:block')}
         style={{
           width: trackerMode
             ? (trackerCollapsed ? NAV_WIDTH_COLLAPSED : TRACKER_NAV_WIDTH)
@@ -405,21 +405,29 @@ export default function AppShell({ children }: AppShellProps) {
             <ModeToggle />
           </div>
         )}
+        {/* Invisible top gap so content clears the floating buttons; buttons themselves have no bar/background. */}
+        {!fullBleed && (
+          <div className="hidden h-10 shrink-0 lg:block" aria-hidden />
+        )}
         {!fullBleed && !trackerMode && (
-          <div className="hidden h-12 shrink-0 items-center justify-end gap-2 px-4 lg:flex lg:px-8">
-            <NotificationBell />
-            <ModeToggle />
+          <div className="pointer-events-none fixed right-3 top-1.5 z-30 hidden items-center gap-2 lg:flex lg:right-8">
+            <div className="pointer-events-auto flex items-center gap-2">
+              <NotificationBell />
+              <ModeToggle />
+            </div>
           </div>
         )}
         {!fullBleed && trackerMode && (
-          <div className="absolute right-3 top-2 z-30 hidden lg:block">
-            <NotificationBell />
+          <div className="pointer-events-none fixed right-3 top-1.5 z-30 hidden lg:block">
+            <div className="pointer-events-auto">
+              <NotificationBell />
+            </div>
           </div>
         )}
         {fullBleed ? (
           <div className="min-h-0 flex-1">{children}</div>
         ) : (
-          <div className={cn('mx-auto w-full min-w-0 flex-1 px-3 pb-28 pt-2 sm:px-6 lg:pt-3', trackerMode ? 'max-w-none lg:px-3' : 'max-w-[1600px] lg:px-8')}>{children}</div>
+          <div className={cn('mx-auto w-full min-w-0 flex-1 px-3 pb-28 pt-2 sm:px-6 lg:pt-2', trackerMode ? 'max-w-none lg:px-3' : 'max-w-[1600px] lg:px-8')}>{children}</div>
         )}
       </main>
 

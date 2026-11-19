@@ -5,6 +5,7 @@ Clean startup + routing wired to new Qdrant collections:
   - *_documents, *_structured, *_embeddings
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -87,8 +88,15 @@ async def lifespan(app: FastAPI):
             init_database()
             logger.info("Database ready")
 
+        # live events to the open tabs: this process listens on Redis once and hands them to its streams (app/services/live.py)
+        from app.services.live import run_subscriber
+        live_task = asyncio.create_task(run_subscriber(), name="live-events")
+
         logger.info("Startup complete")
-        yield
+        try:
+            yield
+        finally:
+            live_task.cancel()
         # Graceful shutdown
         logger.info("Shutting down CV Analyzer API...")
         logger.info("Shutdown complete")
@@ -129,7 +137,7 @@ from app.api.middleware.rate_limiter import rate_limit_middleware
 app.middleware("http")(rate_limit_middleware)
 
 # Request metrics for the Monitor page: latency / errors per route template (never raises, never blocks)
-_UNMETERED = ("/api/health", "/api/monitor", "/metrics")
+_UNMETERED = ("/api/health", "/api/monitor", "/metrics", "/api/notifications/stream")    # the live line stays open for minutes
 
 
 @app.middleware("http")
@@ -231,7 +239,7 @@ app.include_router(storage.router, prefix="/api/storage", tags=["Local Storage"]
 async def root():
     return {
         "message": "CV Analyzer API",
-        "version": "2.0.0",
+        "version": "2.0.1",
         "status": "running",
         "description": "AI-powered CV analysis and job matching system",
         "endpoints": {

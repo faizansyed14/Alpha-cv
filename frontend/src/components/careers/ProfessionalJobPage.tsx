@@ -68,11 +68,23 @@ export default function ProfessionalJobPage({ token }: ProfessionalJobPageProps)
           <p className="mt-1 text-xs text-slate-500">
             Please use the complete job posting URL provided by the employer.
           </p>
-          {error && (
-            <Button variant="ghost" size="sm" className="mt-3" onClick={() => clearError?.()}>
-              Dismiss
+          <div className="mt-4 flex flex-col items-center gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                clearError?.();
+                window.location.assign('/careers/openings');
+              }}
+            >
+              Explore other jobs
             </Button>
-          )}
+            {error && (
+              <Button variant="ghost" size="sm" onClick={() => clearError?.()}>
+                Dismiss
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     );

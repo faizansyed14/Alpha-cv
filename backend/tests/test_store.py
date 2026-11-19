@@ -185,6 +185,30 @@ def test_facets_count_candidates(store):
         store.candidate_facet("password")
 
 
+def test_the_expected_salary_filter_keeps_the_range_and_leaves_out_cvs_without_one(store):
+    low = store.save_candidate(cv(1, facts={"full_name": "Low", "expected_salary": 8000}))
+    mid = store.save_candidate(cv(2, facts={"full_name": "Mid", "expected_salary": 15000}))
+    high = store.save_candidate(cv(3, facts={"full_name": "High", "expected_salary": 30000}))
+    none = store.save_candidate(cv(4, facts={"full_name": "None"}))
+    ids = lambda **kw: set(store.search_candidates(**kw)["ids"])
+    assert ids() == {low, mid, high, none}                                                    # no salary filter: everyone
+    assert ids(salary_min=10000) == {mid, high}
+    assert ids(salary_max=15000) == {low, mid}                                                # the bounds are included
+    assert ids(salary_min=10000, salary_max=20000) == {mid}
+    assert ids(salary_min=0) == {low, mid, high}                                              # a filter at all leaves out CVs without one
+    assert store.search_candidates(salary_min=10000, with_total=True)["total"] == 2
+    assert ids(salary_min=10000, keywords=["python"]) == {mid, high}                          # with the other filters
+
+
+def test_a_region_of_nationalities_matches_each_country_under_its_other_names(store):
+    india = store.save_candidate(cv(1, facts={"full_name": "A", "nationality": "India"}))
+    indian = store.save_candidate(cv(2, facts={"full_name": "B", "nationality": "Indian"}))
+    uae = store.save_candidate(cv(3, facts={"full_name": "C", "nationality": "United Arab Emirates"}))
+    store.save_candidate(cv(4, facts={"full_name": "D", "nationality": "Egypt"}))
+    found = set(store.search_candidates(nationalities=["India", "indian", "United Arab Emirates", "emirati", "uae"])["ids"])
+    assert found == {india, indian, uae}
+
+
 def test_keyword_search_matches_whole_words_and_exact_phrases(store):
     java = store.save_candidate(cv(1, raw_text="Experienced in Java and Spring", skills=["Java"], keywords=["Java"]))
     js = store.save_candidate(cv(2, raw_text="Experienced in JavaScript and React", skills=["JavaScript"], keywords=["JavaScript"]))

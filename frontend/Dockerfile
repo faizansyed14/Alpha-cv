@@ -1,5 +1,5 @@
-# Use the official Node.js 20 image as the base image
-FROM node:20-alpine AS base
+# Node.js 24 (Active LTS, security updates until April 2028). Node 20 reached end-of-life in April 2026.
+FROM node:24-alpine AS base
 
 # Install dependencies only when needed
 FROM base AS deps

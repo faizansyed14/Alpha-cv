@@ -71,6 +71,11 @@ class Candidate(SQLModel, table=True):
         Index("ix_candidate_previous_sha256", "previous_sha256", postgresql_using="gin"),
         Index("ix_candidate_location", "location"),
         Index("ix_candidate_nationality", "nationality"),
+        # the salary and experience range filters; only CVs that have the value (migration 0035)
+        Index("ix_candidate_expected_salary", "expected_salary", postgresql_where=text("expected_salary IS NOT NULL"),
+              sqlite_where=text("expected_salary IS NOT NULL")),
+        Index("ix_candidate_years_experience", "years_of_experience", postgresql_where=text("years_of_experience IS NOT NULL"),
+              sqlite_where=text("years_of_experience IS NOT NULL")),
         Index("ix_candidate_languages", "languages", postgresql_using="gin"),
         Index("ix_candidate_keywords", "keywords", postgresql_using="gin"),
     )

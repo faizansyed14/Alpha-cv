@@ -11,6 +11,8 @@ import type { RequirementImportResult, RequirementImportRow, RequirementStatus, 
 import { errorText } from './jd';
 import { StatusPill, formatDay } from './shared';
 
+const PREVIEW_PAGE = 500;
+
 type Kind = 'requirements' | 'selections';
 type Row = RequirementImportRow | SelectionImportRow;
 type Result = RequirementImportResult | SelectionImportResult;
@@ -121,6 +123,9 @@ export default function ImportDialog({ kind = 'requirements', onClose, onImporte
   const [busy, setBusy] = useState<'check' | 'import' | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [show, setShow] = useState<'all' | 'error' | 'notes'>('all');
+  // a 10,000-row sheet is listed 500 rows at a time: the page stays quick (every row is still imported)
+  const [shown, setShown] = useState(PREVIEW_PAGE);
+  useEffect(() => { setShown(PREVIEW_PAGE); }, [show, result]);
   const [template, setTemplate] = useState<Template | null>(null);
   const [downloading, setDownloading] = useState(false);
 
@@ -281,7 +286,7 @@ export default function ImportDialog({ kind = 'requirements', onClose, onImporte
                     <TR><TH>Row</TH>{c.head.map((h) => <TH key={h}>{h}</TH>)}<TH>Result</TH></TR>
                   </THead>
                   <TBody>
-                    {rows.map((r) => {
+                    {rows.slice(0, shown).map((r) => {
                       const missingNames = new Set(r.missing.map((m) => m.name));
                       const person = (name: string | null) => !name ? <span className="text-slate-300">-</span>
                         : missingNames.has(name) ? <span className="text-red-700 underline decoration-dotted underline-offset-2" title="No login with this name">{name}</span>
@@ -304,6 +309,14 @@ export default function ImportDialog({ kind = 'requirements', onClose, onImporte
                   </TBody>
                 </Table>
               </div>
+              {rows.length > shown && (
+                <div className="mt-3 flex items-center justify-center gap-3 text-xs text-slate-500">
+                  <span className="tabular-nums">Showing {shown.toLocaleString()} of {rows.length.toLocaleString()} rows</span>
+                  <Button variant="secondary" size="sm" onClick={() => setShown((n) => n + PREVIEW_PAGE)}>
+                    Show {Math.min(PREVIEW_PAGE, rows.length - shown).toLocaleString()} more
+                  </Button>
+                </div>
+              )}
             </>
           )}
         </div>

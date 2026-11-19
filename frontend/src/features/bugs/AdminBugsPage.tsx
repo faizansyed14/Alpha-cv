@@ -14,6 +14,8 @@ import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import { BUG_AREAS, SEVERITIES, STATUSES, SeverityChip, StatusChip, errText, fullWhen, shortId, whenLabel } from './bugUi';
 import { Bone } from '@/components/skeletons';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
+import { fetchUpTo } from '@/lib/fetchUpTo';
 
 const PAGE = 25;
 const EMPTY_COUNTS: BugCounts = { all: 0, open: 0, in_progress: 0, resolved: 0, closed: 0 };
@@ -66,13 +68,14 @@ export default function AdminBugsPage() {
     [query, status, severity, areaFilter],
   );
 
-  const load = useCallback(async () => {
+  /** The first page, or (a quiet refresh) as many rows as are on screen: `keep`. */
+  const load = useCallback(async (keep = 0) => {
     const mine = ++requestId.current;
     setError(null);
     try {
-      const r = await api.adminListBugReports({ ...filters(), limit: PAGE, offset: 0 });
+      const { first: r, items: rows } = await fetchUpTo(keep, PAGE, 100, (limit, offset) => api.adminListBugReports({ ...filters(), limit, offset }));
       if (mine !== requestId.current) return;
-      setItems(r.items);
+      setItems(rows);
       setTotal(r.total);
       setCounts(r.counts);
     } catch (err) {
@@ -87,6 +90,9 @@ export default function AdminBugsPage() {
     const t = setTimeout(() => { void load(); }, query.trim() ? 300 : 0);
     return () => clearTimeout(t);
   }, [load, query]);
+
+  // fresh without a refresh: when the admin comes back to the tab, and when a new report arrives (a live notification)
+  useAutoRefresh(() => { void load(items.length); }, { kinds: ['bug_reported'] });
 
   const loadMore = async () => {
     if (loadingMore) return;
@@ -126,7 +132,7 @@ export default function AdminBugsPage() {
         ...(draftNote.trim() !== (open.admin_note || '').trim() ? { admin_note: draftNote.trim() } : {}),
       });
       setOpen(null);
-      await load();                          // the tabs' numbers and the list change together
+      await load(items.length);                          // the tabs' numbers and the list change together
     } catch (err) {
       setDialogError(errText(err, 'The change could not be saved.'));
     } finally {
@@ -141,7 +147,7 @@ export default function AdminBugsPage() {
     try {
       await api.adminDeleteBugReport(open.id);
       setOpen(null);
-      await load();
+      await load(items.length);
     } catch (err) {
       setDialogError(errText(err, 'The report could not be deleted.'));
     } finally {

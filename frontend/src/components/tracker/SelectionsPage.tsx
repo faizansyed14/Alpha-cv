@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { errorText } from './jd';
 import ImportDialog from './ImportDialog';
 import { CommentCell, InlineDate, LocationFilter, TRACKER_TH_STICKY, TRACKER_THEAD } from './shared';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 
 const PAGE = 50;
 const ALL = '__all__';
@@ -148,6 +149,8 @@ export default function SelectionsPage() {
     }
   }, [filters]);
   useEffect(() => { if (allowed) { setLoading(true); void load(); } }, [load, allowed]);
+  // fresh without a refresh: when the reader comes back to the tab, and when a requirement is closed (it adds a row here)
+  useAutoRefresh(() => { if (allowed) void load(items.length); }, { kinds: ['requirement_closed'] });
 
   // the next page, asked for when the reader scrolls near the end; a page for filters that changed meanwhile is dropped
   const [moreFailed, setMoreFailed] = useState(false);

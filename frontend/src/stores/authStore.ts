@@ -255,7 +255,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       const keys: string[] = [];
       for (let i = 0; i < sessionStorage.length; i++) {
         const k = sessionStorage.key(i);
-        if (k && k.startsWith('notice_dismissed_')) keys.push(k);
+        if (k && (k.startsWith('notice_dismissed_') || k.startsWith('alphacv.candidates.'))) keys.push(k);   // and the Candidates page's filters
       }
       keys.forEach((k) => sessionStorage.removeItem(k));
     } catch {

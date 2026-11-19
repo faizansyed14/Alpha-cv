@@ -551,6 +551,24 @@ def _notify_status(session: Session, req: Requirement, actor: User, old_status: 
     notify(session, [req.manager_id, req.sales_manager_id], "requirement_status", title, body=body, link=f"/tracker?focus={req.id}", actor=actor)
 
 
+_COMMENT_LABEL = {"sales_comments": "sales comment", "rm_comments": "recruitment manager comment", "recruiter_comments": "recruiter comment"}
+
+
+def _notify_comment(session: Session, req: Requirement, actor: User, written: Sequence[tuple]) -> None:
+    """A comment was written or changed: tell the others on the requirement (its recruiters, its recruitment manager and its sales
+    manager), with the start of what was written. The writer is not told. A closed requirement is seen only by the recruiter it is
+    credited to and the managers, so only they are told, and taken to it on Closures."""
+    field, text = written[-1]
+    label = _COMMENT_LABEL[field] if len(written) == 1 else "comments"
+    snippet = " ".join(str(text).split())
+    if req.status == "closed":
+        people, link = [req.recruiter_id, req.manager_id, req.sales_manager_id], f"/tracker/closures?focus={req.id}"
+    else:
+        people, link = [*_assignee_ids(session, req.id), req.manager_id, req.sales_manager_id], f"/tracker?focus={req.id}"
+    notify(session, people, "requirement_comment", f"New {label} on {req.position}",
+           body=f"{actor.username}: {snippet}", link=link, actor=actor)
+
+
 def _jd_name(jd_id: Optional[str]) -> Optional[str]:
     if not jd_id:
         return None
@@ -1012,6 +1030,9 @@ def update_requirement(requirement_id: str, body: RequirementPatch, user: User =
             _notify_assigned(session, req, user, added, new_manager)
         if req.status != old_status and req.status != "closed":
             _notify_status(session, req, user, old_status)                       # its managers hear of a recruiter's status change
+        written = [(f, new) for f, _old, new in changes if f in _COMMENT_LABEL and new and str(new).strip()]
+        if written:
+            _notify_comment(session, req, user, written)                          # and everyone on it of a new comment
         session.commit()
         session.refresh(req)
         security_event("requirement_updated", by=user.username, requirement=req.id, fields=",".join(c[0] for c in changes))

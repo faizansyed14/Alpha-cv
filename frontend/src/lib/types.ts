@@ -31,6 +31,9 @@ export interface CVAdvancedSearchParams {
   categories?: string[];
   /** Only CVs that have (or have no) HR notes. */
   notes?: 'with' | 'without';
+  /** Expected salary range, AED a month: CVs without one are left out. */
+  salary_min?: number;
+  salary_max?: number;
   limit?: number;
   cursor?: string | null;
 }
@@ -144,7 +147,7 @@ export interface LoginBlocks {
 /** One notification on the bell (the last 30 days only). */
 export interface AppNotification {
   id: string;
-  kind: 'requirement_assigned' | 'requirement_closed' | 'requirement_status' | 'bug_status' | 'bug_reply' | 'bug_reported' | string;
+  kind: 'requirement_assigned' | 'requirement_closed' | 'requirement_status' | 'requirement_comment' | 'bug_status' | 'bug_reply' | 'bug_reported' | string;
   title: string;
   body: string | null;
   /** the page it opens */

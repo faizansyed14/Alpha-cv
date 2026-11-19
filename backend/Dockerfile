@@ -11,7 +11,9 @@ FROM ${PYTHON_IMAGE} AS build
 # A dropped connection during the long install used to end the build with "No matching distribution ... (from versions: none)":
 # retry more often and wait longer before giving up on the package index.
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_RETRIES=10 PIP_DEFAULT_TIMEOUT=100
-RUN python -m venv /opt/venv
+# the installer itself is pinned too: the pip that ships with the image (25.0.1) has known vulnerabilities
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir "pip==26.3"
 ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /src
 # Dependencies first so this layer is cached until requirements.txt changes; the pip cache mount keeps downloaded

@@ -26,6 +26,7 @@ import ImportDialog from './ImportDialog';
 import { FOCUS_EVENT } from '@/components/notifications/NotificationBell';
 import { errorText } from './jd';
 import { CommentCell, RecruitersSelect, STATUS_META, STATUSES, StatusPill, StatusSelect, InlineCount, InlineDate, LocationFilter, PersonFilter, PersonSelect, durationParts, formatDay, todayIso, TRACKER_TH_STICKY, TRACKER_THEAD } from './shared';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 
 const PAGE = 50;
 const ALL = '__all__';
@@ -122,6 +123,9 @@ export default function TrackerPage() {
   }, [filters]);
 
   useEffect(() => { if (user) { setLoading(true); void load(); } }, [load, user]);
+  // fresh without a refresh: when the reader comes back to the tab, and when a requirement of theirs changes (a live notification);
+  // the rows already loaded are kept
+  useAutoRefresh(() => { if (user) void load(items.length); }, { kinds: ['requirement_*'] });
 
   // the next page, asked for when the reader scrolls near the end; a page for filters that changed meanwhile is dropped
   const [moreFailed, setMoreFailed] = useState(false);

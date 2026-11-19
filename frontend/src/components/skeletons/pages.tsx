@@ -1,4 +1,4 @@
-import { ArrowRight, Briefcase, Code2, FileText, Plus, RefreshCw, SlidersHorizontal, Sparkles, Target, Upload, Users } from '@/components/icons';
+import { ArrowRight, Briefcase, FileText, Plus, RefreshCw, SlidersHorizontal, Sparkles, Target, Upload, Users } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { PageHeader, Section } from '@/components/ui/page';
 import { StatCard } from '@/components/ui/stat-card';
@@ -128,8 +128,7 @@ function TalentDatabaseChrome({ view, children }: { view: 'candidates' | 'jobs';
             <Button variant="secondary" size="sm" icon={<RefreshCw />} disabled>Refresh</Button>
             {view === 'candidates' && (
               <>
-                <Button variant="secondary" size="sm" icon={<Code2 />} disabled>Boolean</Button>
-                <Button variant="secondary" size="sm" icon={<SlidersHorizontal />} disabled>Keyword search</Button>
+                <Button variant="secondary" size="sm" icon={<SlidersHorizontal />} disabled>Advanced search</Button>
               </>
             )}
             <Button variant="primary" size="sm" icon={<Upload />} disabled>Upload</Button>

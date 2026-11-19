@@ -9,7 +9,6 @@ import { useWorkspaceNav } from '@/hooks/useWorkspaceNav';
 import { JobPostingListItem } from '@/lib/types';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { IconButton } from '@/components/ui/icon-button';
 import { Menu } from '@/components/ui/menu';
 import { Segmented } from '@/components/ui/segmented';
 import { InfiniteScrollSentinel } from '@/components/ui/infinite-scroll';
@@ -23,6 +22,7 @@ import { Bone } from '@/components/skeletons';
 import JobAiDialog, { type JobAiKind } from './JobAiDialog';
 import HiringImageDialog from './HiringImageDialog';
 import WeeklyReportDialog from './WeeklyReportDialog';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 
 type Owner = 'yours' | 'all' | 'others';
 type Status = 'all' | 'active' | 'inactive';
@@ -73,6 +73,9 @@ export default function CareersPage() {
   const [place, setPlace] = useState<Place>('all');      // where the job is: Dubai, Abu Dhabi or anywhere
   const [query, setQuery] = useState('');
   const [firstLoadDone, setFirstLoadDone] = useState(false);
+  // back on the tab after a while: the jobs on screen fetched again, quietly, as many as were loaded (the reader's place is kept)
+  const refreshJobPostings = useCareersStore((s) => s.refreshJobPostings);
+  useAutoRefresh(() => { if (firstLoadDone) void refreshJobPostings(); });
 
   useEffect(() => {
     setOpeningsUrl(`${window.location.origin}/careers/openings`);
@@ -222,7 +225,15 @@ export default function CareersPage() {
         description="Jobs, applicants, database matches, and AI scoring."
         actions={
           <>
-            <IconButton label="Refresh the list" icon={<RefreshCw />} loading={isRefreshing} onClick={refresh} tip="bottom" />
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={isRefreshing}
+              onClick={refresh}
+              icon={<RefreshCw className={isRefreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />}
+            >
+              {isRefreshing ? 'Refreshing…' : 'Refresh'}
+            </Button>
             <Menu
               trigger={({ ref, ...props }) => (
                 <Button ref={ref} variant="secondary" size="sm" icon={<Globe className="h-4 w-4" />} {...props}>Public page</Button>

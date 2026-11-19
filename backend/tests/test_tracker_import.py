@@ -56,6 +56,19 @@ def test_the_preview_reads_every_row_and_changes_nothing(world):
     assert by_row[6]["requirement_date"] == "2026-04-19" and "before the requirement date" in by_row[6]["notes"][0]
 
 
+def test_a_sheet_of_5000_rows_is_imported_in_seconds_and_more_than_10000_is_refused(world):
+    import time
+    big = [[i, f"Role {i}", f"Client {i % 40}", "rita", "mona", "sam", "2026-10-05", "2026-10-06", 2, "Submitted", None] for i in range(1, 5001)]
+    started = time.monotonic()
+    got = post(world, sheet(big), apply=True).json()
+    took = time.monotonic() - started
+    assert got["summary"]["rows"] == 5000 and got["created"] == 5000 and len(stored(world)) == 5000
+    assert took < 60, f"5,000 rows took {took:.1f}s"
+    print(f"\n5,000-row import took {took:.1f}s")
+    too_big = post(world, sheet([[i, "R", "C", "rita", "mona", "sam", "2026-10-05", None, None, "Open", None] for i in range(10_001)]))
+    assert too_big.status_code == 400 and "more than 10000 rows" in too_big.json()["detail"]
+
+
 def test_importing_creates_the_requirements_as_the_tracker_keeps_them(world):
     got = post(world, sheet(ROWS), apply=True).json()
     assert got["applied"] is True and got["created"] == 5 and len(stored(world)) == 5

@@ -16,7 +16,8 @@ class CVAdvancedSearchRequest(BaseModel):
     experience_min: Optional[float] = Field(None, ge=0, description="Minimum years of experience")
     experience_max: Optional[float] = Field(None, ge=0, description="Maximum years of experience")
     locations: Optional[List[str]] = Field(None, max_length=50, description="Any of these locations (matched by words)")
-    nationalities: Optional[List[str]] = Field(None, max_length=50, description="Any of these nationalities (matched by words)")
+    # a region ("Any Arab National") sends each of its countries with the words a CV may use for it, so it is longer than the others
+    nationalities: Optional[List[str]] = Field(None, max_length=400, description="Any of these nationalities (matched by words)")
     languages: Optional[List[str]] = Field(None, max_length=50, description="Any of these languages (exact match on CV languages)")
     categories: Optional[List[str]] = Field(None, max_length=50, description="Only CVs in any of these categories (folders)")
     notes: Optional[Literal["with", "without"]] = Field(None, description="Only CVs that have (or have no) HR notes")
@@ -35,6 +36,8 @@ class CVAdvancedSearchRequest(BaseModel):
     added_within_days: Optional[int] = Field(None, ge=1, le=3650, description="Freshness: only CVs added to the system in the last N days")
     added_from: Optional[str] = Field(None, max_length=10, description="Freshness: added on or after this date (YYYY-MM-DD)")
     added_to: Optional[str] = Field(None, max_length=10, description="Freshness: added on or before this date (YYYY-MM-DD)")
+    salary_min: Optional[float] = Field(None, ge=0, le=1e9, description="Expected salary at least this (AED a month)")
+    salary_max: Optional[float] = Field(None, ge=0, le=1e9, description="Expected salary at most this (AED a month)")
     limit: int = Field(50, ge=1, le=100, description="Page size (max 100)")
     cursor: Optional[str] = Field(None, description="Opaque pagination cursor from the previous response's next_cursor")
 

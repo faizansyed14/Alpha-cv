@@ -12,6 +12,7 @@ import io
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func
 from sqlmodel import Session, select
@@ -197,6 +198,11 @@ async def import_selections(
     data = await read_limited(file, MAX_IMPORT_BYTES)
     if not data.startswith(b"PK"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This is not an Excel (.xlsx) file that can be read.")
+    return await run_in_threadpool(_import_selections_now, data, apply, user, session)
+
+
+def _import_selections_now(data: bytes, apply: bool, user: User, session: Session) -> Dict[str, Any]:
+    """Reading the sheet and the database work: run off the event loop, so other requests are not held up meanwhile."""
     rows, _unknown = _read_sheet(data, COLUMNS)
     people = People(session)
     taken: set = set()

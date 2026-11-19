@@ -9,7 +9,6 @@ import {
   Search,
   Loader2,
   X,
-  Code2,
   GripVertical,
   Upload,
   Copy,
@@ -34,7 +33,12 @@ import AdvancedSearchModal from '@/components/database/AdvancedSearchModal';
 import ContactActions from '@/components/common/ContactActions';
 import CandidateCard from '@/components/database/CandidateCard';
 import JobCard from '@/components/database/JobCard';
-import FilterSidebar, { type FilterGroupDef } from '@/components/common/FilterSidebar';
+import FilterSidebar, { RangeFilter, type FilterGroupDef } from '@/components/common/FilterSidebar';
+import { SearchingPanel, RefreshingList } from '@/components/database/FilteringState';
+import { EMPTY_ADVANCED_FORM, type AdvancedSearchForm } from '@/components/database/AdvancedSearchModal';
+import { clearCandidateFilters, readCandidateFilters, saveCandidateFilters } from '@/lib/candidateFilters';
+import { rangeLabel, useNumberRange } from '@/lib/useNumberRange';
+import { NATIONALITY_GROUPS, countsByCountry, nationalitySearchTerms } from '@/lib/nationalityGroups';
 import { restoreScroll, saveScroll, SCROLL_KEYS } from '@/lib/scrollRestore';
 
 const FilePreviewModal = dynamic(
@@ -167,7 +171,11 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
 
   const [search, setSearch] = useState('');
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
-  const [searchModalMode, setSearchModalMode] = useState<'keywords' | 'boolean'>('keywords');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  /** The Advanced search form as it was last filled in: it opens again that way. */
+  const [advancedForm, setAdvancedForm] = useState<AdvancedSearchForm>(EMPTY_ADVANCED_FORM);
+  /** True once the filters kept for this tab have been put back (see below). */
+  const [filtersRestored, setFiltersRestored] = useState(false);
   const [activeFolder, setActiveFolder] = useState<string>(CATEGORY_ALL);
   const [categories, setCategories] = useState<Record<string, number>>({});
   // cursor: where the category's next page starts (null on its last page, undefined when the server gave none)
@@ -253,6 +261,13 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   const [addedFrom, setAddedFrom] = useState('');
   const [addedTo, setAddedTo] = useState('');
   const freshnessActive = freshness !== 'any' && (freshness !== 'custom' || !!addedFrom || !!addedTo);
+  /** Expected salary (AED a month) and years of experience, under Freshness: two boxes each, searched a moment after typing stops. */
+  const salaryRange = useNumberRange();
+  const experienceRange = useNumberRange();
+  const salary = salaryRange.range;
+  const experience = experienceRange.range;
+  const salaryActive = salaryRange.active;
+  const experienceActive = experienceRange.active;
   const [locationFacets, setLocationFacets] = useState<{ value: string; count: number; members?: string[] }[]>([]);
   const [nationalityFacets, setNationalityFacets] = useState<{ value: string; count: number }[]>([]);
   const [languageFacets, setLanguageFacets] = useState<{ value: string; count: number }[]>([]);
@@ -447,7 +462,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     const languages = sidebarFilters.language || [];
     const cats = sidebarFilters.category || [];
     // with an advanced search on screen the notes filter is part of that search instead (see below)
-    const active = locations.length > 0 || nationalities.length > 0 || languages.length > 0 || cats.length >= 2 || freshnessActive || (!!notesParam && !advancedQuery);
+    const active = locations.length > 0 || nationalities.length > 0 || languages.length > 0 || cats.length >= 2 || freshnessActive || salaryActive || experienceActive || (!!notesParam && !advancedQuery);
     if (!active) {
       geoQueryRef.current = null;
       setGeoFilterCVs(null);
@@ -459,9 +474,14 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     const query: CVAdvancedSearchParams = {
       // the filter lists countries; search the locations stored behind the ticked ones
       locations: locations.length ? locations.flatMap((c) => locationFacets.find((f) => f.value === c)?.members || [c]) : undefined,
-      nationalities: nationalities.length ? nationalities : undefined,
+      // a ticked country is searched under every name a CV may give it ("India", "Indian")
+      nationalities: nationalities.length ? nationalitySearchTerms(nationalities) : undefined,
       languages: languages.length ? languages : undefined,
       categories: cats.length ? cats : undefined,
+      salary_min: salary.min,
+      salary_max: salary.max,
+      experience_min: experience.min,
+      experience_max: experience.max,
       notes: advancedQuery ? undefined : notesParam,
       added_within_days: freshnessActive && freshness !== 'custom' ? Number(freshness) : undefined,
       added_from: freshness === 'custom' && addedFrom ? addedFrom : undefined,
@@ -489,7 +509,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarFilters.location, sidebarFilters.nationality, sidebarFilters.language, sidebarFilters.category, notesParam, advancedQuery === null, freshness, addedFrom, addedTo]);
+  }, [sidebarFilters.location, sidebarFilters.nationality, sidebarFilters.language, sidebarFilters.category, notesParam, advancedQuery === null, freshness, addedFrom, addedTo, salary, experience]);
 
   // With an advanced search on screen, a change of the notes filter runs that same search again with the filter added (the server applies it).
   const skipFirstNotes = useRef(true);
@@ -658,6 +678,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   const rerunBooleanFromTop = () => {
     const text = booleanEdit.trim();
     if (!text) return;
+    setAdvancedForm((f) => ({ ...f, mode: 'boolean', booleanInput: text }));
     const base = advancedQuery || {};
     void runAdvancedSearch({
       ...base,
@@ -675,6 +696,7 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     setAdvancedSearching(false);
     setAdvancedQuery(null);
     setBooleanEdit('');
+    setAdvancedForm(EMPTY_ADVANCED_FORM);
   };
 
   // Typing in the search box on the job descriptions tab asks the server, which searches every JD (not only the ones loaded so far).
@@ -760,8 +782,9 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   // Instant restore before paint — list should appear already at the saved spot.
   useLayoutEffect(() => {
     if (view !== 'candidates' || paginatedCVs.length === 0) return;
+    if (!filtersRestored || geoFilterLoading || advancedSearching || serverSearching) return;   // the list the reader left is not back yet
     return restoreScroll(SCROLL_KEYS.candidates) || undefined;
-  }, [view, paginatedCVs.length]);
+  }, [view, paginatedCVs.length, filtersRestored, geoFilterLoading, advancedSearching, serverSearching]);
 
   const toggleCV = (id: string) => {
     if (selectedCVs.includes(id)) deselectCV(id);
@@ -900,13 +923,15 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       { key: 'category', label: 'Category', options: categoryOptions },
       {
         key: 'location',
-        label: 'Country',
+        label: 'Current country',
         options: locationFacets.map((f) => ({ value: f.value, label: f.value, count: f.count })),
       },
       {
         key: 'nationality',
         label: 'Nationality',
-        options: nationalityFacets.map((f) => ({ value: f.value, label: f.value, count: f.count })),
+        // "India" and "Indian" are one country here; the regions ("Any GCC National") tick all their countries at once
+        options: [...countsByCountry(nationalityFacets)].sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, label: value, count })),
+        sets: NATIONALITY_GROUPS.map((g) => ({ key: g.key, label: g.label, values: g.countries })),
       },
       {
         key: 'language',
@@ -926,11 +951,91 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
     });
   };
 
+  const setSidebarFilterMany = (groupKey: string, values: string[], on: boolean) => {
+    setSidebarFilters((prev) => {
+      const current = prev[groupKey] || [];
+      const next = on ? [...current, ...values.filter((v) => !current.includes(v))] : current.filter((v) => !values.includes(v));
+      return { ...prev, [groupKey]: next };
+    });
+  };
+
+  /** The filter chips over the list: a region ticked whole is one chip ("Nationality: Any GCC National"), not one per country. */
+  const filterChips = useMemo(() => {
+    const chips: { key: string; label: string; remove: () => void }[] = [];
+    for (const [group, vals] of Object.entries(sidebarFilters)) {
+      const name = group === 'location' ? 'Current country' : group[0].toUpperCase() + group.slice(1);
+      let rest = vals || [];
+      if (group === 'nationality') {
+        for (const g of NATIONALITY_GROUPS) {
+          if (g.countries.every((c) => rest.includes(c))) {
+            chips.push({ key: `${group}:${g.key}`, label: `${name}: ${g.label}`, remove: () => setSidebarFilterMany(group, g.countries, false) });
+            rest = rest.filter((v) => !g.countries.includes(v));
+          }
+        }
+      }
+      for (const v of rest) chips.push({ key: `${group}:${v}`, label: `${name}: ${v}`, remove: () => toggleSidebarFilter(group, v) });
+    }
+    return chips;
+  }, [sidebarFilters]);
+
+  /**
+   * The filters, the typed search and the advanced search are kept for this browser tab, so opening a candidate and coming back finds
+   * the list as it was. They are put back once, on arrival: what is loading is marked as loading at once, so the scroll position is
+   * not restored onto the unfiltered list in between.
+   */
+  useEffect(() => {
+    if (view !== 'candidates' || filtersRestored) return;
+    const saved = readCandidateFilters();
+    setFiltersRestored(true);
+    if (!saved) return;
+    setSidebarFilters({ category: [], location: [], nationality: [], language: [], ...saved.sidebar });
+    setFreshness(saved.freshness);
+    setAddedFrom(saved.addedFrom);
+    setAddedTo(saved.addedTo);
+    salaryRange.restore(saved.salary);
+    experienceRange.restore(saved.experience);
+    setNotesFilter(saved.notes);
+    setAdvancedForm(saved.advancedForm);
+    if (saved.search) {
+      setSearch(saved.search);
+      setServerSearching(true);
+    }
+    if (saved.advancedQuery) {
+      void runAdvancedSearch(saved.advancedQuery);
+    } else {
+      setGeoFilterLoading(true);              // the filter effect runs next, and turns this off when the filters ask for nothing
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  useEffect(() => {
+    if (!filtersRestored || view !== 'candidates') return;
+    saveCandidateFilters({
+      sidebar: sidebarFilters, freshness, addedFrom, addedTo, salary: salaryRange.text, experience: experienceRange.text,
+      notes: notesFilter, search, advancedQuery, advancedForm,
+    });
+  }, [filtersRestored, view, sidebarFilters, freshness, addedFrom, addedTo, salaryRange.text, experienceRange.text, notesFilter, search, advancedQuery, advancedForm]);
+
+  /** Applied outside the panel's checkboxes, counted in its "Clear all" (which clears them too). */
+  const extraFiltersActive = (freshnessActive ? 1 : 0) + (salaryActive ? 1 : 0) + (experienceActive ? 1 : 0)
+    + (notesFilter !== 'all' ? 1 : 0) + (search.trim() ? 1 : 0) + (advancedQuery ? 1 : 0);
+
+  /** The panel's "Clear all": everything back to the whole list: the left filters, the typed search, the notes filter and the advanced search. */
+  const clearEverything = () => {
+    clearSidebarFilters();
+    setNotesFilter('all');
+    setSearch('');
+    clearAdvancedSearch();
+    clearCandidateFilters();
+  };
+
   const clearSidebarFilters = () => {
     setSidebarFilters({ category: [], location: [], nationality: [], language: [] });
     setFreshness('any');
     setAddedFrom('');
     setAddedTo('');
+    salaryRange.clear();
+    experienceRange.clear();
   };
 
   const cvCount = totalCVs ?? cvs.length;
@@ -941,6 +1046,11 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
       paginatedCVs.length === 0 &&
       !advancedResults);
   const jdLoading = loadingStates.jds.isLoading && jds.length === 0;
+  /** A filter or a typed search being run on the server (not the next page of one: that has its own strip at the end of the list). */
+  const typedSearch = view === 'candidates' && serverSearching && !!search.trim();
+  const filtering = geoFilterLoading || typedSearch;
+  const filteringTitle = typedSearch ? `Searching for “${search.trim()}”` : `Filtering ${cvCount > 0 ? `${cvCount.toLocaleString()} CVs` : 'your CVs'}`;
+  const filteringHint = typedSearch ? 'Looking through every CV in the database.' : 'Applying your filters across the whole database.';
 
   const renderCandidateCard = (cv: CVListItem, index: number) => {
     const d = getCVDisplay(cv);
@@ -972,32 +1082,16 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
   const renderCandidatesBody = () => {
     if (advancedSearching) {
       return (
-        <div className="space-y-3" aria-busy="true" aria-live="polite">
-          <div className="overflow-hidden rounded-2xl border border-surface-border bg-paper shadow-card">
-            <div className="px-5 pb-3 pt-4">
-              <p className="text-md font-semibold tracking-[-0.01em] text-slate-900">
-                Searching {cvCount > 0 ? `${cvCount.toLocaleString()} CVs` : 'your CVs'}
-              </p>
-              <p className="mt-0.5 text-xs text-slate-500">Checking every CV against your search. Matches appear here as soon as they are found.</p>
-            </div>
-            <div className="search-track"><div className="search-bar" /></div>
-          </div>
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="search-sheen relative flex gap-3.5 overflow-hidden rounded-2xl border border-surface-border bg-paper p-5" style={{ animationDelay: `${i * 140}ms` }}>
-              <div className="h-12 w-12 shrink-0 rounded-full bg-slate-100" />
-              <div className="min-w-0 flex-1 space-y-2.5">
-                <div className="h-3.5 w-1/3 rounded bg-slate-100" />
-                <div className="h-3 w-1/2 rounded bg-slate-100" />
-                <div className="flex gap-2 pt-1">
-                  <div className="h-5 w-16 rounded-full bg-slate-100" />
-                  <div className="h-5 w-20 rounded-full bg-slate-100" />
-                  <div className="h-5 w-14 rounded-full bg-slate-100" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <SearchingPanel
+          title={`Searching ${cvCount > 0 ? `${cvCount.toLocaleString()} CVs` : 'your CVs'}`}
+          hint="Checking every CV against your search. Matches appear here as soon as they are found."
+        />
       );
+    }
+
+    // a filter or a typed search on its way, and nothing on screen yet: the same panel, saying what is being done
+    if (filtering && paginatedCVs.length === 0) {
+      return <SearchingPanel title={filteringTitle} hint={filteringHint} />;
     }
 
     if (cvLoading) {
@@ -1013,13 +1107,13 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
               ? 'No candidates match this search'
               : search
               ? 'No candidates match your search'
-              : (sidebarFilters.category?.length || sidebarFilters.location?.length || sidebarFilters.nationality?.length || sidebarFilters.language?.length || freshnessActive)
+              : (sidebarFilters.category?.length || sidebarFilters.location?.length || sidebarFilters.nationality?.length || sidebarFilters.language?.length || freshnessActive || salaryActive || experienceActive)
                 ? 'No candidates match these filters'
                 : 'No CVs yet'
           }
           hint={
             !search &&
-            !(sidebarFilters.category?.length || sidebarFilters.location?.length || sidebarFilters.nationality?.length || sidebarFilters.language?.length || freshnessActive)
+            !(sidebarFilters.category?.length || sidebarFilters.location?.length || sidebarFilters.nationality?.length || sidebarFilters.language?.length || freshnessActive || salaryActive || experienceActive)
               ? 'Upload CVs from the Upload tab to build your database.'
               : undefined
           }
@@ -1052,9 +1146,11 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
           </div>
         </div>
 
-        <div className="space-y-2.5">
-          {paginatedCVs.map((cv, i) => renderCandidateCard(cv, i))}
-        </div>
+        <RefreshingList busy={filtering} label={typedSearch ? 'Searching…' : 'Applying filters…'}>
+          <div className="space-y-2.5">
+            {paginatedCVs.map((cv, i) => renderCandidateCard(cv, i))}
+          </div>
+        </RefreshingList>
 
         <InfiniteScrollSentinel
           hasMore={hasMoreRows}
@@ -1085,18 +1181,26 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
         }
         actions={
           <>
-            <Button variant="secondary" size="sm" onClick={() => { loadCVs(); loadJDs(); }} icon={<RefreshCw />}>
-              Refresh
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={isRefreshing}
+              onClick={async () => {
+                setIsRefreshing(true);
+                try {
+                  await Promise.all([loadCVs(), loadJDs()]);
+                } finally {
+                  setIsRefreshing(false);
+                }
+              }}
+              icon={<RefreshCw className={isRefreshing ? 'animate-spin' : undefined} />}
+            >
+              {isRefreshing ? 'Refreshing…' : 'Refresh'}
             </Button>
             {view === 'candidates' && (
-              <>
-                <Button variant="secondary" size="sm" icon={<Code2 />} onClick={() => { setSearchModalMode('boolean'); setShowAdvancedSearch(true); }}>
-                  Boolean
-                </Button>
-                <Button variant="secondary" size="sm" icon={<SlidersHorizontal />} onClick={() => { setSearchModalMode('keywords'); setShowAdvancedSearch(true); }}>
-                  Keyword search
-                </Button>
-              </>
+              <Button variant="secondary" size="sm" icon={<SlidersHorizontal />} onClick={() => setShowAdvancedSearch(true)}>
+                Advanced search
+              </Button>
             )}
             <Button variant="primary" size="sm" icon={<Upload />} onClick={() => go('upload')}>
               Upload
@@ -1176,18 +1280,36 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
           <span className="text-sm font-medium text-slate-700 tabular-nums">
             {pagedTotalLabel} candidates
           </span>
-          {Object.entries(sidebarFilters).flatMap(([group, vals]) =>
-            (vals || []).map((v) => (
-              <button
-                key={`${group}:${v}`}
-                type="button"
-                onClick={() => toggleSidebarFilter(group, v)}
-                className="inline-flex items-center gap-1 rounded-md bg-navy-50 px-2 py-0.5 text-2xs font-medium text-navy-700 hover:bg-navy-100"
-                title="Remove filter"
-              >
-                {group[0].toUpperCase() + group.slice(1)}: {v} <X className="h-3 w-3" />
-              </button>
-            )),
+          {filterChips.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={c.remove}
+              className="inline-flex items-center gap-1 rounded-md bg-navy-50 px-2 py-0.5 text-2xs font-medium text-navy-700 hover:bg-navy-100"
+              title="Remove filter"
+            >
+              {c.label} <X className="h-3 w-3" />
+            </button>
+          ))}
+          {salaryActive && (
+            <button
+              type="button"
+              onClick={salaryRange.clear}
+              className="inline-flex items-center gap-1 rounded-md bg-navy-50 px-2 py-0.5 text-2xs font-medium text-navy-700 hover:bg-navy-100"
+              title="Remove filter"
+            >
+              Salary: AED {rangeLabel(salary)} <X className="h-3 w-3" />
+            </button>
+          )}
+          {experienceActive && (
+            <button
+              type="button"
+              onClick={experienceRange.clear}
+              className="inline-flex items-center gap-1 rounded-md bg-navy-50 px-2 py-0.5 text-2xs font-medium text-navy-700 hover:bg-navy-100"
+              title="Remove filter"
+            >
+              Experience: {rangeLabel(experience)} yrs <X className="h-3 w-3" />
+            </button>
           )}
           {freshnessActive && (
             <button
@@ -1204,9 +1326,10 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
 
       {showAdvancedSearch && (
         <AdvancedSearchModal
-          initialMode={searchModalMode}
+          initialForm={advancedForm}
           onClose={() => setShowAdvancedSearch(false)}
-          onSubmit={(query) => {
+          onSubmit={(query, form) => {
+            setAdvancedForm(form);
             void runAdvancedSearch(query);
           }}
         />
@@ -1317,8 +1440,9 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
             groups={filterGroups}
             selected={sidebarFilters}
             onToggle={toggleSidebarFilter}
-            onClearAll={clearSidebarFilters}
-            extraActive={freshnessActive ? 1 : 0}
+            onSetMany={setSidebarFilterMany}
+            onClearAll={clearEverything}
+            extraActive={extraFiltersActive}
             top={
               <div>
                 <label htmlFor="cv-freshness" className="mb-1.5 block text-sm font-semibold text-slate-800">Freshness (date added)</label>
@@ -1331,6 +1455,14 @@ export default function DatabasePage({ lockedView }: DatabasePageProps = {}) {
                     <input type="date" value={addedTo} min={addedFrom || undefined} onChange={(e) => setAddedTo(e.target.value)} className="field-input w-full" aria-label="Added to" />
                   </div>
                 )}
+                <div className="mt-4">
+                  <RangeFilter id="cv-salary" label="Expected salary" unit="AED / month" value={salaryRange.text} onChange={salaryRange.setText}
+                    note={salaryActive ? 'Only CVs with an expected salary are shown.' : null} />
+                </div>
+                <div className="mt-4">
+                  <RangeFilter id="cv-experience" label="Work experience" unit="years" decimals value={experienceRange.text} onChange={experienceRange.setText}
+                    note={experienceActive ? 'Only CVs with their years of experience are shown.' : null} />
+                </div>
               </div>
             }
             className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto"

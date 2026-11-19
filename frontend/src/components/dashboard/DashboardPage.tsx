@@ -28,6 +28,7 @@ import { Bone } from '@/components/skeletons';
 import { rise, stagger } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { MonthBars, SplitBar, Sparkline, TrendChart } from './charts';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 
 function dayPart(hour: number) {
   if (hour < 5) return 'Good evening';
@@ -177,6 +178,14 @@ export default function DashboardPage() {
     loadCVs();
     loadJDs();
   }, [loadCVs, loadJDs]);
+
+  // fresh without a refresh: the counts and the hiring overview again when the reader comes back to the tab, and when a requirement or
+  // a bug report of theirs changes (a live notification). Quiet: the numbers on screen stay until the new ones arrive.
+  useAutoRefresh(() => {
+    loadCVs();
+    loadJDs();
+    setReloadKey((k) => k + 1);
+  }, { kinds: ['requirement_*', 'bug_*'] });
 
   useEffect(() => {
     let cancelled = false;

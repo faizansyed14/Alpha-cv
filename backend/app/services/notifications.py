@@ -5,6 +5,8 @@
 * Only the last NOTIFICATION_RETENTION_DAYS (30) are ever returned or counted, and ``purge`` (run every hour by the background worker)
   deletes older ones and anything beyond NOTIFICATION_MAX_PER_USER per person. So the table holds at most 30 days, whatever happens.
 * Nobody is notified about what they did themselves.
+* Once the caller's transaction COMMITS, the people notified are told at once in their open tabs (``app.services.live``): the bell
+  updates without waiting for its next check. A rolled-back change tells nobody.
 """
 from __future__ import annotations
 
@@ -12,7 +14,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
-from sqlalchemy import delete, func, update
+from sqlalchemy import delete, event, func, text, update
+from sqlalchemy.orm import Session as OrmSession
 from sqlmodel import Session, select
 
 from app.config.settings import settings
@@ -47,10 +50,33 @@ def notify(session: Session, user_ids: Iterable[Optional[str]], kind: str, title
             for uid in active:
                 session.add(Notification(user_id=uid, kind=kind, title=_cut(title, 200) or kind, body=_cut(body, 500),
                                          link=_cut(link, 300), actor=actor_name))
+        session.info.setdefault(_LIVE_KEY, set()).update((uid, kind) for uid in active)     # told live once the change is committed
         return len(active)
     except Exception:  # noqa: BLE001 - a notification is never worth failing the change it reports
         logger.exception("Could not add a %s notification", kind)
         return 0
+
+
+_LIVE_KEY = "live_notify"
+
+
+@event.listens_for(OrmSession, "after_commit")
+def _tell_live_after_commit(session: OrmSession) -> None:
+    """The notifications of this transaction are saved: tell the people in their open tabs now (never before the commit, so a tab never
+    looks for a notification that is not there yet)."""
+    events = session.info.pop(_LIVE_KEY, None)
+    if events:
+        from app.services import live
+
+        try:
+            live.publish(events)
+        except Exception:  # noqa: BLE001 - the notification is saved; the bell finds it at its next check
+            logger.warning("Could not send the live notification event", exc_info=True)
+
+
+@event.listens_for(OrmSession, "after_rollback")
+def _forget_live_after_rollback(session: OrmSession) -> None:
+    session.info.pop(_LIVE_KEY, None)
 
 
 def role_ids(session: Session, role: str) -> List[str]:
@@ -121,6 +147,10 @@ def purge(engine: Any) -> int:
     """Delete notifications older than the retention period and, per person, any beyond the newest NOTIFICATION_MAX_PER_USER.
     Returns how many were deleted."""
     with Session(engine) as s:
+        # one clean-up at a time, however many workers or servers run it: the others skip this round (PostgreSQL; the lock ends with the
+        # transaction)
+        if engine.dialect.name == "postgresql" and not s.execute(text("SELECT pg_try_advisory_xact_lock(hashtext('notification_purge'))")).scalar():
+            return 0
         removed = s.execute(delete(Notification).where(Notification.created_at < _cutoff())).rowcount or 0
         cap = max(1, settings.NOTIFICATION_MAX_PER_USER)
         over = s.exec(select(Notification.user_id).group_by(Notification.user_id).having(func.count() > cap)).all()

@@ -11,7 +11,7 @@ from typing import Optional
 from sqlalchemy import Column, DateTime, ForeignKey, Index, String
 from sqlmodel import Field, SQLModel
 
-NOTIFICATION_KINDS = ("requirement_assigned", "requirement_closed", "requirement_status", "bug_status", "bug_reply", "bug_reported")
+NOTIFICATION_KINDS = ("requirement_assigned", "requirement_closed", "requirement_status", "requirement_comment", "bug_status", "bug_reply", "bug_reported")
 
 
 class Notification(SQLModel, table=True):

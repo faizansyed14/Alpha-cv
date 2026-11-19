@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, ClipboardList, Clock, FileText, Hourglass, MapPin, Trophy, TrendingDown, TrendingUp, Users } from '@/components/icons';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
@@ -17,6 +17,7 @@ import { Initials } from './ClosuresPage';
 import { errorText } from './jd';
 import { ClosedBars, RecruiterDonut, StatusDonut, type StatusCounts } from './AnalyticsCharts';
 import { LocationFilter, MONTH_NAMES, TRACKER_THEAD, formatDay, yearChoices } from './shared';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 
 /** How a number moved against the month or year before: "+3 vs February 2026". */
 function Delta({ now, before, label }: { now: number; before: number; label: string }) {
@@ -79,17 +80,24 @@ export default function AnalyticsPage() {
   const [data, setData] = useState<TrackerAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // fresh without a refresh: when the reader comes back to the tab, and when a requirement is assigned, closed or changes status
+  // (a live notification); the charts on screen stay until the new numbers arrive
+  const [tick, setTick] = useState(0);
+  useAutoRefresh(() => setTick((t) => t + 1), { kinds: ['requirement_*'] });
 
+  const shownFor = useRef('');                       // the choices the numbers on screen are for
   useEffect(() => {
     if (!user) return;
     let alive = true;
+    const choice = JSON.stringify([view, year, month, location]);
+    const quiet = shownFor.current === choice;        // only a refresh of what is on screen: a failure leaves it as it is
     setLoading(true);
     api.getTrackerAnalytics({ view, year, month, location: canPickLocation ? location : undefined })
-      .then((d) => { if (alive) { setData(d); setError(null); } })
-      .catch((e) => { if (alive) setError(errorText(e, 'The analytics could not be loaded.')); })
+      .then((d) => { if (alive) { setData(d); setError(null); shownFor.current = choice; } })
+      .catch((e) => { if (alive && !quiet) setError(errorText(e, 'The analytics could not be loaded.')); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [user, view, year, month, location, canPickLocation]);
+  }, [user, view, year, month, location, canPickLocation, tick]);
 
   if (!user) return null;
   const pending = loading && !data;                 // the page, its titles and table headers are real; only the numbers and charts are placeholders
