@@ -719,6 +719,7 @@ export interface SelectionImportRow {
   client: string | null;
   date: string | null;
   status: SelectionStatus | null;
+  joined_date: string | null;
   comments: string | null;
   sheet: { recruiters: string[]; manager: string | null; sales_manager: string | null };
 }
@@ -726,7 +727,9 @@ export interface SelectionImportRow {
 export interface SelectionImportResult {
   applied: boolean;
   created: number;
-  summary: { rows: number; new: number; fill: number; exists: number; error: number; with_notes: number };
+  /** rows already there that had no date of joined: the sheet's date is filled in (nothing else of them changes) */
+  summary: { rows: number; new: number; fill: number; exists: number; error: number; with_notes: number; joined_fill: number };
+  joined_filled: number;
   missing_logins: { name: string; role: string; rows: number }[];
   rows: SelectionImportRow[];
 }
@@ -761,6 +764,8 @@ export interface Selection {
   position: string;
   client: string;
   status: SelectionStatus;
+  /** The day the candidate joined (YYYY-MM-DD) */
+  joined_date: string | null;
   recruiters: Array<{ id: string; username: string }>;
   /** Shown as the Account Manager */
   sales_manager: { id: string; username: string } | null;
@@ -778,7 +783,7 @@ export interface SelectionOptions {
   statuses: SelectionStatus[];
   locations: string[];
   all_locations: boolean;
-  editable: Record<'selection_date' | 'candidate_name' | 'status' | 'comments', boolean>;
+  editable: Record<'selection_date' | 'joined_date' | 'candidate_name' | 'status' | 'comments', boolean>;
   recruiters: Array<{ id: string; username: string; location: string }>;
 }
 
@@ -791,7 +796,7 @@ export interface SelectionFilters {
   date_to?: string;
 }
 
-export interface SelectionInput { selection_date?: string; candidate_name?: string | null; status?: SelectionStatus; comments?: string | null }
+export interface SelectionInput { selection_date?: string; joined_date?: string | null; candidate_name?: string | null; status?: SelectionStatus; comments?: string | null }
 
 export interface RequirementFilters {
   status?: RequirementStatus | '';

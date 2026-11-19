@@ -4,7 +4,8 @@ Like the requirements import: the first row must hold exactly the template's col
 to each row, and nothing changes until the import is confirmed.
 
 Each sheet row is matched to what is already on the page, so importing (again) never makes duplicates:
-1. a row with the same candidate, position and client is already there: the sheet row is SKIPPED (the existing row is not changed);
+1. a row with the same candidate, position and client is already there: the sheet row is SKIPPED (the existing row is not changed, except
+   that a date of joining the row does not have yet is filled in from the sheet);
 2. else an EMPTY row of the same position and client (the row a closed requirement makes by itself): the candidate is filled into it;
 3. else a new row.
 """
@@ -30,19 +31,20 @@ from app.security.uploads import read_limited
 router = APIRouter(prefix="/api/tracker/selections", tags=["tracker"])
 
 COLUMNS = {
-    "Date": "date",
+    "Date of Selection": "date",
     "Candidate Name": "candidate",
     "Position": "position",
     "Client": "client",
     "Status": "status",
+    "Date of Joined": "joined",
     "Recruiter": "recruiter",
     "Account Manager": "sales",
     "Recruitment Manager": "manager",
     "Comment": "comment",
 }
 EXAMPLE_ROWS = [
-    [1, "2026-11-03", "Saleh Alzaabi", "Multimedia", "PGC", "Offer Pending", "Abdul Baqi", "Des", "Asif", "Offer pending"],
-    [2, "2026-10-30", "Omer Ali", "Power BI Developer", "NMDC", "Joined", "Advith", "Des", "Asif", "Joined on 2nd Nov"],
+    [1, "2026-11-03", "Saleh Alzaabi", "Multimedia", "PGC", "Offer Pending", "", "Abdul Baqi", "Des", "Asif", "Offer pending"],
+    [2, "2026-10-30", "Omer Ali", "Power BI Developer", "NMDC", "Joined", "2026-11-02", "Advith", "Des", "Asif", "Joined on 2nd Nov"],
 ]
 STATUSES = {"offerpending": "offer_pending", "pending": "offer_pending", "offerreleased": "offer_released", "released": "offer_released",
             "joined": "joined", "backedout": "backed_out", "backout": "backed_out", "backedoff": "backed_out"}
@@ -70,6 +72,13 @@ def _plan(raw: Dict[str, Any], session: Session, user: User, people: People, tak
         notes.append("no date: today's date is used")
     elif not 2000 <= day.year <= 2100:
         problems.append(f"the date {day:%d %b %Y} does not look right")
+    joined, bad = _date(raw.get("joined"))
+    if bad:
+        problems.append("date of joined: " + bad)
+    elif joined is not None and not 2000 <= joined.year <= 2100:
+        problems.append(f"the date of joined {joined:%d %b %Y} does not look right")
+    elif joined is not None and day is not None and joined < day:
+        notes.append("the date of joined is before the date of selection")
     status_value = STATUSES.get(_key(raw.get("status")) or "offerpending")
     if not status_value:
         problems.append(f"status '{_text(raw.get('status'))}' is not one of Offer Pending, Offer Released, Joined, Backed Out")
@@ -110,16 +119,19 @@ def _plan(raw: Dict[str, Any], session: Session, user: User, people: People, tak
                 problems.append("the people on this row work in different locations")
             location = next(iter(places), None)
 
-    outcome, target = ("error", None)
+    outcome, target, joined_into = ("error", None, None)
     if not problems:
         key = "row:" + "|".join(v.lower() for v in (candidate, position, client))
-        same = session.exec(select(Selection.id).where(
+        same = session.exec(select(Selection.id, Selection.joined_date).where(
             func.lower(Selection.candidate_name) == candidate.lower(), func.lower(Selection.position) == position.lower(),
             func.lower(Selection.client) == client.lower(), *( [Selection.location == own] if own else [] ))).first()
         if same is not None or key in taken:
             outcome = "exists"                                   # already on the page, or earlier in this sheet: skipped, never changed
             if same is None:
                 notes.append("the same candidate, position and client appear earlier in this sheet")
+            elif joined is not None and same.joined_date is None:
+                joined_into = same.id                            # the one thing an import adds to a row that is already there
+                notes.append("the row is already there: only its date of joined is filled in")
         else:
             taken.add(key)
             empty = session.exec(select(Selection).where(
@@ -132,12 +144,22 @@ def _plan(raw: Dict[str, Any], session: Session, user: User, people: People, tak
     return {
         "row": raw["row"], "outcome": outcome, "problems": problems, "notes": [] if problems else notes, "missing": missing,
         "candidate_name": candidate, "position": position, "client": client, "date": day.isoformat() if day else None,
-        "status": status_value, "comments": comment,
+        "status": status_value, "joined_date": joined.isoformat() if joined else None, "comments": comment,
         "sheet": {"recruiters": sheet_recruiters, "manager": sheet_people["manager"], "sales_manager": sheet_people["sales"]},
-        "_apply": {"target": target.id if target is not None else None, "day": day, "location": location,
+        "_apply": {"target": target.id if target is not None else None, "day": day, "joined": joined, "joined_into": joined_into, "location": location,
                    "recruiters": [r.id for r in recruiters], "manager": found_people["manager"].id if found_people["manager"] else None,
                    "sales": found_people["sales"].id if found_people["sales"] else None},
     }
+
+
+def _fill_joined(session: Session, user: User, plan: Dict[str, Any]) -> bool:
+    """A row that is already there gets the sheet's date of joining, if it still has none (nothing else of it is changed)."""
+    row = session.get(Selection, plan["_apply"]["joined_into"])
+    if row is None or row.joined_date is not None:
+        return False
+    row.joined_date, row.updated_by, row.updated_at = plan["_apply"]["joined"], user.username, datetime.utcnow()
+    session.add(row)
+    return True
 
 
 def _write(session: Session, user: User, plan: Dict[str, Any]) -> None:
@@ -146,6 +168,7 @@ def _write(session: Session, user: User, plan: Dict[str, Any]) -> None:
     if row is None:
         row = Selection(location=a["location"], selection_date=a["day"], position=plan["position"], client=plan["client"], status=plan["status"])
     row.candidate_name, row.selection_date, row.status, row.comments = plan["candidate_name"], a["day"], plan["status"], plan["comments"]
+    row.joined_date = a["joined"]
     row.manager_id, row.sales_manager_id = a["manager"], a["sales"]
     row.location = row.location or a["location"]
     row.updated_by, row.updated_at = user.username, datetime.utcnow()
@@ -177,7 +200,7 @@ def import_template(user: User = Depends(require_selection_role)):
         cell.fill = PatternFill("solid", fgColor="16204B")
     for row in EXAMPLE_ROWS:
         ws.append(row)
-    for col, width in zip("ABCDEFGHIJ", (6, 12, 30, 24, 16, 16, 16, 18, 20, 40)):
+    for col, width in zip("ABCDEFGHIJK", (6, 16, 30, 24, 16, 16, 16, 16, 18, 20, 40)):
         ws.column_dimensions[col].width = width
     ws.freeze_panes = "A2"
     out = io.BytesIO()
@@ -208,22 +231,26 @@ def _import_selections_now(data: bytes, apply: bool, user: User, session: Sessio
     taken: set = set()
     plans = [_plan(r, session, user, people, taken) for r in rows]
     done = {"new": 0, "fill": 0}
+    joined_filled = 0
     if apply:
         for plan in plans:
             if plan["outcome"] in done:
                 _write(session, user, plan)
                 done[plan["outcome"]] += 1
+            elif plan["outcome"] == "exists" and plan["_apply"]["joined_into"]:
+                joined_filled += _fill_joined(session, user, plan)
         session.commit()
-        security_event("selections_imported", by=user.username, rows=len(plans), **done)
+        security_event("selections_imported", by=user.username, rows=len(plans), joined_filled=joined_filled, **done)
     count = lambda o: sum(1 for p in plans if p["outcome"] == o)
     needed: Dict[Tuple[str, str], int] = {}
     for p in plans:
         for m in {(m["name"], m["role"]) for m in p["missing"]}:
             needed[m] = needed.get(m, 0) + 1
     return {
-        "applied": apply, "created": done["new"] + done["fill"],
+        "applied": apply, "created": done["new"] + done["fill"], "joined_filled": joined_filled,
         "summary": {"rows": len(plans), "new": count("new"), "fill": count("fill"), "exists": count("exists"),
-                    "error": count("error"), "with_notes": sum(1 for p in plans if p["notes"])},
+                    "error": count("error"), "with_notes": sum(1 for p in plans if p["notes"]),
+                    "joined_fill": sum(1 for p in plans if p["outcome"] == "exists" and p["_apply"]["joined_into"])},
         "missing_logins": [{"name": n, "role": r, "rows": c} for (n, r), c in sorted(needed.items(), key=lambda x: (-x[1], x[0]))],
         "rows": [{k: v for k, v in p.items() if k != "_apply"} for p in plans],
     }

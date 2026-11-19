@@ -67,7 +67,8 @@ def requirement_row(v: Dict[str, Any]) -> Dict[str, Any]:
 def selection_row(v: Dict[str, Any]) -> Dict[str, Any]:
     recruiters = ", ".join(text(r.get("username"), 40) for r in (v.get("recruiters") or []) if isinstance(r, dict))
     return {"id": v.get("id"), "date": text(v.get("date"), 10), "candidate": text(v.get("candidate_name"), 80) or None, "position": text(v.get("position"), 90),
-            "client": text(v.get("client"), 60), "status": v.get("status"), "recruiters": recruiters or None, "account_manager": _person(v.get("sales_manager")),
+            "client": text(v.get("client"), 60), "status": v.get("status"), "joined": text(v.get("joined_date"), 10) or None,
+            "recruiters": recruiters or None, "account_manager": _person(v.get("sales_manager")),
             "recruitment_manager": _person(v.get("manager")), "comments": text(v.get("comments"), 160) or None}
 
 

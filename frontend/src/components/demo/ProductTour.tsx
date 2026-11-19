@@ -58,6 +58,7 @@ const tourJobHandlers: JobHandlers = {
   onMatch: noop,
   onAi: noop,
   onToggleStatus: noop,
+  onImage: noop,
   onDelete: noop,
   onCopy: noop,
 };
@@ -1106,7 +1107,7 @@ export default function ProductTour({ embedded = false }: { embedded?: boolean }
                         <section className="rounded-3xl border border-paper bg-paper/90 p-6 shadow-card">
                           <h2 className="mb-4 text-center text-2xs font-semibold uppercase tracking-[0.12em] text-slate-400">Key responsibilities</h2>
                           <ul className="space-y-2">
-                            {DEMO_JOB.key_responsibilities.split('\n').filter(Boolean).map((line) => (
+                            {(DEMO_JOB.key_responsibilities ?? '').split('\n').filter(Boolean).map((line) => (
                               <li key={line} className="flex gap-3 text-base leading-7 text-slate-700">
                                 <span className="mt-[0.7rem] h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" />
                                 {line}

@@ -979,6 +979,13 @@ export class ApiClient {
     return (await this.client.patch<Selection>(`/api/tracker/selections/${encodeURIComponent(id)}`, body)).data;
   }
 
+  /** The selections the filters match, as an Excel file in the import sheet's columns. */
+  async exportSelections(filters: SelectionFilters = {}): Promise<Blob> {
+    const params: Record<string, string> = {};
+    for (const [k, v] of Object.entries(filters)) if (v) params[k] = v as string;
+    return (await this.client.get('/api/tracker/selections/export', { params, responseType: 'blob', timeout: 120000 })).data as Blob;
+  }
+
   async deleteSelection(id: string): Promise<void> {
     await this.client.delete(`/api/tracker/selections/${encodeURIComponent(id)}`);
   }

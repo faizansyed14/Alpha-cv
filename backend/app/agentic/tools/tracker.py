@@ -213,7 +213,7 @@ def list_selections(ctx: ToolContext, args: Dict[str, Any]) -> ToolOutput:
     page = pages.selections_page(ctx.gateway, limit=number(args.get("limit"), pages.PAGE, 1, 25), **keep)
     ctx.see(*(r["id"] for r in page.rows))
     card = {"type": "selections", "rows": page.rows, "total": page.total, "stats": page.stats, "page": pages.descriptor("list_selections", keep, page)} if ctx.show_lists else None
-    model = pages.for_model(page.rows, ["id", "date", "candidate", "position", "client", "status", "recruiters"], page.total, bool(card))
+    model = pages.for_model(page.rows, ["id", "date", "candidate", "position", "client", "status", "joined", "recruiters"], page.total, bool(card))
     if page.stats:
         model["counts"] = page.stats
     return ToolOutput(model, card, f"Selections found: {page.total}; top: {_names(page.rows, 'position')}"[:700])

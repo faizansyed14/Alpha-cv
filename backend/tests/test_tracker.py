@@ -1256,3 +1256,35 @@ def test_an_assigned_recruitment_manager_writes_recruiter_comments_and_is_credit
 def test_selections_offer_recruitment_managers_as_recruiters(world):
     world.as_(world.sales)
     assert "mona" in {r["username"] for r in world.client.get("/api/tracker/selections/options").json()["recruiters"]}
+
+
+def test_the_date_of_joined_is_set_cleared_and_exported_in_the_import_sheets_columns(world):
+    import io as _io
+    from openpyxl import load_workbook
+    r = make(world, recruiter_ids=[world.rita.id], manager_id=world.mgr.id, position="Cloud Engineer", client="Globex")
+    close(world, r, by=world.rita)
+    world.as_(world.sales)
+    row = selections(world)["items"][0]
+    assert row["joined_date"] is None and world.client.get("/api/tracker/selections/options").json()["editable"]["joined_date"] is True
+    got = world.client.patch(f"/api/tracker/selections/{row['id']}", json={"candidate_name": "=cmd|' /C calc'!A0", "status": "joined", "joined_date": "2026-12-01"})
+    assert got.status_code == 200 and got.json()["joined_date"] == "2026-12-01"
+    assert world.client.patch(f"/api/tracker/selections/{row['id']}", json={"joined_date": "1900-01-01"}).status_code == 422
+    assert world.client.patch(f"/api/tracker/selections/{row['id']}", json={"joined_date": None}).json()["joined_date"] is None   # cleared
+    world.client.patch(f"/api/tracker/selections/{row['id']}", json={"joined_date": "2026-12-01"})
+    resp = world.client.get("/api/tracker/selections/export", params={"status": "joined"})
+    assert resp.status_code == 200 and resp.headers["content-type"].startswith("application/vnd.openxmlformats")
+    ws = load_workbook(_io.BytesIO(resp.content)).active
+    header = [c.value for c in ws[1]]
+    assert header == ["S.No", "Date of Selection", "Candidate Name", "Position", "Client", "Status", "Date of Joined", "Recruiter",
+                      "Account Manager", "Recruitment Manager", "Comment"]
+    values = [c.value for c in ws[2]]
+    assert values[2] == "=cmd|' /C calc'!A0" and ws.cell(row=2, column=3).data_type == "s"        # text, never run as a formula
+    assert values[4:7] == ["Globex", "Joined", __import__("datetime").datetime(2026, 12, 1)] and values[7:10] == ["rita", "sam", "mona"]
+    assert ws.max_row == 2
+    assert world.client.get("/api/tracker/selections/export", params={"status": "backed_out"}).status_code == 200
+    # the exported file imports again as it is: every row is already there, nothing is doubled
+    back = world.client.post("/api/tracker/selections/import", params={"apply": "true"},
+                             files={"file": ("selections.xlsx", resp.content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert back.status_code == 200 and back.json()["summary"]["exists"] == 1 and back.json()["created"] == 0, back.json()
+    world.as_(world.rita)
+    assert world.client.get("/api/tracker/selections/export").status_code == 403

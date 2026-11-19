@@ -8,7 +8,7 @@ from sqlmodel import select
 from app.models.selection import Selection, SelectionRecruiter
 from tests.test_tracker import close, make, world  # noqa: F401  (world is the fixture)
 
-HEADER = ["Date", "Candidate Name", "Position", "Client", "Status", "Recruiter", "Account Manager", "Recruitment Manager", "Comment"]
+HEADER = ["Date of Selection", "Candidate Name", "Position", "Client", "Status", "Date of Joined", "Recruiter", "Account Manager", "Recruitment Manager", "Comment"]
 
 
 def sheet(rows, header=HEADER):
@@ -31,9 +31,9 @@ def rows(world):
     return world.session.exec(select(Selection)).all()
 
 
-ROW_A = ["2026-11-03", "Saleh Alzaabi", "Multimedia", "PGC", "Offer Pending", "rita", "sam", "mona", "Offer pending"]
-ROW_B = ["2026-11-03", "Hamdan AlBahar", "Multimedia", "PGC", "Joined", "rita", "sam", "mona", "Joined on 10th Nov"]
-ROW_C = ["2026-10-30", "Omer Ali", "Power BI Developer", "NMDC", "Backed Out", "rob", "sam", "mona", "Declined the offer"]
+ROW_A = ["2026-11-03", "Saleh Alzaabi", "Multimedia", "PGC", "Offer Pending", "", "rita", "sam", "mona", "Offer pending"]
+ROW_B = ["2026-11-03", "Hamdan AlBahar", "Multimedia", "PGC", "Joined", "", "rita", "sam", "mona", "Joined on 10th Nov"]
+ROW_C = ["2026-10-30", "Omer Ali", "Power BI Developer", "NMDC", "Backed Out", "", "rob", "sam", "mona", "Declined the offer"]
 
 
 def test_the_preview_changes_nothing_and_new_rows_are_added_on_import(world):
@@ -65,7 +65,7 @@ def test_a_duplicate_is_skipped_and_the_existing_row_is_never_changed(world):
     post(world, sheet([ROW_A, ROW_C]), apply=True)
     again = post(world, sheet([ROW_A, ROW_C]), apply=True).json()
     assert again["summary"]["exists"] == 2 and again["created"] == 0 and len(rows(world)) == 2
-    joined = ROW_A[:4] + ["Joined"] + ROW_A[5:8] + ["Joined on 20th Nov"]                 # the same candidate with another status
+    joined = ROW_A[:4] + ["Joined", ""] + ROW_A[6:9] + ["Joined on 20th Nov"]                 # the same candidate with another status
     skipped = post(world, sheet([joined]), apply=True).json()
     assert skipped["summary"]["exists"] == 1 and skipped["created"] == 0
     a = next(s for s in rows(world) if s.candidate_name == "Saleh Alzaabi")
@@ -77,10 +77,10 @@ def test_a_duplicate_is_skipped_and_the_existing_row_is_never_changed(world):
 
 def test_problem_rows_are_left_out_with_the_reason(world):
     bad = [
-        ["2026-11-03", "X", "Multimedia", "PGC", "Offer Pending", "Patricia", "sam", "mona", ""],   # no such login
-        ["2026-11-03", "Y", "Multimedia", "PGC", "Hired", "rita", "sam", "mona", ""],              # unknown status
-        ["2026-11-03", "", "Multimedia", "PGC", "Joined", "rita", "sam", "mona", ""],              # no candidate
-        ["2026-11-03", "Z", "Multimedia", "PGC", "Joined", "ravi", "sam", "mona", ""],             # Abu Dhabi recruiter, Dubai importer
+        ["2026-11-03", "X", "Multimedia", "PGC", "Offer Pending", "", "Patricia", "sam", "mona", ""],   # no such login
+        ["2026-11-03", "Y", "Multimedia", "PGC", "Hired", "", "rita", "sam", "mona", ""],              # unknown status
+        ["2026-11-03", "", "Multimedia", "PGC", "Joined", "", "rita", "sam", "mona", ""],              # no candidate
+        ["2026-11-03", "Z", "Multimedia", "PGC", "Joined", "", "ravi", "sam", "mona", ""],             # Abu Dhabi recruiter, Dubai importer
     ]
     got = post(world, sheet([ROW_A] + bad), apply=True).json()
     assert got["created"] == 1 and got["summary"]["error"] == 4
@@ -91,7 +91,7 @@ def test_problem_rows_are_left_out_with_the_reason(world):
 
 
 def test_the_columns_must_match_and_recruiters_cannot_import(world):
-    wrong = post(world, sheet([ROW_A], header=HEADER[:8] + ["Comments"]))
+    wrong = post(world, sheet([ROW_A], header=HEADER[:9] + ["Comments"]))
     assert wrong.status_code == 400 and "missing: Comment" in wrong.json()["detail"] and "not expected: Comments" in wrong.json()["detail"]
     cols = world.client.get("/api/tracker/selections/import/columns").json()
     assert cols["columns"] == HEADER
@@ -99,3 +99,30 @@ def test_the_columns_must_match_and_recruiters_cannot_import(world):
     world.as_(world.rita)
     assert post(world, sheet([ROW_A])).status_code == 403
     assert rows(world) == []
+
+
+def test_the_date_of_joined_is_read_checked_and_filled_into_a_row_that_has_none(world):
+    joined = ROW_B[:5] + ["2026-11-10"] + ROW_B[6:]
+    bad = ROW_C[:5] + ["soon"] + ROW_C[6:]
+    early = ["2026-11-03", "Early Bird", "Multimedia", "PGC", "Joined", "2026-10-01", "rita", "sam", "mona", ""]
+    got = post(world, sheet([ROW_A, joined, bad, early]), apply=True).json()
+    by_row = {r["row"]: r for r in got["rows"]}
+    assert by_row[3]["joined_date"] == "2026-11-10" and by_row[2]["joined_date"] is None
+    assert "date of joined: 'soon' is not a date" in " ".join(by_row[4]["problems"])
+    assert "before the date of selection" in " ".join(by_row[5]["notes"]) and by_row[5]["outcome"] == "new"
+    saved = {r.candidate_name: r for r in rows(world)}
+    assert str(saved["Hamdan AlBahar"].joined_date) == "2026-11-10" and saved["Saleh Alzaabi"].joined_date is None
+    # the same sheet again, now with a date of joined for Saleh: only that date is added, nothing else of the row changes
+    later = ROW_A[:4] + ["Joined", "14/1/2026"] + ROW_A[6:9] + ["changed comment"]
+    again = post(world, sheet([later, joined]), apply=True).json()
+    assert again["created"] == 0 and again["summary"]["exists"] == 2 and again["summary"]["joined_fill"] == 1 and again["joined_filled"] == 1
+    a = next(s for s in rows(world) if s.candidate_name == "Saleh Alzaabi")
+    world.session.refresh(a)
+    assert str(a.joined_date) == "2026-01-14" and a.status == "offer_pending" and a.comments == "Offer pending"
+    # a date that is already there is never overwritten
+    other = ROW_B[:5] + ["2026-12-01"] + ROW_B[6:]
+    third = post(world, sheet([other]), apply=True).json()
+    assert third["summary"]["joined_fill"] == 0 and third["joined_filled"] == 0
+    h = next(s for s in rows(world) if s.candidate_name == "Hamdan AlBahar")
+    world.session.refresh(h)
+    assert str(h.joined_date) == "2026-11-10"

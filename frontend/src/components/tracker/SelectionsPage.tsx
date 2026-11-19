@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, CheckCircle2, Hourglass, Pencil, Search, Send, Trash2, Trophy, Upload, X, XCircle } from '@/components/icons';
+import { AlertCircle, CheckCircle2, Download, Hourglass, Pencil, Search, Send, Trash2, Trophy, Upload, X, XCircle } from '@/components/icons';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { Bone } from '@/components/skeletons';
@@ -16,11 +16,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { StatCard } from '@/components/ui/stat-card';
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/table';
 import { ToastContainer, useToast } from '@/components/ui/toast';
-import type { Selection, SelectionFilters, SelectionInput, SelectionOptions, SelectionStats, SelectionStatus } from '@/lib/types';
+import type { Selection, SelectionFilters, SelectionImportResult, SelectionInput, SelectionOptions, SelectionStats, SelectionStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { errorText } from './jd';
 import ImportDialog from './ImportDialog';
-import { CommentCell, InlineDate, LocationFilter, TRACKER_TH_STICKY, TRACKER_THEAD } from './shared';
+import { CommentCell, InlineDate, LocationFilter, todayIso, TRACKER_TH_STICKY, TRACKER_THEAD } from './shared';
 import { useAutoRefresh } from '@/lib/useAutoRefresh';
 
 const PAGE = 50;
@@ -106,6 +106,7 @@ export default function SelectionsPage() {
   const allowed = !!user && user.role !== 'user';
   const { toasts, showSuccess, showError, removeToast } = useToast();
   const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const [options, setOptions] = useState<SelectionOptions | null>(null);
   const [items, setItems] = useState<Selection[]>([]);
@@ -200,6 +201,25 @@ export default function SelectionsPage() {
     }
   };
 
+  /** The rows the filters match, as an Excel file in the import sheet's columns (so it can be imported again). */
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      const url = URL.createObjectURL(await api.exportSelections(filters));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `selections-${todayIso()}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      showError('Export failed', errorText(e, 'The Excel file could not be created.'));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const clear = () => { setSearch(''); setQ(''); setStatus(''); setLocation(''); setRecruiterId(''); setDateFrom(''); setDateTo(''); };
 
   if (!allowed) return null;
@@ -223,15 +243,22 @@ export default function SelectionsPage() {
         className="!mb-3"
         title="Selections & joining"
         description="A row is added here when a requirement is closed. Record who was selected and whether they joined."
-        actions={<Button variant="secondary" size="sm" icon={<Upload />} onClick={() => setImporting(true)}>Import from Excel</Button>}
+        actions={(
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" size="sm" icon={<Download />} onClick={() => void exportExcel()} loading={exporting} disabled={loading || total === 0}>Export to Excel</Button>
+            <Button variant="secondary" size="sm" icon={<Upload />} onClick={() => setImporting(true)}>Import from Excel</Button>
+          </div>
+        )}
       />
       {importing && (
         <ImportDialog
           kind="selections"
           onClose={() => setImporting(false)}
-          onImported={(created) => {
+          onImported={(created, result) => {
             setImporting(false);
-            showSuccess('Imported', `${created} selection${created === 1 ? '' : 's'} added.`);
+            const joined = (result as SelectionImportResult | undefined)?.joined_filled ?? 0;
+            showSuccess('Imported', `${created} selection${created === 1 ? '' : 's'} added.`
+              + (joined ? ` Date of joined filled in on ${joined} row${joined === 1 ? '' : 's'} already there.` : ''));
             void load();
           }}
         />
@@ -306,15 +333,16 @@ export default function SelectionsPage() {
         />
       ) : (
         <>
-          <Table className="min-w-[1380px] [&_td]:px-2.5 [&_th]:whitespace-normal [&_th]:px-2.5">
+          <Table className="min-w-[1520px] [&_td]:px-2.5 [&_th]:whitespace-normal [&_th]:px-2.5">
             <THead className={TRACKER_THEAD}>
               <TR className="hover:bg-transparent">
                 <TH className="w-12">S.No</TH>
-                <TH>Date</TH>
+                <TH className="min-w-[8.6rem]">Date of selection</TH>
                 <TH>Candidate</TH>
                 <TH>Position</TH>
                 <TH>Client</TH>
                 <TH>Status</TH>
+                <TH className="min-w-[8.6rem]">Date of joined</TH>
                 <TH>Recruiter</TH>
                 <TH>Account manager</TH>
                 <TH>Recruitment manager</TH>
@@ -334,6 +362,7 @@ export default function SelectionsPage() {
                   <TD><Bone className="h-4 w-20" /></TD>
                   <TD><Bone className="h-4 w-20" /></TD>
                   <TD><Bone className="h-4 w-20" /></TD>
+                  <TD><Bone className="h-4 w-20" /></TD>
                   <TD><Bone className="h-3 w-24" /></TD>
                   <TD className="sticky right-0 z-[1] bg-paper"><div className="flex justify-end"><Bone className="h-8 w-8 rounded-lg" /></div></TD>
                 </TR>
@@ -341,7 +370,7 @@ export default function SelectionsPage() {
                 <TR key={r.id} className="align-top">
                   <TD className="tabular-nums text-slate-400">{i + 1}</TD>
                   <TD className="whitespace-nowrap tabular-nums">
-                    <InlineDate label="Date" value={r.date} editable={!!ed?.selection_date} onSave={async (v) => (v ? patch(r.id, { selection_date: v }) : false)} />
+                    <InlineDate label="Date of selection" value={r.date} editable={!!ed?.selection_date} onSave={async (v) => (v ? patch(r.id, { selection_date: v }) : false)} />
                   </TD>
                   <TD className="min-w-[10rem]">
                     <InlineText label="Candidate" placeholder="Add candidate" value={r.candidate_name} editable={!!ed?.candidate_name} onSave={(v) => patch(r.id, { candidate_name: v })} />
@@ -349,6 +378,9 @@ export default function SelectionsPage() {
                   <TD className="min-w-[8rem] font-semibold text-slate-900">{r.position}</TD>
                   <TD className="min-w-[6rem]">{r.client}</TD>
                   <TD>{ed?.status ? <StatusPick value={r.status} onChange={(s) => void patch(r.id, { status: s })} /> : <StatusPill status={r.status} />}</TD>
+                  <TD className="whitespace-nowrap tabular-nums">
+                    <InlineDate label="Date of joined" value={r.joined_date} min={r.date} editable={!!ed?.joined_date} onSave={(v) => patch(r.id, { joined_date: v })} />
+                  </TD>
                   <TD className="min-w-[7rem] text-slate-700">{r.recruiters.length ? r.recruiters.map((x) => x.username).join(', ') : <span className="text-slate-300">-</span>}</TD>
                   <TD className="min-w-[7rem] text-slate-700">{r.sales_manager?.username ?? <span className="text-slate-300">-</span>}</TD>
                   <TD className="min-w-[7rem] text-slate-700">{r.manager?.username ?? <span className="text-slate-300">-</span>}</TD>

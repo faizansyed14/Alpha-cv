@@ -61,4 +61,5 @@ SELECTION_FIELD_EDITORS = {
     "status": SELECTION_ROLES,
     "comments": SELECTION_ROLES,
     "selection_date": SELECTION_ROLES,
+    "joined_date": SELECTION_ROLES,
 }

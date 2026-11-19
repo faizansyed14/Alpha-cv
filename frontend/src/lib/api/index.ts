@@ -63,6 +63,7 @@ export const api = {
   listSelections: (filters: SelectionFilters, limit = 50, offset = 0) => apiClient.listSelections(filters, limit, offset),
   updateSelection: (id: string, body: SelectionInput) => apiClient.updateSelection(id, body),
   deleteSelection: (id: string) => apiClient.deleteSelection(id),
+  exportSelections: (filters: SelectionFilters) => apiClient.exportSelections(filters),
   markRequirementPosted: (id: string, jobId: string) => apiClient.markRequirementPosted(id, jobId),
   exportRequirements: (filters: RequirementFilters) => apiClient.exportRequirements(filters),
   importRequirements: (file: File, apply: boolean) => apiClient.importRequirements(file, apply),

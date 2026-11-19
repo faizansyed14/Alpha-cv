@@ -41,6 +41,7 @@ class Selection(SQLModel, table=True):
     position: str = Field(sa_column=Column(String(160), nullable=False))
     client: str = Field(sa_column=Column(String(160), nullable=False))
     status: str = Field(default="offer_pending", sa_column=Column(String(16), nullable=False, server_default="offer_pending"))
+    joined_date: Optional[date] = Field(default=None, sa_column=Column(Date, nullable=True))          # the day the candidate joined
     sales_manager_id: Optional[str] = Field(default=None, sa_column=Column(String(36), nullable=True))      # the account manager
     manager_id: Optional[str] = Field(default=None, sa_column=Column(String(36), nullable=True))            # the recruitment manager
     comments: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))

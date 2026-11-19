@@ -4,7 +4,8 @@ A row is made by itself when a requirement is closed (app/services/selections.py
 (offer pending, offer released, joined, backed out) and a comment.
 * Recruiters do not see this page (every endpoint refuses them). A recruitment manager or sales manager sees the selections of their own
   location; the EVP and the admin both locations (and may look at one).
-* Each of those roles writes the candidate, the status, the comments and the date, and may delete a row.
+* Each of those roles writes the candidate, the status, the comments, the date of selection and the date of joining, and may delete a row.
+* The list can be downloaded as an Excel file in the same columns as the import sheet, so an export can be imported again.
 """
 from datetime import date, datetime
 from typing import Any, Dict, List, Literal, Optional
@@ -15,7 +16,7 @@ from sqlalchemy import func, or_
 from sqlmodel import Session, select
 
 from app.api.deps import require_core_app
-from app.api.routers.tracker import MAX_COMMENT, _clean, _like, _names, _scope_location
+from app.api.routers.tracker import MAX_COMMENT, MAX_EXPORT_ROWS, _clean, _like, _names, _scope_location, _xlsx
 from app.db.database import get_session
 from app.models.selection import SELECTION_STATUSES, Selection, SelectionRecruiter
 from app.models.user import User
@@ -35,7 +36,7 @@ def require_selection_role(user: User = Depends(require_core_app)) -> User:
     return user
 
 
-FIELD_NAME = {"selection_date": "the date", "candidate_name": "the candidate", "status": "the status", "comments": "the comments"}
+FIELD_NAME = {"selection_date": "the date of selection", "joined_date": "the date of joining", "candidate_name": "the candidate", "status": "the status", "comments": "the comments"}
 
 
 class Filters(BaseModel):
@@ -59,8 +60,9 @@ def _filters(
 
 
 class SelectionPatch(BaseModel):
-    """Only the fields that are sent are changed; sending null clears the candidate or the comments."""
+    """Only the fields that are sent are changed; sending null clears the candidate, the date of joining or the comments."""
     selection_date: Optional[date] = None
+    joined_date: Optional[date] = None
     candidate_name: Optional[str] = None
     status: Optional[SelectionStatus] = None
     comments: Optional[str] = None
@@ -75,7 +77,7 @@ class SelectionPatch(BaseModel):
     def _comments(cls, v):
         return _clean(v, MAX_COMMENT) if isinstance(v, str) or v is None else v
 
-    @field_validator("selection_date")
+    @field_validator("selection_date", "joined_date")
     @classmethod
     def _sane_date(cls, v):
         if v is not None and not (2000 <= v.year <= 2100):
@@ -130,6 +132,7 @@ def _views(session: Session, rows: List[Selection]) -> List[Dict[str, Any]]:
         "position": r.position,
         "client": r.client,
         "status": r.status,
+        "joined_date": r.joined_date.isoformat() if r.joined_date else None,
         "recruiters": [_person(names, rid) for rid in links[r.id]],
         "sales_manager": _person(names, r.sales_manager_id),             # shown as the Account Manager
         "manager": _person(names, r.manager_id),                         # the recruitment manager
@@ -186,6 +189,30 @@ def list_selections(
     return {"items": _views(session, list(rows)), "total": int(total), "stats": stats}
 
 
+STATUS_LABEL = {"offer_pending": "Offer Pending", "offer_released": "Offer Released", "joined": "Joined", "backed_out": "Backed Out"}
+# the import sheet's columns, in its order, so an exported file can be imported again
+EXPORT_COLUMNS = [("S.No", 7), ("Date of Selection", 16), ("Candidate Name", 28), ("Position", 34), ("Client", 22), ("Status", 15),
+                  ("Date of Joined", 16), ("Recruiter", 20), ("Account Manager", 18), ("Recruitment Manager", 20), ("Comment", 40)]
+
+
+@router.get("/export")
+def export_selections(f: Filters = Depends(_filters), user: User = Depends(require_selection_role), session: Session = Depends(get_session)):
+    """The selections the filters match (the list the page shows, without paging), as an Excel file."""
+    rows = session.exec(select(Selection).where(*_conditions(user, f, with_status=True))
+                        .order_by(Selection.selection_date.desc(), Selection.created_at.desc(), Selection.id).limit(MAX_EXPORT_ROWS)).all()
+    data = [[n, v["date"] and date.fromisoformat(v["date"]), v["candidate_name"] or "", v["position"], v["client"],
+             STATUS_LABEL.get(v["status"], v["status"]), date.fromisoformat(v["joined_date"]) if v["joined_date"] else "",
+             ", ".join(p["username"] for p in v["recruiters"]), (v["sales_manager"] or {}).get("username", ""),
+             (v["manager"] or {}).get("username", ""), v["comments"] or ""]
+            for n, v in enumerate(_views(session, list(rows)), start=1)]
+    security_event("selections_exported", by=user.username, rows=len(rows))
+    name = f"selections-{date.today().isoformat()}.xlsx"
+    body = _xlsx("Selections", EXPORT_COLUMNS, data, tint_column="Status",
+                 tints={"offer pending": "FFF1CC", "offer released": "DCEBFF", "joined": "DDF5E4", "backed out": "FBDADA"})
+    return Response(body, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+
+
 @router.get("/{selection_id}")
 def get_selection(selection_id: str, user: User = Depends(require_selection_role), session: Session = Depends(get_session)):
     return _views(session, [_get_visible(session, user, selection_id)])[0]
@@ -201,9 +228,9 @@ def update_selection(selection_id: str, body: SelectionPatch, user: User = Depen
     if "status" in sent and body.status is None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="The status cannot be empty.")
     if "selection_date" in sent and body.selection_date is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="The date cannot be empty.")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="The date of selection cannot be empty.")
     changed = []
-    for name in ("selection_date", "candidate_name", "status", "comments"):
+    for name in ("selection_date", "joined_date", "candidate_name", "status", "comments"):
         if name in sent and getattr(row, name) != getattr(body, name):
             setattr(row, name, getattr(body, name))
             changed.append(name)

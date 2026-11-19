@@ -92,19 +92,21 @@ const CONFIG: Record<Kind, {
     boxes: (r) => {
       const s = (r as SelectionImportResult).summary;
       return [{ label: 'New rows', n: s.new, good: true }, { label: 'Into closed requirements', n: s.fill, good: true },
-              { label: 'Already there, skipped', n: s.exists }, { label: 'Cannot be imported', n: s.error, bad: true }];
+              { label: 'Already there, skipped', n: s.exists }, { label: 'Cannot be imported', n: s.error, bad: true },
+              ...(s.joined_fill ? [{ label: 'Date of joined added', n: s.joined_fill, good: true }] : [])];
     },
-    importable: (r) => (r as SelectionImportResult).summary.new + (r as SelectionImportResult).summary.fill,
+    importable: (r) => { const s = (r as SelectionImportResult).summary; return s.new + s.fill + (s.joined_fill ?? 0); },
     noun: ['selection', 'selections'],
-    head: ['Date', 'Candidate', 'Position', 'Client', 'Recruiter', 'Account manager', 'Recruitment manager', 'Status'],
+    head: ['Date of selection', 'Candidate', 'Position', 'Client', 'Status', 'Date of joined', 'Recruiter', 'Account manager', 'Recruitment manager'],
     cells: (row, person) => {
       const r = row as SelectionImportRow;
       return [
         <span key="d" className="whitespace-nowrap tabular-nums">{r.date ? formatDay(r.date) : '-'}</span>,
         <span key="n" className="font-medium text-slate-900">{r.candidate_name || '-'}</span>, r.position || '-', r.client || '-',
+        r.status ? SELECTION_STATUS[r.status] ?? r.status : '-',
+        <span key="j" className="whitespace-nowrap tabular-nums">{r.joined_date ? formatDay(r.joined_date) : '-'}</span>,
         r.sheet.recruiters.length ? r.sheet.recruiters.map((n, i) => <span key={n}>{i > 0 && ', '}{person(n)}</span>) : person(null),
         person(r.sheet.sales_manager), person(r.sheet.manager),
-        r.status ? SELECTION_STATUS[r.status] ?? r.status : '-',
       ];
     },
   },
@@ -115,7 +117,7 @@ const CONFIG: Record<Kind, {
  * only CHECKS it and lists every row with what will happen to it. Nothing is added until "Import" is clicked, and a row that is already
  * there is skipped, so the same file can be imported again.
  */
-export default function ImportDialog({ kind = 'requirements', onClose, onImported }: { kind?: Kind; onClose: () => void; onImported: (created: number) => void }) {
+export default function ImportDialog({ kind = 'requirements', onClose, onImported }: { kind?: Kind; onClose: () => void; onImported: (created: number, result?: Result) => void }) {
   const c = CONFIG[kind];
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -169,7 +171,8 @@ export default function ImportDialog({ kind = 'requirements', onClose, onImporte
     setBusy('import');
     setProblem(null);
     try {
-      onImported((await c.run(file, true)).created);
+      const done = await c.run(file, true);
+      onImported(done.created, done);
     } catch (e) {
       setProblem(errorText(e, 'The import failed. Nothing was added.'));
       setBusy(null);
